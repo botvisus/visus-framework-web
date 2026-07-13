@@ -6,8 +6,7 @@ suitable for emailing, attaching to a CI artefact, or pinning in a bug
 ticket. Every PNG referenced by ``screenshot`` or ``failure_screenshot`` is
 embedded as a base64 data URI so the report has no external dependencies.
 
-The styling follows the design tokens documented in
-``D:\\bot_vision\\DESIGN.md`` (Anthropic Claude design system):
+The styling follows the project's internal design-token palette:
 
   * cream canvas ``#faf9f5``  -- page floor
   * surface card ``#efe9de``  -- feature card backgrounds

@@ -17,6 +17,11 @@ classifiers = [
 ]
 dependencies = ["selenium>=4.38,<5"]
 
+[project.urls]
+Homepage = "https://github.com/botvisus/visus-framework-web"
+Repository = "https://github.com/botvisus/visus-framework-web.git"
+"Bug Tracker" = "https://github.com/botvisus/visus-framework-web/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",

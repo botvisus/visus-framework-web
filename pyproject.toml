@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "visus-web"
-version = "0.1.0"
+version = "0.1.1"
 description = "Modern, Playwright-style web automation on a pure Selenium engine, with BotCity RPA reach."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Matheus Pereira" }]
 classifiers = [
-    "License :: Other/Proprietary License",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
 ]

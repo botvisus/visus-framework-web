@@ -154,6 +154,27 @@ class Recorder:
         self._events.append(event)
         events_logger.info(json.dumps(event))
 
+        # Live sink: stream this action (+ its screenshot bytes and correlated logs)
+        # to a consumer such as the RunPilot orchestrator. Best-effort — it must
+        # never break the run.
+        sink = tracing.current_sink()
+        if sink is not None:
+            ref = fail_ref if fail_ref is not None else shot_ref
+            png = self._shots.get(ref) if ref is not None else None
+            # Correlate the logs emitted during this action (same window logic as the
+            # zip enrichment) so the streamed step carries the per-step log detail the
+            # library report shows — the zip enrichment doesn't run in streaming mode.
+            wstart, wend = float(start_ts) - 0.001, float(end_ts) + 0.001
+            event["logs"] = [
+                f"[{lvl}] {lname}: {msg}"
+                for ts, lvl, lname, msg in self._log_handler.records
+                if wstart < ts <= wend
+            ]
+            try:
+                sink(event, png)
+            except Exception:  # pragma: no cover - observing must not break the run
+                pass
+
     def summary(self) -> dict[str, Any]:
         """Lightweight in-memory run summary (no zip parsing needed).
 
@@ -167,6 +188,14 @@ class Recorder:
             "backtrack_steps": sum(int(e.get("backtrack_steps") or 0) for e in ev),
             "steps": [(str(e.get("action")), bool(e.get("success"))) for e in ev],
         }
+
+    def close(self) -> None:
+        """Release resources (detach the log handler) without writing a zip.
+
+        Used when steps are streamed live to an orchestrator and no local
+        zip/report is wanted.
+        """
+        self._detach()
 
     def _save(self, delegate: Any, selector: str | None, name: str) -> str | None:
         try:

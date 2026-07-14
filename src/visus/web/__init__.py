@@ -14,7 +14,7 @@ from visus.web.engine import Engine
 from visus.web.registry import get_browser_config
 from visus.web.rpa import rpa
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "launch",
@@ -27,7 +27,33 @@ __all__ = [
     "Field",
     "errors",
     "tracing",
+    "is_active",
+    "save_screenshot",
 ]
+
+
+def is_active() -> bool:
+    """True while an ``rpa()`` session holds a live page.
+
+    The runpilot SDK screenshot fallback calls this to prefer the *browser* shot for
+    a web bot over a desktop grab when both ``visus.web`` and ``visus.desktop`` are
+    installed.
+    """
+    return tracing.active_page() is not None
+
+
+def save_screenshot(path: str) -> str:
+    """Write a PNG screenshot of the active ``rpa()`` page to *path*.
+
+    Exposed as a module-level hook for the runpilot SDK's screenshot fallback
+    (``bot.error(screenshot=True)``). Raises ``RuntimeError`` if no session is active
+    so the SDK can fall through to another driver.
+    """
+    page = tracing.active_page()
+    if page is None:
+        raise RuntimeError("visus.web.save_screenshot: no active page/session")
+    page.screenshot(path=path)
+    return path
 
 
 def launch(

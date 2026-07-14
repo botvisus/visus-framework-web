@@ -21,6 +21,7 @@ For advanced cases (multiple pages, custom contexts) drop down to ``launch`` +
 
 from __future__ import annotations
 
+import os
 import sys
 import webbrowser
 from collections.abc import Iterator
@@ -82,16 +83,36 @@ def rpa(
     from visus.web import errors as _errors  # local import: avoid an import cycle
     from visus.web import launch
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    base = Path(outdir) if outdir else Path.cwd() / "visus-runs" / f"{_slug(name)}-{stamp}"
-    base.mkdir(parents=True, exist_ok=True)
-    zip_path = base / "run.zip"
-    report_path = base / "report.html"
+    # When the bot runs under the RunPilot runner, stream every action + screenshot
+    # to the orchestrator as a timeline step and DON'T write a local run.zip /
+    # report.html — the SaaS run report IS the report.
+    reporter_bot = _make_run_reporter()
+    orchestrated = reporter_bot is not None
+
+    if orchestrated:
+        base: Path | None = None
+        zip_path: Path | None = None
+        report_path: Path | None = None
+        do_report = False
+        sink = _make_step_sink(reporter_bot)
+    else:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = Path(outdir) if outdir else Path.cwd() / "visus-runs" / f"{_slug(name)}-{stamp}"
+        base.mkdir(parents=True, exist_ok=True)
+        zip_path = base / "run.zip"
+        report_path = base / "report.html"
+        do_report = report
+        sink = None
 
     box: dict[str, Any] = {}
+    page_box: dict[str, Any] = {}
     rpa_error: BaseException | None = None
     try:
-        with tracing.record(str(zip_path), report=str(report_path) if report else None) as rec:
+        with tracing.record(
+            str(zip_path) if zip_path is not None else None,
+            report=str(report_path) if (report_path is not None and do_report) else None,
+            sink=sink,
+        ) as rec:
             box["rec"] = rec
             with launch(
                 engine,
@@ -100,7 +121,13 @@ def rpa(
                 user_data_dir=user_data_dir,
                 remote_url=remote_url,
             ) as browser:
-                yield browser.new_page()
+                page = browser.new_page()
+                page_box["page"] = page
+                tracing.set_active_page(page)
+                try:
+                    yield page
+                finally:
+                    tracing.set_active_page(None)
     except (_errors.VisusWebError, AssertionError) as exc:
         # an action failure (VisusWebError) OR an expect()/assert failure → present it
         # cleanly (friendly summary + exit 1) instead of dumping an internal traceback.
@@ -108,9 +135,19 @@ def rpa(
     finally:
         recorder = box.get("rec")
         active = rpa_error if rpa_error is not None else sys.exc_info()[1]
+        # An expect()/assert failure (and any non-action error) never passes through
+        # the recorder, so it wouldn't stream a step. Push a final failed step WITH a
+        # page screenshot so the orchestrator always shows the failure.
+        if orchestrated and active is not None and not isinstance(active, _errors.VisusWebError):
+            _report_final_failure(reporter_bot, page_box.get("page"), active)
         if summary and recorder is not None:
-            _print_summary(recorder, base, report_path if report else None, error=active)
-        if open_report and report:
+            _print_summary(
+                recorder,
+                base,
+                report_path if (report_path is not None and do_report) else None,
+                error=active,
+            )
+        if open_report and do_report and report_path is not None:
             try:
                 webbrowser.open(report_path.resolve().as_uri())
             except Exception:
@@ -126,7 +163,7 @@ def rpa(
 
 
 def _print_summary(
-    rec: Any, base: Path, report_path: Path | None, *, error: BaseException | None = None
+    rec: Any, base: Path | None, report_path: Path | None, *, error: BaseException | None = None
 ) -> None:
     s = rec.summary()
     steps = ", ".join(f"{a}{'' if ok else '(FAILED)'}" for a, ok in s["steps"])
@@ -140,6 +177,79 @@ def _print_summary(
     if error is not None:
         # surface the friendly action-error cleanly (indented), not buried in a traceback
         print("error     : " + "\n            ".join(str(error).splitlines()))
-    print(f"folder    : {base}")
+    if base is not None:
+        print(f"folder    : {base}")
+    else:
+        print("report    : streamed live to RunPilot (SaaS run report)")
     if report_path is not None:
         print(f"report    : {report_path}")
+
+
+def _make_run_reporter() -> Any:
+    """Return a runpilot ``Orchestrator`` bound to the current run, or ``None`` when
+    not running under the RunPilot runner (or ``runpilot`` isn't installed).
+
+    Fully optional: ``runpilot`` is imported lazily and any failure degrades to the
+    normal local run.zip/report.html behaviour — visus.web never hard-depends on it.
+    """
+    if not os.environ.get("RUNPILOT_RUN_TOKEN"):
+        return None
+    try:
+        import runpilot  # optional: only present inside a real RunPilot run
+    except Exception:
+        return None
+    try:
+        return runpilot.Orchestrator.try_from_env()
+    except Exception:
+        return None
+
+
+def _make_step_sink(bot: Any) -> Any:
+    """Build a per-action sink that streams each recorded action + its screenshot to
+    the orchestrator as a timeline step (via ``bot.report_ui_step``)."""
+
+    def _sink(event: dict[str, Any], png: bytes | None) -> None:
+        action = str(event.get("action") or "action")
+        target = event.get("target") or event.get("selector")
+        # Carry the library's rich per-step detail (logs + ARIA snapshot + element
+        # metadata) so the SaaS run report matches visus.web's own report.
+        attrs: dict[str, Any] = {}
+        if event.get("logs"):
+            attrs["logs"] = event["logs"]
+        if event.get("aria_snapshot"):
+            attrs["aria_snapshot"] = event["aria_snapshot"]
+        for key in ("role", "name", "url", "title"):
+            value = event.get(key)
+            if value:
+                attrs[key] = value
+        bot.report_ui_step(
+            action=action,
+            target=target,
+            status="ok" if event.get("success") else "failed",
+            screenshot_png=png,
+            duration_ms=event.get("duration_ms"),
+            error=event.get("error"),
+            name=action,
+            attributes=attrs or None,
+        )
+
+    return _sink
+
+
+def _report_final_failure(bot: Any, page: Any, exc: BaseException) -> None:
+    """Report a terminal failed step (with a page screenshot) for a failure that
+    didn't pass through the recorder — e.g. an ``expect()``/assert failure. Uses
+    ``report_ui_step``, which is best-effort and never raises."""
+    png: bytes | None = None
+    if page is not None:
+        try:
+            png = page.screenshot()
+        except Exception:
+            png = None
+    bot.report_ui_step(
+        action="verify",
+        status="failed",
+        screenshot_png=png,
+        error=str(exc),
+        name="run failed",
+    )

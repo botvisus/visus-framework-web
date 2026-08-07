@@ -112,6 +112,17 @@ class SessionHandler:
         self._fields_url: str | None = None
         self._known_handles: list[str] = []
         self._active_handle: str | None = None
+        self._stop: threading.Event | None = None
+
+    def bind_stop(self, stop: threading.Event) -> None:
+        """Give the handler the server's stop event so an op can end the daemon.
+
+        Closing the LAST tab has to actually stop the daemon: ``close()`` alone
+        leaves the socket bound and ``session.json`` on disk, and the next op
+        would silently launch a brand-new browser at the original URL — losing
+        whatever session state (logins, cookies in memory) the user built up.
+        """
+        self._stop = stop
 
     # --- lifecycle -------------------------------------------------------
     def _ensure(self) -> None:
@@ -466,7 +477,11 @@ class SessionHandler:
         return {"index": idx, "title": title}
 
     def _op_tab_close(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Close a tab by index (default: the active one), resetting the active handle."""
+        """Close a tab by index (default: the active one), resetting the active handle.
+
+        Closing the last tab ends the whole session: the browser is gone, so the
+        daemon stops rather than pretending it can still serve.
+        """
         self._ensure()
         driver = self._driver()
         if driver is None:
@@ -483,12 +498,18 @@ class SessionHandler:
             target = handles[i]
         driver.switch_to.window(target)
         driver.close()
-        remaining = list(driver.window_handles)
+        try:
+            remaining = list(driver.window_handles)
+        except Exception:  # noqa: BLE001 — the driver is gone once the last window closes
+            remaining = []
         self._known_handles = remaining
         self._invalidate_fields()
         if not remaining:
             self.close()
-            return {"closed": i, "remaining": 0}
+            stopped = self._stop is not None
+            if self._stop is not None:
+                self._stop.set()
+            return {"closed": i, "remaining": 0, "session_stopped": stopped}
         self._active_handle = remaining[min(i, len(remaining) - 1)]
         try:
             driver.switch_to.window(self._active_handle)
@@ -780,6 +801,7 @@ def serve(
     os.replace(tmp, sf)
 
     stop = threading.Event()
+    handler.bind_stop(stop)
     threads: list[threading.Thread] = []
     try:
         while not stop.is_set():

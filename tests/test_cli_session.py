@@ -1223,6 +1223,48 @@ def test_serve_second_daemon_aborts_via_lock(tmp_path: Path) -> None:
     assert not (tmp_path / ".visus" / "session.json.lock").exists()
 
 
+@pytest.mark.browser
+def test_closing_the_last_tab_really_stops_the_daemon(tmp_path: Path) -> None:
+    """The socket must close and session.json must go — otherwise the next op
+    launches a BRAND-NEW browser and the login is silently gone."""
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url="data:text/html,<title>only</title>"
+    )
+    token = "tok"
+    t, port = _serve_in_thread(h, token, tmp_path)
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=30) as sock:
+            f = sock.makefile("rwb")
+            payload = {"token": token, "op": "tab_close", "args": {}}
+            f.write((json.dumps(payload) + "\n").encode("utf-8"))
+            f.flush()
+            resp = json.loads(f.readline().decode("utf-8"))
+        assert resp["ok"] is True
+        assert resp["result"] == {"closed": 0, "remaining": 0, "session_stopped": True}
+        t.join(timeout=20)
+        assert not t.is_alive(), "the daemon kept serving after the last tab closed"
+        assert not session_server.session_file(tmp_path).is_file()
+        assert not (tmp_path / ".visus" / "session.json.lock").exists()
+    finally:
+        if t.is_alive():
+            _shutdown_thread(t, port, token)
+        h.close()
+
+
+def test_bind_stop_is_optional_and_binds() -> None:
+    """A handler starts unbound (unit tests, embedders) and bind_stop attaches
+    the server's event — an unbound handler must never raise, it just reports
+    session_stopped=False when the last tab closes."""
+    import threading as _threading
+
+    h = session_server.SessionHandler(engine="chrome", headless=True)
+    assert h._stop is None
+    ev = _threading.Event()
+    h.bind_stop(ev)
+    assert h._stop is ev
+    assert not ev.is_set(), "bind_stop must only wire the event, never set it"
+
+
 def _exited_pid() -> int:
     """A pid that genuinely belonged to a process which has now exited."""
     import subprocess
@@ -1681,10 +1723,26 @@ def test_cli_tab_new_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_cli_tab_close_last_tab_message(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: {"closed": 0, "remaining": 0}
+        session_client,
+        "send",
+        lambda op, args=None: {"closed": 0, "remaining": 0, "session_stopped": True},
     )
     r = runner.invoke(app, ["tab-close"])
     assert r.exit_code == 0 and "session stopped" in r.output
+
+
+def test_cli_tab_close_last_tab_message_when_session_survives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never claim the session stopped when it did not."""
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {"closed": 0, "remaining": 0, "session_stopped": False},
+    )
+    r = runner.invoke(app, ["tab-close"])
+    assert r.exit_code == 0
+    assert "browser is closed" in r.output and "session stopped" not in r.output
 
 
 def test_cli_dialog(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2339,3 +2397,15 @@ def test_dispatch_tab_new_and_close() -> None:
     assert "closed tab 1" in console.dispatch("tab-close 1", send)
     assert calls[0] == ("tab_new", {"url": "http://x"})
     assert calls[1] == ("tab_close", {"index": 1})
+
+
+def test_dispatch_tab_close_last_tab_messages() -> None:
+    def send_stopped(op: str, args: dict[str, Any]) -> Any:
+        return {"closed": 0, "remaining": 0, "session_stopped": True}
+
+    def send_alive(op: str, args: dict[str, Any]) -> Any:
+        return {"closed": 0, "remaining": 0, "session_stopped": False}
+
+    assert "session stopped" in console.dispatch("tab-close", send_stopped)
+    out = console.dispatch("tab-close", send_alive)
+    assert "browser is closed" in out and "session stopped" not in out

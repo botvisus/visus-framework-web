@@ -206,7 +206,9 @@ def dispatch(line: str, send: SendFn) -> str:
         if cmd == "tab-close":
             r = send("tab_close", {"index": int(rest[0]) if rest else None})
             if r.get("remaining", 0) == 0:
-                return "closed the last tab — session stopped"
+                if r.get("session_stopped"):
+                    return "closed the last tab — session stopped"
+                return "closed the last tab — the browser is closed"
             return f"closed tab {r['closed']} ({r['remaining']} remaining)"
         return f"unknown command {cmd!r} (try `help`)"
     except IndexError:

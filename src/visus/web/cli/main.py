@@ -822,7 +822,10 @@ def tab_close(
     """Close a tab/window by index (or the active one if omitted)."""
     result = _send("tab_close", {"index": index})
     if result.get("remaining", 0) == 0:
-        typer.echo("closed the last tab — session stopped")
+        if result.get("session_stopped"):
+            typer.echo("closed the last tab — session stopped")
+        else:
+            typer.echo("closed the last tab — the browser is closed")
         return
     typer.echo(f"closed tab {result['closed']} ({result['remaining']} remaining)")
 

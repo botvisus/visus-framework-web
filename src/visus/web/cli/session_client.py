@@ -134,6 +134,16 @@ def send(
     return resp.get("result")
 
 
+def _log_tail(base: Path, *, lines: int = 20) -> str:
+    """The last *lines* of ``<base>/.visus/daemon.log``, or ``""`` when unreadable."""
+    log = base / ".visus" / "daemon.log"
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
+
+
 def start_daemon(
     engine: str = "chrome",
     headless: bool = False,
@@ -196,10 +206,13 @@ def start_daemon(
                 info["_file"] = str(sf)
                 return info
         time.sleep(0.1)
-    raise SessionError(
-        f"daemon did not come up within {timeout:.0f}s "
-        f"(see {base / '.visus' / 'daemon.log'})"
-    )
+    log_path = base / ".visus" / "daemon.log"
+    tail = _log_tail(base)
+    if tail:
+        detail = f"\n--- last lines of {log_path} ---\n{tail}"
+    else:
+        detail = f" (no output in {log_path})"
+    raise SessionError(f"daemon did not come up within {timeout:.0f}s{detail}")
 
 
 def stop(*, start_dir: str | Path | None = None) -> str:

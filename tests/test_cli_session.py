@@ -932,6 +932,42 @@ def test_start_daemon_refuses_when_running(tmp_path: Path, monkeypatch: pytest.M
         session_client.start_daemon("chrome", True, None, cwd=tmp_path)
 
 
+def test_start_daemon_timeout_reports_the_real_daemon_log(tmp_path: Path) -> None:
+    """A wedged start must show WHY, not just "did not come up within Ns".
+
+    Fully real: the lock is held by THIS (live) process, so a genuinely spawned
+    daemon aborts on the lock and writes its reason to .visus/daemon.log before
+    exiting — no browser is ever launched on that path.
+    """
+    import os as _os
+
+    visus = tmp_path / ".visus"
+    visus.mkdir(parents=True)
+    (visus / "session.json.lock").write_text(str(_os.getpid()), encoding="utf-8")
+
+    with pytest.raises(session_client.SessionError) as excinfo:
+        session_client.start_daemon("chrome", True, None, cwd=tmp_path, timeout=8.0)
+
+    message = str(excinfo.value)
+    assert "did not come up within 8s" in message
+    assert "daemon aborting" in message, message
+    assert "already holds" in message, message
+
+
+def test_log_tail_of_a_missing_log_is_empty(tmp_path: Path) -> None:
+    assert session_client._log_tail(tmp_path) == ""
+
+
+def test_log_tail_returns_only_the_last_lines(tmp_path: Path) -> None:
+    visus = tmp_path / ".visus"
+    visus.mkdir(parents=True)
+    (visus / "daemon.log").write_text(
+        "\n".join(f"line {i}" for i in range(50)), encoding="utf-8"
+    )
+    tail = session_client._log_tail(tmp_path, lines=3)
+    assert tail == "line 47\nline 48\nline 49"
+
+
 def test_start_daemon_retries_through_partial_session_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

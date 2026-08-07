@@ -924,6 +924,77 @@ def test_send_raw_raises_on_empty_response(tmp_path: Path) -> None:
         srv.close()
 
 
+def test_socket_timeout_for_derives_from_the_op_timeout() -> None:
+    assert session_client.socket_timeout_for(None) == 60.0
+    assert session_client.socket_timeout_for({}) == 60.0
+    assert session_client.socket_timeout_for({"timeout": 500}) == 60.0  # floored
+    assert session_client.socket_timeout_for({"timeout": 120000}) == 130.0
+    assert session_client.socket_timeout_for({"timeout": "nope"}) == 60.0
+    assert session_client.socket_timeout_for({"timeout": None}) == 60.0
+
+
+def test_send_honours_an_explicit_socket_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The timeout genuinely reaches the socket: a silent daemon must time out."""
+    import threading as _threading
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    gate = _threading.Event()
+
+    def _accept_and_stay_silent() -> None:
+        conn, _ = srv.accept()
+        try:
+            gate.wait(timeout=10)
+        finally:
+            conn.close()
+
+    th = _threading.Thread(target=_accept_and_stay_silent, daemon=True)
+    th.start()
+    _write_session(tmp_path, {"pid": 1, "port": port, "token": "t"})
+    monkeypatch.setattr(session_client, "_pid_alive", lambda pid: True)
+    try:
+        with pytest.raises(TimeoutError):
+            session_client.send(
+                "wait", {"timeout": 5}, start_dir=tmp_path, timeout=0.3
+            )
+    finally:
+        gate.set()
+        th.join(timeout=10)
+        srv.close()
+
+
+def test_cli_send_maps_a_socket_timeout_to_a_clean_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """socket.timeout is an OSError, not a SessionError — it used to traceback."""
+
+    def boom(op: str, args: dict[str, Any] | None = None) -> Any:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(session_client, "send", boom)
+    r = runner.invoke(app, ["click", "0"])
+    assert r.exit_code == 1
+    assert not isinstance(r.exception, TimeoutError), "the raw exception escaped"
+    assert "error:" in r.output and "timed out" in r.output
+
+
+def test_cli_send_maps_a_corrupt_response_to_a_clean_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(op: str, args: dict[str, Any] | None = None) -> Any:
+        raise json.JSONDecodeError("Expecting value", "{oops", 0)
+
+    monkeypatch.setattr(session_client, "send", boom)
+    r = runner.invoke(app, ["click", "0"])
+    assert r.exit_code == 1
+    assert not isinstance(r.exception, json.JSONDecodeError)
+    assert "error:" in r.output
+
+
 def test_start_daemon_refuses_when_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         session_client, "find_session", lambda d=None: {"pid": 7, "port": 8, "token": "t"}

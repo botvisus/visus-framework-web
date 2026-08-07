@@ -271,13 +271,24 @@ app.add_typer(session_app, name="session")
 
 
 def _send(op: str, args: dict[str, Any] | None = None) -> Any:
-    """Send an op to the running daemon, mapping failures to a clean Exit(1)."""
+    """Send an op to the running daemon, mapping failures to a clean Exit(1).
+
+    ``socket.timeout`` is an ``OSError`` and a truncated reply raises
+    ``JSONDecodeError`` — neither is a ``SessionError``, and both used to reach
+    the user as a raw traceback.
+    """
     from visus.web.cli import session_client
 
     try:
         return session_client.send(op, args or {})
     except session_client.SessionError as exc:
         typer.echo(f"error: {exc}")
+        raise typer.Exit(1) from exc
+    except _json.JSONDecodeError as exc:
+        typer.echo(f"error: daemon sent a malformed response — {exc}")
+        raise typer.Exit(1) from exc
+    except OSError as exc:
+        typer.echo(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
         raise typer.Exit(1) from exc
 
 

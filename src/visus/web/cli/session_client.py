@@ -104,7 +104,32 @@ def _cleanup(sf: Path) -> None:
             pass
 
 
-def _send_raw(port: int, payload: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
+# The client's socket deadline when an op carries no timeout of its own.
+DEFAULT_SOCKET_TIMEOUT = 60.0
+# Slack added on top of an op's own deadline, covering the daemon's reply hop.
+SOCKET_TIMEOUT_MARGIN = 10.0
+
+
+def socket_timeout_for(args: dict[str, Any] | None) -> float:
+    """Socket deadline for one op: its own ``timeout`` (ms) plus slack.
+
+    ``visus wait``/``visus expect-text`` expose an uncapped ``--timeout`` in
+    milliseconds that the daemon honours literally, so a fixed 60 s socket
+    deadline would abort a perfectly healthy long wait mid-flight.
+    """
+    ms = (args or {}).get("timeout")
+    if ms is None:
+        return DEFAULT_SOCKET_TIMEOUT
+    try:
+        seconds = float(ms) / 1000.0
+    except (TypeError, ValueError):
+        return DEFAULT_SOCKET_TIMEOUT
+    return max(DEFAULT_SOCKET_TIMEOUT, seconds + SOCKET_TIMEOUT_MARGIN)
+
+
+def _send_raw(
+    port: int, payload: dict[str, Any], *, timeout: float = DEFAULT_SOCKET_TIMEOUT
+) -> dict[str, Any]:
     """Send one JSON request line, read one JSON response line."""
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
         sock.settimeout(timeout)
@@ -123,12 +148,21 @@ def send(
     args: dict[str, Any] | None = None,
     *,
     start_dir: str | Path | None = None,
+    timeout: float | None = None,
 ) -> Any:
-    """Send an op to the live daemon and return its ``result`` (raises on failure)."""
+    """Send an op to the live daemon and return its ``result`` (raises on failure).
+
+    The socket deadline defaults to :func:`socket_timeout_for` so a long
+    ``--timeout`` on the op is not cut short by the transport.
+    """
     info = find_session(start_dir)
     if info is None:
         raise SessionError("no live session — run `visus session start` first")
-    resp = _send_raw(int(info["port"]), {"token": info["token"], "op": op, "args": args or {}})
+    resp = _send_raw(
+        int(info["port"]),
+        {"token": info["token"], "op": op, "args": args or {}},
+        timeout=socket_timeout_for(args) if timeout is None else timeout,
+    )
     if not resp.get("ok"):
         raise SessionError(str(resp.get("error", "unknown error")))
     return resp.get("result")

@@ -1,0 +1,163 @@
+name: CI
+
+# Runs the real gates on every push and PR, and is callable from publish.yml so a
+# release cannot be built before these jobs go green.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint + types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (mirrors TESTING.md)
+        shell: bash
+        run: |
+          uv venv --python "3.12"
+          uv pip install -e ".[dev,vision,mcp,cli]"
+      - name: Put the venv on PATH
+        shell: bash
+        run: |
+          if [ -d .venv/bin ]; then
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          fi
+      - name: ruff
+        run: ruff check src tests scripts
+      - name: mypy --strict
+        run: mypy
+
+  fast-tests:
+    name: Tests (no browser) ${{ matrix.os }} py${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (mirrors TESTING.md)
+        shell: bash
+        run: |
+          uv venv --python "${{ matrix.python }}"
+          uv pip install -e ".[dev,vision,mcp,cli]"
+      - name: Put the venv on PATH
+        shell: bash
+        run: |
+          if [ -d .venv/bin ]; then
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          fi
+      - name: pytest (no browser, no packaging)
+        run: pytest -q -m "not browser and not packaging" --cov-fail-under=0
+
+  packaging-tests:
+    name: Installed console scripts (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (mirrors TESTING.md)
+        shell: bash
+        run: |
+          uv venv --python "3.12"
+          uv pip install -e ".[dev,vision,mcp,cli]"
+      - name: Put the venv on PATH
+        shell: bash
+        run: |
+          if [ -d .venv/bin ]; then
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          fi
+      - name: pytest -m packaging
+        run: pytest -q -m packaging --cov-fail-under=0
+
+  browser-tests:
+    name: Full suite + coverage gates (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install (mirrors TESTING.md)
+        shell: bash
+        run: |
+          uv venv --python "3.12"
+          uv pip install -e ".[dev,vision,mcp,cli]"
+      - name: Put the venv on PATH
+        shell: bash
+        run: |
+          if [ -d .venv/bin ]; then
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          fi
+      # Chrome ships with the runner image; Selenium Manager resolves chromedriver
+      # on first launch (backends/browsers/chrome.py). Fail loudly here rather than
+      # 298 times below.
+      - name: Smoke-test browser + driver
+        run: visus doctor
+      # -n 4 (not the addopts default -n auto): a measured full-suite run on a
+      # many-core dev machine showed -n auto spawning one xdist worker per core,
+      # each loading its own ONNX model for the vision tests (test_e2e_vision.py
+      # is `browser`-marked and runs here), and workers dying with
+      # `_ArrayMemoryError`. -n 4 was the exact configuration measured safe:
+      # 935 passed, 7 skipped, 0 failed in 14m52s. GitHub-hosted windows-latest
+      # runners are not guaranteed to stay small-core forever, so this is pinned
+      # explicitly rather than left to whatever `os.cpu_count()` reports.
+      - name: pytest (full suite, real browsers) + global coverage gate
+        run: pytest -q -n 4 -m "not packaging" --cov-fail-under=90 --cov-report=json
+      - name: Per-package coverage floors
+        run: python scripts/check_coverage.py
+      - name: Upload coverage.json
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-json
+          path: coverage.json
+          if-no-files-found: warn

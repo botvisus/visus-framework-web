@@ -40,6 +40,9 @@ uv.lock
 .coverage.*
 htmlcov/
 coverage.xml
+# machine-readable report consumed by scripts/check_coverage.py — regenerated,
+# never committed (coverage-floors.json IS committed)
+coverage.json
 .tox/
 .nox/
 

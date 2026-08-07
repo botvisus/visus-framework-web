@@ -1,0 +1,5 @@
+{
+  "_comment": "UNMEASURED. No full-suite run has produced these numbers yet -- the environment that authored this file is banned from running one (a pre-existing test_doctor_* spawns a real Chrome that hangs it). `packages` is intentionally empty rather than filled with invented numbers; scripts/check_coverage.py degrades to enforcing only the global floor from pyproject.toml while it is empty. To freeze real per-package floors: `pytest -q -m \"not packaging\" --cov-fail-under=0 --cov-report=json` then `python scripts/check_coverage.py --freeze`. Delete this comment once real numbers are frozen.",
+  "slack": 3.0,
+  "packages": {}
+}

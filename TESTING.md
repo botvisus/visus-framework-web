@@ -11,22 +11,39 @@ uv venv && uv pip install -e ".[dev,vision,mcp,cli]"
 
 ## Run the suite
 
+The full gate is **two commands**: run the suite to produce a machine-readable
+report, then enforce both the global floor and the per-package floors against it.
+
 ```bash
-uv run pytest -q --cov-fail-under=90
+uv run pytest -q --cov-fail-under=0 --cov-report=json   # writes coverage.json
+uv run python scripts/check_coverage.py                 # enforce global + per-package
 ```
 - Runs in **parallel** via `pytest-xdist` (`-n auto`, `--dist loadfile`).
-- The **90% coverage gate** on `visus.web` lives in `[tool.coverage.report]
-  fail_under` and is no longer baked into `addopts`, so it must be passed
-  explicitly by whoever intends to enforce it. `addopts` still turns coverage
-  *measurement* on by default (`--cov=visus.web --cov-report=term-missing`).
+- `scripts/check_coverage.py` re-reads `[tool.coverage.report] fail_under` from
+  `pyproject.toml` as the global floor (the same 90% number `pytest-cov` itself
+  would enforce), then re-aggregates `coverage.json` per top-level sub-package of
+  `visus.web` (`api`, `async_api`, `backends`, `cli`, `mcp`, `observability`,
+  `vision`, plus `_root` for top-level modules) and checks each one against
+  `coverage-floors.json`. A single global percentage can hide a weak package
+  behind a strong one — `cli/` and `mcp/` alone are roughly 3,200 of ~11,300
+  statements — so the per-package floors close that gap. See
+  `scripts/check_coverage.py`'s module docstring for the full design, and
+  `coverage-floors.json` for the freeze command and current status (it ships
+  unmeasured — see that file's `_comment`).
+- `pytest`'s own `--cov-fail-under` is passed as `0` above because
+  `scripts/check_coverage.py` is the thing enforcing floors now, including the
+  same global number. Pass `--cov-fail-under=90` instead and skip the script if
+  you only want pytest-cov's old single-number gate.
 - A filtered lane (e.g. `-m "not browser"`) can never reach 90% coverage — it
-  only exercises part of the code — so it waives the gate with
-  `--cov-fail-under=0` instead of enforcing it:
+  only exercises part of the code — so it waives *both* gates instead of
+  enforcing them:
   ```bash
-  uv run pytest -q -m "not browser" --cov-fail-under=0
+  uv run pytest -q -m "not browser" --cov-fail-under=0 --cov-report=json
   ```
-  This keeps coverage **measured** (the term-missing table still prints)
-  without throwing the numbers away, unlike `--no-cov`.
+  This keeps coverage **measured** (the term-missing table still prints, and
+  `coverage.json` is still written) without throwing the numbers away, unlike
+  `--no-cov`. Do not run `scripts/check_coverage.py` against a filtered-lane
+  report — its numbers would be misleadingly low.
 - Browser tests are marked `@pytest.mark.browser`.
 
 Run a single file fast — drop coverage entirely:
@@ -56,6 +73,10 @@ Chrome and Edge (Chromium) run **headless**. Edge IE-mode runs **headed** (see a
 ## Quality gates
 
 ```bash
-uv run ruff check src tests   # lint (and `ruff format` to format)
-uv run mypy                   # strict type-check
+uv run ruff check src tests scripts   # lint (and `ruff format` to format)
+uv run mypy                           # strict type-check (visus.web only)
 ```
+
+`scripts/` holds repo tooling — currently `scripts/check_coverage.py`, the per-package
+coverage floors. It is linted by ruff but **not** type-checked: `[tool.mypy] packages =
+["visus.web"]` selects mypy's own inputs. Write it fully annotated anyway.

@@ -1328,6 +1328,82 @@ def test_serve_writes_session_file_atomically(tmp_path: Path) -> None:
         _shutdown_thread(t, port, token)
 
 
+def test_write_private_creates_exclusively_and_owner_only(tmp_path: Path) -> None:
+    import os as _os
+    import stat as _stat
+
+    target = tmp_path / "secret.json"
+    session_server._write_private(target, '{"token": "abc"}')
+    assert target.read_text(encoding="utf-8") == '{"token": "abc"}'
+
+    # O_EXCL: never write THROUGH a file somebody else planted.
+    with pytest.raises(FileExistsError):
+        session_server._write_private(target, "second")
+    assert target.read_text(encoding="utf-8") == '{"token": "abc"}'
+
+    if hasattr(_os, "getuid"):  # POSIX enforces the mode bits
+        assert _stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_token_check_is_type_safe_and_rejects_same_length_tokens(
+    tmp_path: Path,
+) -> None:
+    """compare_digest raises TypeError on non-str input — that must never leak."""
+    handler = _handler_with_fake_page(_FakePage())
+    token = "0123456789abcdef"
+    t, port = _serve_in_thread(handler, token, tmp_path)
+
+    def rpc(payload: dict[str, Any]) -> dict[str, Any]:
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+            f = sock.makefile("rwb")
+            f.write((json.dumps(payload) + "\n").encode("utf-8"))
+            f.flush()
+            return json.loads(f.readline().decode("utf-8"))
+
+    try:
+        assert rpc({"token": token, "op": "status"})["ok"] is True
+        for bad in ("fedcba9876543210", "", "café", None):
+            resp = rpc({"token": bad, "op": "status"})
+            assert resp["ok"] is False, bad
+            assert resp["error"] == "unauthorized: bad token", (bad, resp)
+        for bad_typed in (123, ["x"], {"a": 1}):
+            resp = rpc({"token": bad_typed, "op": "status"})
+            assert resp["ok"] is False, bad_typed
+            assert resp["error"] == "unauthorized: bad token", (bad_typed, resp)
+        assert rpc({"op": "status"})["error"] == "unauthorized: bad token"
+    finally:
+        _shutdown_thread(t, port, token)
+
+    # The behaviour above is IDENTICAL before and after the fix — `!=` also
+    # rejects every bad token. What changes is HOW: a plain `!=` on str leaks the
+    # length of the shared prefix through timing. That is unobservable from a
+    # socket, so pin it at the source, the same way Task 2 pins the single
+    # `self._fields = []` literal.
+    src = Path(session_server.__file__).read_text(encoding="utf-8")
+    assert "secrets.compare_digest(" in src, (
+        "compare the session token with secrets.compare_digest, not `!=`"
+    )
+    assert 'req.get("token") != token' not in src, (
+        "the timing-variable `!=` token comparison is still in the source"
+    )
+
+
+def test_session_file_is_written_privately(tmp_path: Path) -> None:
+    import os as _os
+    import stat as _stat
+
+    handler = _handler_with_fake_page(_FakePage())
+    t, port = _serve_in_thread(handler, "tok", tmp_path)
+    try:
+        sf = session_server.session_file(tmp_path)
+        assert json.loads(sf.read_text(encoding="utf-8"))["token"] == "tok"
+        assert list((tmp_path / ".visus").glob("session.json.*.tmp")) == []
+        if hasattr(_os, "getuid"):
+            assert _stat.S_IMODE(sf.stat().st_mode) == 0o600
+    finally:
+        _shutdown_thread(t, port, "tok")
+
+
 def test_serve_second_daemon_aborts_via_lock(tmp_path: Path) -> None:
     """A duplicate serve() on the same dir must hit the O_EXCL lock and abort."""
     handler = _handler_with_fake_page(_FakePage())

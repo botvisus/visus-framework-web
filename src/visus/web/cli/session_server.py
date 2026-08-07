@@ -773,7 +773,13 @@ def _handle_conn(
                 if not isinstance(req, dict):
                     _reply({"ok": False, "error": "bad request: expected a JSON object"})
                     continue
-                if req.get("token") != token:
+                tok = req.get("token")
+                # Constant-time and type-safe: compare_digest raises TypeError on
+                # a non-str/bytes argument, and a malicious client controls this
+                # value entirely.
+                if not isinstance(tok, str) or not secrets.compare_digest(
+                    tok.encode("utf-8"), token.encode("utf-8")
+                ):
                     _reply({"ok": False, "error": "unauthorized: bad token"})
                     continue
                 op = req.get("op", "")
@@ -788,6 +794,22 @@ def _handle_conn(
 
 class SessionLockedError(RuntimeError):
     """Raised when another daemon already holds the session lock."""
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Create *path* exclusively with owner-only permissions and write *text*.
+
+    The session file carries the daemon's shared secret, and that token authorises
+    ``eval``, screenshot writes to an arbitrary path and file upload — so it must
+    not be world-readable. ``O_EXCL`` additionally refuses to write THROUGH a file
+    somebody else planted. POSIX enforces the mode bits; on Windows the exclusive
+    create still holds but ACLs are inherited from ``.visus/``.
+    """
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
 
 
 def _read_lock_pid(lock: Path) -> int:
@@ -891,7 +913,11 @@ def serve(
         }
     )
     tmp = sf.with_name(f"{sf.name}.{os.getpid()}.tmp")
-    tmp.write_text(payload, encoding="utf-8")
+    try:
+        tmp.unlink()  # a crashed predecessor may have left this behind
+    except OSError:
+        pass
+    _write_private(tmp, payload)
     os.replace(tmp, sf)
 
     stop = threading.Event()

@@ -22,8 +22,15 @@ class SessionError(RuntimeError):
     """Raised when no live session is found or a daemon op fails."""
 
 
-def _pid_alive(pid: int) -> bool:
-    """True if a process with *pid* exists."""
+# How long a liveness answer may be reused. Short enough that a dying daemon is
+# noticed almost immediately, long enough to collapse the repeat probes a single
+# CLI invocation makes.
+PID_ALIVE_TTL = 1.0
+_pid_alive_cache: dict[int, tuple[float, bool]] = {}
+
+
+def _probe_pid(pid: int) -> bool:
+    """Ask the OS whether a process with *pid* exists (uncached)."""
     if pid <= 0:
         return False
     if sys.platform == "win32":
@@ -45,6 +52,23 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _pid_alive(pid: int) -> bool:
+    """True if a process with *pid* exists, memoised for :data:`PID_ALIVE_TTL`.
+
+    On Windows every probe spawns ``tasklist`` with a 5 s timeout, and a single
+    command probes the same pid more than once (discovery, then the op). The memo
+    removes the duplicate cost without ever hiding a death for longer than the TTL.
+    Liveness-critical callers use :func:`_probe_pid` directly.
+    """
+    now = time.monotonic()
+    hit = _pid_alive_cache.get(pid)
+    if hit is not None and now - hit[0] < PID_ALIVE_TTL:
+        return hit[1]
+    alive = _probe_pid(pid)
+    _pid_alive_cache[pid] = (now, alive)
+    return alive
 
 
 def _socket_open(port: int, *, host: str = "127.0.0.1", timeout: float = 1.0) -> bool:
@@ -273,11 +297,19 @@ def stop(*, start_dir: str | Path | None = None) -> str:
 
 
 def status(*, start_dir: str | Path | None = None) -> dict[str, Any] | None:
-    """Return the live daemon's status dict, or ``None`` if no session is running."""
+    """Return the live daemon's status dict, or ``None`` if no session is running.
+
+    Sends on the connection info from the SINGLE ``find_session`` call above —
+    routing through :func:`send` would re-run discovery and pay a second liveness
+    probe (on Windows: a second ``tasklist`` with a 5 s timeout).
+    """
     info = find_session(start_dir)
     if info is None:
         return None
-    result = send("status", start_dir=start_dir)
+    resp = _send_raw(int(info["port"]), {"token": info["token"], "op": "status", "args": {}})
+    if not resp.get("ok"):
+        raise SessionError(str(resp.get("error", "unknown error")))
+    result = resp.get("result")
     merged: dict[str, Any] = {
         "pid": info["pid"],
         "port": info["port"],
@@ -358,7 +390,7 @@ def kill(*, start_dir: str | Path | None = None) -> str:
         except OSError:
             pass
 
-    if pid > 0 and _pid_alive(pid):
+    if pid > 0 and _probe_pid(pid):
         _terminate(pid)
         return f"killed daemon pid {pid}; removed {', '.join(removed) or 'nothing'}"
     if not removed:

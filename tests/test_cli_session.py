@@ -1160,7 +1160,8 @@ def test_pid_alive_negative() -> None:
 
 
 def test_pid_alive_windows_tasklist_branch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exercise the win32 tasklist parse: pid present -> True, absent/raising -> False."""
+    """Exercise the win32 tasklist parse (uncached probe): present -> True,
+    absent/raising -> False."""
     monkeypatch.setattr(session_client.sys, "platform", "win32")
 
     class _Completed:
@@ -1173,7 +1174,7 @@ def test_pid_alive_windows_tasklist_branch(monkeypatch: pytest.MonkeyPatch) -> N
         "run",
         lambda *a, **kw: _Completed("python.exe   12345 Console   1   50,000 K"),
     )
-    assert session_client._pid_alive(12345) is True
+    assert session_client._probe_pid(12345) is True
 
     # pid absent -> not alive.
     monkeypatch.setattr(
@@ -1181,14 +1182,70 @@ def test_pid_alive_windows_tasklist_branch(monkeypatch: pytest.MonkeyPatch) -> N
         "run",
         lambda *a, **kw: _Completed("INFO: No tasks are running which match the criteria."),
     )
-    assert session_client._pid_alive(12345) is False
+    assert session_client._probe_pid(12345) is False
 
     # subprocess raises -> treated as not alive (exception fallback).
     def _boom(*a: Any, **kw: Any) -> Any:
         raise OSError("tasklist missing")
 
     monkeypatch.setattr(session_client.subprocess, "run", _boom)
-    assert session_client._pid_alive(12345) is False
+    assert session_client._probe_pid(12345) is False
+
+
+def test_status_costs_exactly_one_liveness_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`visus session status` used to probe twice; on Windows that is 2x tasklist."""
+    probes: list[int] = []
+    real_probe = session_client._probe_pid
+
+    def spy(pid: int) -> bool:
+        probes.append(pid)
+        return real_probe(pid)
+
+    handler = _handler_with_fake_page(_FakePage())
+    t, port = _serve_in_thread(handler, "tok", tmp_path)
+    try:
+        # Rewrite the session file with THIS process's pid so the probe is real.
+        import os as _os
+
+        sf = session_server.session_file(tmp_path)
+        info = json.loads(sf.read_text(encoding="utf-8"))
+        info["pid"] = _os.getpid()
+        sf.write_text(json.dumps(info), encoding="utf-8")
+
+        session_client._pid_alive_cache.clear()
+        monkeypatch.setattr(session_client, "_probe_pid", spy)
+        result = session_client.status(start_dir=tmp_path)
+        assert result is not None and result["running"] is True
+        assert len(probes) == 1, f"{len(probes)} liveness probes for one status"
+    finally:
+        monkeypatch.undo()
+        _shutdown_thread(t, port, "tok")
+
+
+def test_pid_alive_is_memoised_within_its_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(
+        session_client, "_probe_pid", lambda pid: calls.append(pid) or True
+    )
+    session_client._pid_alive_cache.clear()
+    assert session_client._pid_alive(4242) is True
+    assert session_client._pid_alive(4242) is True
+    assert session_client._pid_alive(4242) is True
+    assert calls == [4242], "the probe was not memoised"
+
+
+def test_pid_alive_memo_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(
+        session_client, "_probe_pid", lambda pid: calls.append(pid) or True
+    )
+    monkeypatch.setattr(session_client, "PID_ALIVE_TTL", 0.0)
+    session_client._pid_alive_cache.clear()
+    session_client._pid_alive(4242)
+    session_client._pid_alive(4242)
+    assert calls == [4242, 4242], "a zero TTL must not memoise"
 
 
 def test_socket_open_false_on_closed_port() -> None:
@@ -1716,7 +1773,7 @@ def test_kill_terminates_a_live_daemon(
     killed: list[int] = []
     sf = _write_session(tmp_path, {"pid": 4242, "port": 2, "token": "t"})
     sf.with_name(sf.name + ".lock").write_text("4242", encoding="utf-8")
-    monkeypatch.setattr(session_client, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(session_client, "_probe_pid", lambda pid: True)
     monkeypatch.setattr(session_client, "_terminate", killed.append)
     msg = session_client.kill(start_dir=tmp_path)
     assert killed == [4242]

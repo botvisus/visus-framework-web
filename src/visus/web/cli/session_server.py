@@ -840,7 +840,7 @@ def _claim_lock(sf: Path) -> Path:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError as exc:
             owner = _read_lock_pid(lock)
-            if attempt == 0 and not session_client._pid_alive(owner):
+            if attempt == 0 and not session_client._probe_pid(owner):
                 try:
                     lock.unlink()
                 except OSError:

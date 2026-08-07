@@ -6,11 +6,13 @@ nothing in this module may write ``.claude`` or ``.agents`` into the repo.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from visus.web.cli import skill_check
 from visus.web.cli.main import app
 from visus.web.cli.skills import (
     SKILL_NAME,
@@ -121,3 +123,92 @@ def test_cli_install_skills_rejects_unknown_target(
     r = runner.invoke(app, ["install-skills", "--target", "cursor"])
     assert r.exit_code == 2
     assert "unknown skill target" in r.output
+
+
+def test_read_skill_normalises_crlf(tmp_path: Path) -> None:
+    f = tmp_path / "SKILL.md"
+    f.write_bytes(b"# title\r\nbody\r\n")
+    assert skill_check.read_skill(f) == "# title\nbody\n"
+
+
+def test_read_skill_returns_none_when_missing(tmp_path: Path) -> None:
+    assert skill_check.read_skill(tmp_path / "nope.md") is None
+
+
+def test_frame_pads_every_line_to_the_widest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(skill_check.sys, "stderr", io.StringIO())  # utf-8 capable
+    out = skill_check.frame(["ab", "cdefg"])
+    assert out == (
+        "╔═══════╗\n"
+        "║ ab    ║\n"
+        "║ cdefg ║\n"
+        "╚═══════╝\n"
+    )
+
+
+def test_frame_falls_back_to_ascii_on_a_cp1252_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(skill_check.sys, "stderr", stream)
+    out = skill_check.frame(["hi"])
+    assert out == "+----+\n| hi |\n+----+\n"
+    out.encode("cp1252")  # must not raise
+
+
+def test_frame_handles_no_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(skill_check.sys, "stderr", io.StringIO())
+    assert skill_check.frame([]) == "╔══╗\n╚══╝\n"
+
+
+def test_check_is_silent_when_nothing_is_installed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    skill_check.check_installed_skills(tmp_path)
+    assert capsys.readouterr().err == ""
+
+
+def test_check_is_silent_when_the_copy_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_skills(tmp_path, flavor="claude")
+    capsys.readouterr()
+    skill_check.check_installed_skills(tmp_path)
+    assert capsys.readouterr().err == ""
+
+
+def test_check_warns_on_stderr_when_the_copy_diverges(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_skills(tmp_path, flavor="claude")
+    installed = tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md"
+    with installed.open("a", encoding="utf-8") as fh:
+        fh.write("x")
+    capsys.readouterr()
+    skill_check.check_installed_skills(tmp_path)
+    captured = capsys.readouterr()
+    assert "does not match the tool version" in captured.err
+    assert "visus install --skills" in captured.err
+    assert captured.out == "", "the warning must never reach stdout"
+
+
+def test_check_ignores_a_crlf_only_difference(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: a CRLF checkout must not look like drift (Windows-first repo)."""
+    install_skills(tmp_path, flavor="claude")
+    installed = tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md"
+    installed.write_bytes(installed.read_text(encoding="utf-8").replace("\n", "\r\n").encode())
+    capsys.readouterr()
+    skill_check.check_installed_skills(tmp_path)
+    assert capsys.readouterr().err == ""
+
+
+def test_check_never_raises_when_the_bundle_is_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom() -> Path:
+        raise RuntimeError("resource resolution exploded")
+
+    monkeypatch.setattr(skill_check, "bundled_skill_dir", _boom)
+    skill_check.check_installed_skills(tmp_path)  # must not raise

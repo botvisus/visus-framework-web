@@ -97,3 +97,28 @@ def test_runtime_imports_are_declared() -> None:
     assert any(s.startswith("rich") for s in cli), (
         f"the cli extra must declare rich (imported directly by the CLI); got {cli}"
     )
+
+
+def test_the_license_is_stated_consistently_everywhere() -> None:
+    """LICENSE, PyPI metadata and README must not disagree about the licence.
+
+    They did: LICENSE and pyproject.toml said Apache-2.0 while README carried a
+    "Proprietary — all rights reserved" badge and prose. Both render on the same
+    PyPI project page, so a reader had no way to tell which one bound them, and
+    the packaged metadata is the legally operative one.
+    """
+    declared = _pyproject()["project"]["license"]
+    assert declared == "Apache-2.0", declared
+
+    license_text = (PYPROJECT.parent / "LICENSE").read_text(encoding="utf-8")
+    assert "Apache License" in license_text
+    assert "Version 2.0" in license_text
+
+    readme = (PYPROJECT.parent / "README.md").read_text(encoding="utf-8")
+    lowered = readme.lower()
+    assert "proprietary" not in lowered, (
+        "README still claims a proprietary licence while LICENSE and pyproject.toml "
+        "say Apache-2.0 — the two render on the same PyPI page"
+    )
+    assert "all rights reserved" not in lowered
+    assert "Apache" in readme

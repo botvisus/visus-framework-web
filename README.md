@@ -6,7 +6,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/visus-web.svg)](https://pypi.org/project/visus-web/)
 [![Python](https://img.shields.io/pypi/pyversions/visus-web.svg)](https://pypi.org/project/visus-web/)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 
 </div>
@@ -977,7 +977,7 @@ See [`TESTING.md`](TESTING.md) for the test matrix (including the Edge IE-mode e
 
 ## License
 
-**Proprietary — all rights reserved.** You may install and use `visus-web` as a dependency in your
-own projects, but copying the source, redistributing, modifying, or reverse engineering it is **not
-permitted**. See [LICENSE](LICENSE) for the full terms. For commercial or redistribution licenses,
-contact the author.
+**Apache License 2.0** — the same licence Playwright ships under. You may use, copy, modify,
+redistribute and sublicense `visus-web`, including commercially, provided you keep the copyright
+and licence notices and state any changes you made. It also grants an explicit patent licence from
+every contributor. See [LICENSE](LICENSE) for the full terms and [NOTICE](NOTICE) for attribution.

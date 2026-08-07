@@ -14,7 +14,7 @@ verified against the source.
 | # | Plan | Tasks | Lines | Closes |
 |---|---|---:|---:|---|
 | 1 | [`tier1-skill-distribution`](2026-08-06-tier1-skill-distribution.md) | 13 | 3,223 | A1–A7, E3, rows 15–17, 19–23, 31, 36–39, 42 |
-| 2 | [`tier1-ci-and-release`](2026-08-06-tier1-ci-and-release.md) | 8 | 2,328 | E1, E2, E4, E5, rows 32, 34, 35, 40 |
+| 2 | [`tier1-ci-and-release`](2026-08-06-tier1-ci-and-release.md) | 9 | 2,328 | E1, E2, E4, E5, rows 32, 34, 35, 40, **+ Task 0: dependency pinning** |
 | 3 | [`tier2a-daemon-correctness`](2026-08-06-tier2a-daemon-correctness.md) | 18 | 3,099 | B1–B9, rows 29, 30, 41, 43 |
 | 4 | [`tier2c-agent-driving-loop`](2026-08-06-tier2c-agent-driving-loop.md) | 18 | 4,348 | C1–C7, rows 25, 33 |
 | 5 | [`tier2b-cli-surface-parity`](2026-08-06-tier2b-cli-surface-parity.md) | 22 | 8,424 | D2, D3, D5–D7, D10, D11, rows 1–5, 8, 10, 13, 26–28 |
@@ -45,8 +45,13 @@ PLAN 3  daemon-correctness   ──┼──┴──► PLAN 4  agent-driving-l
                           (PLAN 6 ╌╌► PLAN 7 unblocks Task 18 only, not a prerequisite)
 ```
 
-**Topological order: `1 → 3 → 2 → 4 → 5 → 6 → 7`.** Acyclic — verified by grepping the
-produces/consumes graph across all seven files.
+**Topological order: `2·Task 0 → 1 → 3 → 2 → 4 → 5 → 6 → 7`.** Acyclic — verified by
+grepping the produces/consumes graph across all seven files.
+
+> **`PLAN 2 Task 0` comes before everything.** It pins the dependency floors that
+> currently leave the repo red on a fresh install. Until it lands, `mypy` checks
+> nothing and 55 tests fail — including the MCP tool-count assertion PLAN 1 Task 7
+> depends on. See "Baseline" below.
 
 Plans **1 and 3 have no prerequisites** and can run in parallel. Everything else is
 sequential.
@@ -136,19 +141,53 @@ These plans were adversarially verified, not just written.
 
 **Not done — know this before you start:**
 
-- **No gate was ever executed.** `uv`, `ruff`, `mypy`, `pytest` and `selenium` were all
-  absent from the authoring environment. Every verification above is *static*: files
-  opened and read, never run.
+- **The gates were run, and the baseline is RED.** See "Baseline" below — this changed
+  the plans.
 
-  This matters less than it sounds. The code these plans describe does not exist yet,
-  so no run today could validate it — that is what each task's own failing-test step
-  is for. What a run *would* establish is a green baseline, so an implementer whose
-  test goes red knows the break is theirs and not pre-existing.
+- **No browser test was run.** The 298 browser-marked tests need a real Chrome plus a
+  driver; only the 557 non-browser test instances were executed. Coverage was never
+  measured, so **PLAN 2 Task 2 Step 6 remains unverified**: it runs the suite to freeze
+  current per-package coverage into `coverage-floors.json`, and if real coverage is
+  below the 90% the config claims, that step yields different floors than the plan
+  assumes.
 
-  **One concrete exposure: PLAN 2 Task 2 Step 6.** It runs the suite to freeze the
-  current per-package coverage numbers into `coverage-floors.json`. If real coverage
-  today is below the 90% the config claims, that step yields different floors than the
-  plan assumes. Check it before starting PLAN 2. Everything else degrades gracefully.
+- **The plans' own code still cannot be validated by running anything** — it does not
+  exist yet. Each task's failing-test step is that validation.
+
+---
+
+## Baseline — measured 2026-08-06
+
+`python -m venv .venv && pip install -e ".[dev,cli,mcp,vision]"`, then the three gates:
+
+| Gate | Result |
+|---|---|
+| `ruff check src tests` | ✅ All checks passed |
+| `mypy` | ❌ fatal — exits before checking anything |
+| `pytest -m "not browser"` | ❌ **55 failed, 502 passed** |
+
+**None of it is the repo's own code.** Every failure traces to a dependency floor with
+no upper bound resolving to a newer major:
+
+1. **`mcp>=1.2.0` admitted `mcp` 2.0.0, which deleted `mcp.server.fastmcp`.**
+   `src/visus/web/mcp/server.py:11` imports exactly that, so the module raises
+   `ModuleNotFoundError` — 49 test failures and 45 mypy errors from one line. This is
+   **live in production**: `pip install "visus-web[mcp]"` ships a dead MCP server
+   today. Last working release is 1.29.0.
+2. **`numpy>=1.24.0` admitted 2.5.1**, whose stubs use 3.12-only `type` statements;
+   under `python_version = "3.10"` mypy dies at
+   `numpy/__init__.pyi:737` and checks nothing.
+3. **`rpa.py:198` imports `runpilot`, undeclared** — but deliberately so (lazy,
+   env-guarded, `try/except`, and the docstring says so). The code is right; the mypy
+   config just lacks an override.
+
+Unattributed: 6 `tests/test_vision.py` failures with an onnxruntime
+`bad allocation` runtime error. Possibly environment memory pressure — not confidently
+a repo bug.
+
+**This is why `PLAN 2 Task 0` exists.** It was added after the run. **Do it first, before
+anything else in any plan** — PLAN 1 Task 7's test asserts the MCP tool count, and it
+cannot even import the server until Task 0 lands.
 - **Two citations point at reference clones not in this checkout** —
   `playwright.config.ts:22` and one `playwright-cli/…` path in PLAN 2. The
   playwright-cli citations in PLAN 7 are prefixed with that repo's path; it lives at

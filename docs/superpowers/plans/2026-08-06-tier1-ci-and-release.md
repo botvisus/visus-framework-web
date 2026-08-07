@@ -104,6 +104,191 @@ print(total)  # 775
 
 ---
 
+### Task 0: Pin the drifted dependency floors — **CI cannot go green until this lands**
+
+> **This task was added after the plans were written, from a real baseline run.** A
+> fresh `python -m venv .venv && pip install -e ".[dev,cli,mcp,vision]"` on
+> 2026-08-06 produced **55 failed, 502 passed** and a **fatal mypy error**. None of
+> it is caused by the repo's own code — every failure traces to an unbounded
+> dependency floor resolving to a newer major version. Adding CI (Tasks 3–5) on top
+> of this would produce a workflow that is red from its first run, for reasons that
+> have nothing to do with CI.
+
+**Files:**
+- Modify: `pyproject.toml:42-44` (the `mcp` extra), `pyproject.toml:36-41` (the
+  `vision` extra), `pyproject.toml:96-102` (the mypy override blocks)
+- Test: `tests/test_repo_metadata.py`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: an installable environment in which `ruff`, `mypy` and `pytest` can
+  actually pass — the precondition every later task in this plan assumes.
+
+**The three findings, each verified by running the tool:**
+
+1. **`mcp>=1.2.0` resolves to `mcp` 2.0.0, which deleted `mcp.server.fastmcp`.**
+   `src/visus/web/mcp/server.py:11` is
+   `from mcp.server.fastmcp import FastMCP, Image`. Under 2.0.0 the submodules of
+   `mcp.server` are `mcpserver`, `lowlevel`, `session`, `stdio`, … — no `fastmcp`.
+   The module raises `ModuleNotFoundError` on import, so **the entire MCP server is
+   dead on a fresh install**, taking 49 tests and 45 mypy `untyped-decorator` errors
+   with it. Last working release is **1.29.0**. This is not a test-only problem:
+   `pip install "visus-web[mcp]"` is broken for real users today.
+2. **`numpy>=1.24.0` resolves to 2.5.1, whose stubs use `type` statements.** With
+   `python_version = "3.10"` in `[tool.mypy]`, mypy dies with
+   `.venv\Lib\site-packages\numpy\__init__.pyi:737: error: Type statement is only
+   supported in Python 3.12 and greater [syntax]` and checks nothing at all.
+3. **`src/visus/web/rpa.py:198` imports `runpilot`, which is undeclared.** This one is
+   *by design* — the import is lazy, guarded by `os.environ.get("RUNPILOT_RUN_TOKEN")`
+   and wrapped in `try/except`, and the docstring at `rpa.py:191-193` says "Fully
+   optional … visus.web never hard-depends on it". The code is right; the mypy config
+   is missing an override, exactly like the ones already present for
+   `rapidocr_onnxruntime`, `cv2` and `mcp`.
+
+The repo already pins its one hard dependency correctly — `selenium>=4.38,<5`
+(`pyproject.toml:18`). Apply that same discipline to the extras.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `tests/test_repo_metadata.py`:
+
+```python
+def test_every_dependency_declares_an_upper_bound() -> None:
+    """Unbounded floors let a new major silently break a published extra.
+
+    `mcp>=1.2.0` admitted mcp 2.0.0, which removed `mcp.server.fastmcp` and broke
+    `pip install "visus-web[mcp]"` outright. Guard every declared dependency.
+    """
+    data = _pyproject()
+    declared: list[str] = list(data["project"]["dependencies"])
+    for extra, specs in data["project"]["optional-dependencies"].items():
+        if extra == "docs":
+            continue  # docs builds are not shipped to users
+        declared.extend(specs)
+
+    unbounded = [s for s in declared if "<" not in s and "==" not in s and "~=" not in s]
+    assert unbounded == [], (
+        "these dependencies have no upper bound, so a new major can break a "
+        f"published extra without any change to this repo: {unbounded}"
+    )
+```
+
+If `tests/test_repo_metadata.py` does not exist yet (PLAN 1 Task 13 creates it),
+create it with this helper at the top:
+
+```python
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
+PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+
+
+def _pyproject() -> dict[str, Any]:
+    with PYPROJECT.open("rb") as fh:
+        return tomllib.load(fh)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_repo_metadata.py::test_every_dependency_declares_an_upper_bound -v --no-cov`
+
+Expected: FAIL with `AssertionError: these dependencies have no upper bound … ['rapidocr-onnxruntime>=1.3.0', 'opencv-python>=4.8.0', 'pillow>=10.0.0', 'numpy>=1.24.0', 'mcp>=1.2.0', 'typer>=0.12.0']`
+
+- [ ] **Step 3: Pin the floors**
+
+In `pyproject.toml`, replace the `vision`, `mcp` and `cli` extras:
+
+```toml
+vision = [
+    "rapidocr-onnxruntime>=1.3.0,<2",
+    "opencv-python>=4.8.0,<5",
+    "pillow>=10.0.0,<13",
+    "numpy>=1.24.0,<3",
+]
+mcp = [
+    "mcp>=1.2.0,<2",
+]
+cli = [
+    "typer>=0.12.0,<1",
+    "rich>=13,<16",
+]
+```
+
+`rich` is added here because `src/visus/web/cli/main.py:531-533` and
+`src/visus/web/cli/console.py:66-68` import it at runtime while it is only ever
+pulled in transitively by Typer (PLAN 1 covers the same gap; whichever lands first
+wins, and the other's edit becomes a no-op).
+
+- [ ] **Step 4: Add the missing mypy override**
+
+Append to `pyproject.toml`, next to the existing override blocks at `:96-102`:
+
+```toml
+[[tool.mypy.overrides]]
+module = ["runpilot.*"]
+ignore_missing_imports = true
+```
+
+- [ ] **Step 5: Recreate the environment and verify all three gates**
+
+The current `.venv` already holds the broken versions; pinning alone will not
+downgrade it.
+
+```bash
+rm -rf .venv
+uv sync --extra dev --extra cli --extra mcp --extra vision
+uv run ruff check src tests
+uv run mypy
+uv run pytest -m "not browser" --cov-fail-under=0 -q
+```
+
+Expected: `ruff` prints `All checks passed!`; `mypy` prints
+`Success: no issues found in 54 source files`; pytest reports **0 failed**.
+
+If `mypy` still reports `untyped-decorator` errors in `mcp/server.py`, the pin did
+not take — confirm with `uv run python -c "import mcp; print(mcp.__version__)"` that
+you are on 1.x.
+
+- [ ] **Step 6: Run the new test to verify it passes**
+
+Run: `uv run pytest tests/test_repo_metadata.py::test_every_dependency_declares_an_upper_bound -v --no-cov`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add pyproject.toml tests/test_repo_metadata.py
+git commit -m "fix(deps): bound every dependency floor; mcp 2.0 broke the mcp extra
+
+mcp>=1.2.0 admitted mcp 2.0.0, which removed mcp.server.fastmcp. Every
+visus.web.mcp.server import has raised ModuleNotFoundError on a fresh install
+since that release, so \`pip install \"visus-web[mcp]\"\` ships a dead server.
+
+numpy>=1.24.0 admitted 2.5.1, whose stubs use 3.12-only \`type\` statements and
+make mypy exit before checking anything under python_version = \"3.10\".
+
+Also registers the runpilot mypy override: rpa.py:198 imports it lazily and
+optionally by design, so the import-not-found error was a config gap."
+```
+
+> **Known caveat, not fixed here.** The same baseline run showed 6 failures in
+> `tests/test_vision.py` with
+> `onnxruntime … RUNTIME_EXCEPTION … Status Message: bad allocation`. That is a
+> runtime memory-allocation failure inside onnxruntime, not an import or API
+> problem, and it did not reproduce consistently enough to attribute to the repo.
+> Re-check it after Step 5; if it persists on a machine with free memory, it is a
+> separate bug and deserves its own investigation.
+
+---
+
 ### Task 1: Move the coverage gate out of unconditional `addopts` (E5)
 
 **Files:**

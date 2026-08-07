@@ -131,3 +131,52 @@ def test_tool_registered(tool_name: str) -> None:
         f"Tool {tool_name!r} not found. Registered: {sorted(registered)}"
     )
 
+
+# ---------------------------------------------------------------------------
+# Skill delivery (resources + prompt) — closes the last distribution channel
+# ---------------------------------------------------------------------------
+
+
+def test_skill_resource_returns_the_bundled_skill() -> None:
+    from visus.web.cli.skills import bundled_skill_dir
+    from visus.web.mcp import server
+
+    text = server._bundled_skill_text()
+    assert text == (bundled_skill_dir() / "SKILL.md").read_text(encoding="utf-8")
+    assert "visus session start" in text
+
+
+def test_skill_reference_resource_reads_a_reference_file() -> None:
+    from visus.web.mcp import server
+
+    assert "visus list-fields" in server._bundled_skill_reference_text("cli-commands.md")
+
+
+def test_skill_reference_resource_cannot_escape_the_references_dir() -> None:
+    from visus.web.mcp import server
+
+    with pytest.raises(FileNotFoundError):
+        server._bundled_skill_reference_text("../SKILL.md")
+
+
+def test_quickstart_prompt_teaches_the_session_loop() -> None:
+    from visus.web.mcp import server
+
+    text = server.visus_web_quickstart()
+    assert "visus session start" in text
+    assert "visus://skill/SKILL.md" in text
+
+
+async def test_skill_resource_and_prompt_are_registered() -> None:
+    server = importlib.import_module("visus.web.mcp.server")
+
+    uris = [str(r.uri) for r in await server.mcp.list_resources()]
+    assert any("SKILL.md" in u for u in uris), uris
+
+    prompts = [p.name for p in await server.mcp.list_prompts()]
+    assert "visus_web_quickstart" in prompts, prompts
+
+
+def test_registering_the_skill_did_not_change_the_tool_count() -> None:
+    assert len(_get_tool_names()) == 45
+

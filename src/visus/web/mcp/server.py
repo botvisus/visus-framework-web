@@ -748,6 +748,61 @@ def browser_close() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Skill delivery — an MCP client with no shell can still read the skill
+# ---------------------------------------------------------------------------
+
+
+def _bundled_skill_text() -> str:
+    """The bundled SKILL.md, read from the installed package."""
+    from visus.web.cli.skills import bundled_skill_dir
+
+    return (bundled_skill_dir() / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _bundled_skill_reference_text(name: str) -> str:
+    """One reference file of the bundled skill. ``name`` is basenamed, never a path."""
+    from pathlib import Path
+
+    from visus.web.cli.skills import bundled_skill_dir
+
+    return (bundled_skill_dir() / "references" / Path(name).name).read_text(encoding="utf-8")
+
+
+@mcp.resource("visus://skill/SKILL.md", mime_type="text/markdown")
+def visus_web_skill() -> str:
+    """The visus-web agent skill — the same file `visus install --skills` writes."""
+    return _bundled_skill_text()
+
+
+@mcp.resource("visus://skill/references/{name}", mime_type="text/markdown")
+def visus_web_skill_reference(name: str) -> str:
+    """One reference file of the visus-web skill, e.g. `cli-commands.md`."""
+    return _bundled_skill_reference_text(name)
+
+
+@mcp.prompt()
+def visus_web_quickstart() -> str:
+    """Teach the caller the visus session loop and where the full skill lives."""
+    return (
+        "You are driving a real browser with visus-web.\n\n"
+        "Read the resource `visus://skill/SKILL.md` for the full skill, and\n"
+        "`visus://skill/references/<file>.md` for a specific topic\n"
+        "(cli-session, cli-targeting, cli-commands, cli-json-and-piping, cli-repl,\n"
+        "windows-shell, mcp-tools, vision, tracing-reports, pytest-plugin,\n"
+        "troubleshooting, library-api).\n\n"
+        "With shell access, prefer the CLI — it is far cheaper in tokens:\n"
+        "  visus session start <url>\n"
+        "  visus list-fields\n"
+        "  visus fill 1 <text>\n"
+        "  visus click --role button --name Submit\n"
+        "  visus expect-text --role heading '<expected>'\n"
+        "  visus session stop\n\n"
+        "Without shell access, use the browser_* tools here. Field indexes are a\n"
+        "cache: re-run list-fields after any navigation.\n"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

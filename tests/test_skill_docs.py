@@ -16,6 +16,14 @@ SKILL_DIR = (
 SKILL_MD = SKILL_DIR / "SKILL.md"
 COMMANDS_MD = SKILL_DIR / "references" / "cli-commands.md"
 
+DEV_SKILL = (
+    Path(__file__).resolve().parents[1]
+    / ".claude"
+    / "skills"
+    / "developing-visus-web"
+    / "SKILL.md"
+)
+
 
 def _frontmatter() -> dict[str, str]:
     text = SKILL_MD.read_text(encoding="utf-8")
@@ -181,3 +189,25 @@ def test_skill_has_a_specific_tasks_index() -> None:
     assert "## Specific tasks" in text
     tail = text.split("## Specific tasks", 1)[1]
     assert tail.count("](references/") >= 9
+
+
+def test_contributor_recipe_names_every_place_a_session_command_touches() -> None:
+    text = DEV_SKILL.read_text(encoding="utf-8")
+    for fragment in (
+        "session_server.py",
+        "_op_",
+        "console.py",
+        "README.md",
+        "references/cli-commands.md",
+    ):
+        assert fragment in text, f"the CLI recipe never mentions {fragment!r}"
+
+
+def test_contributor_recipe_names_the_real_locator_helper() -> None:
+    text = DEV_SKILL.read_text(encoding="utf-8")
+    assert "make_locator" in text
+    assert "locator(page, role=" not in text, "that helper does not exist"
+
+
+def test_contributor_skill_declares_the_full_cli_extra() -> None:
+    assert "[cli]` (typer + rich + click)" in DEV_SKILL.read_text(encoding="utf-8")

@@ -58,10 +58,51 @@ The clean-room `bundle.js` (`window.__visus`) is OUR code (NOT Playwright). It c
 3. Real-browser smoke test under that engine if available in CI.
 
 ### Add an MCP tool
-`src/visus/web/mcp/server.py`: a `@mcp.tool()` thin wrapper over the public API, targeting via the shared `locator(page, role=, name=, text=, selector=, frame=)` helper. Add it to the registration assertion in `tests/test_mcp_server.py` and drive it in `tests/test_e2e_mcp.py`.
+`src/visus/web/mcp/server.py`: a `@mcp.tool()` thin wrapper over the public API, targeting via the shared `make_locator(page, *, selector=, role=, name=, text=, exact=, frame=)` helper (`mcp/session.py:142-160`; **keyword-only** after `page`). Add the name to `_EXPECTED_TOOLS` in `tests/test_mcp_server.py` and drive the tool in `tests/test_e2e_mcp.py`.
 
 ### Add a CLI command
-`src/visus/web/cli/main.py`: an `@app.command()` Typer function over the public API. Test with `typer.testing.CliRunner` (real browser for browser-touching commands).
+
+There are two kinds of command, and only the first is a one-file change.
+
+**Daemon-free command** — 11 of the 54 registered commands: `version`, `translate`,
+`doctor`, `install`, `install-skills`, `screenshot`, `pdf`, `open`, `run`, `mcp`,
+`codegen`. These launch (at most) their own throwaway browser and never talk to the
+session daemon. For these, `src/visus/web/cli/main.py` really is the whole change:
+an `@app.command()` Typer function over the public API. Test with
+`typer.testing.CliRunner` (real browser for the browser-touching ones).
+
+**Session command** — the other 43. It drives the running daemon (started by
+`visus session start`) instead of launching its own browser. Following only the
+one-file recipe above for one of these ships a command that always fails at
+runtime with `error: ValueError: unknown op '<name>'`, because nothing ever
+answers the dispatch in step 1. Places to touch, in the order you'll hit them:
+
+1. **`src/visus/web/cli/session_server.py`** — a `_op_<name>(self, args)` method.
+   `SessionHandler.handle()` dispatches with `getattr(self, f"_op_{op}", None)`
+   and raises `unknown op '<name>'` if it's missing — this is the one contributors
+   skip, and it's the only one that fails silently at authoring time (ruff/mypy
+   are clean; it only breaks when someone runs the command). Required.
+2. **`src/visus/web/cli/main.py`** — an `@app.command()` that sends the op via
+   `_send("<name>", args)`, never talking to the daemon directly. Required (this
+   is the one place the old recipe named).
+3. **`src/visus/web/skills/visus-web/references/cli-commands.md`** — a row in the
+   matching table. `tests/test_skill_docs.py::test_every_cli_command_is_documented`
+   walks `app.registered_commands` and fails, listing anything undocumented here.
+   Required to pass the build.
+4. **`README.md`**'s CLI command tables — a row in the matching table. Not
+   test-gated (no test reads `README.md`), but it's the first thing a human
+   reads; keep it in sync by hand.
+5. **`src/visus/web/cli/console.py`** — a `dispatch()` branch plus a line in
+   `_HELP`, so the interactive REPL can reach it too. Nice-to-have, not
+   required: the REPL is a convenience wrapper over the same `_send`, and it is
+   currently *incomplete* on purpose/by-omission — `drag`, `upload`,
+   `add-cookies`, `clear-cookies`, `read-text`, `solve-captcha`, and
+   `find-image` all ship as working CLI commands with no `console.py` branch at
+   all. Add one when it's cheap; don't treat its absence as broken.
+
+Test the `_op_*` handler with a real-browser test, and the CLI command with
+`typer.testing.CliRunner` asserting the exact op name and payload sent to the
+daemon (pattern: `tests/test_cli_session.py:1152-1642`).
 
 ## Test conventions (enforced)
 
@@ -70,5 +111,13 @@ The clean-room `bundle.js` (`window.__visus`) is OUR code (NOT Playwright). It c
 - **Gates:** `uv run ruff check src tests`, `uv run mypy` (`--strict`, no weakening — cast `execute_script`/CDP `Any` returns; selenium types only inside backend files), `uv run pytest -q` (≥90% coverage on `visus.web`).
 - **Commits:** small, TDD (failing test → minimal impl → green → commit).
 
+### Change the shipped agent skill
+
+The skill lives at `src/visus/web/skills/visus-web/` and ships inside the wheel.
+Its frontmatter `version` must equal `visus.web.__version__` — bump both together.
+`tests/test_skill_docs.py` gates command coverage, the MCP tool count, and link
+integrity. The contributor guide you are reading is **not** shipped; it lives in
+`.claude/skills/developing-visus-web/`.
+
 ## Layout & build
-`src/`-layout namespace package (`visus.web`; no `src/visus/__init__.py`). Build: `uv` + `hatchling`. Optional extras: `[dev]`, `[vision]` (rapidocr/opencv/pillow/numpy), `[mcp]` (mcp), `[cli]` (typer). Entry points: `visus`, `visus-web-mcp`.
+`src/`-layout namespace package (`visus.web`; no `src/visus/__init__.py`). Build: `uv` + `hatchling`. Optional extras: `[dev]`, `[vision]` (rapidocr/opencv/pillow/numpy), `[mcp]` (mcp), `[cli]` (typer + rich + click). Entry points: `visus`, `visus-web-mcp`.

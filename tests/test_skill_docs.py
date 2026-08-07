@@ -123,3 +123,24 @@ def test_every_cli_command_is_documented() -> None:
 
 def test_command_reference_is_linked_from_the_skill() -> None:
     assert "references/cli-commands.md" in SKILL_MD.read_text(encoding="utf-8")
+
+
+def test_targeting_reference_states_the_name_only_rule() -> None:
+    """`--name` alone is rejected by main.py's `_target_args` — the README never says so."""
+    text = (SKILL_DIR / "references" / "cli-targeting.md").read_text(encoding="utf-8")
+    assert "`--name` alone is not a target" in text
+    assert "error: provide an index, or --selector / --role / --text" in text
+
+
+def test_troubleshooting_reference_carries_the_literal_daemon_errors() -> None:
+    """Symptom lookup only works if the strings match the daemon byte for byte."""
+    text = (SKILL_DIR / "references" / "troubleshooting.md").read_text(encoding="utf-8")
+    for literal in (
+        "no live session — run `visus session start` first",
+        "a session is already running (pid",
+        "daemon did not come up within",
+        "daemon closed the connection without responding",
+        "unauthorized: bad token",
+        "out of range (have",
+    ):
+        assert literal in text, f"missing the literal error {literal!r}"

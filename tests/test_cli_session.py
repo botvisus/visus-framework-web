@@ -1223,6 +1223,55 @@ def test_serve_second_daemon_aborts_via_lock(tmp_path: Path) -> None:
     assert not (tmp_path / ".visus" / "session.json.lock").exists()
 
 
+def test_prune_drops_finished_threads() -> None:
+    import threading as _threading
+
+    done = _threading.Thread(target=lambda: None)
+    done.start()
+    done.join(timeout=10)
+    running_gate = _threading.Event()
+    running = _threading.Thread(target=running_gate.wait, daemon=True)
+    running.start()
+    try:
+        assert session_server._prune([done, running]) == [running]
+    finally:
+        running_gate.set()
+        running.join(timeout=10)
+
+
+def test_serve_joins_worker_threads_before_tearing_down(tmp_path: Path) -> None:
+    """No worker may outlive serve(): a live op must not meet a closing driver."""
+    import threading as _threading
+
+    baseline = {
+        t.ident for t in _threading.enumerate() if t.name == "visus-session-conn"
+    }
+    handler = _handler_with_fake_page(_FakePage())
+    token = "tok"
+    t, port = _serve_in_thread(handler, token, tmp_path)
+    for _ in range(12):
+        # `with sock.makefile(...) as f:` (nested, not a bare local `f`) matters:
+        # socket.makefile() bumps the socket's internal `_io_refs`, so `sock`'s own
+        # `close()` (from the outer `with`) leaves the OS fd open — deferred to
+        # whenever `f` is GC'd — unless `f` is *itself* closed first. An unclosed
+        # `f` here would starve the corresponding server thread of EOF for the
+        # rest of this function's lifetime, wedging it well past the shutdown
+        # grace period and producing a false-positive "leftover worker thread".
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+            with sock.makefile("rwb") as f:
+                f.write((json.dumps({"token": token, "op": "status"}) + "\n").encode("utf-8"))
+                f.flush()
+                assert json.loads(f.readline().decode("utf-8"))["ok"] is True
+    _shutdown_thread(t, port, token)
+    assert not t.is_alive()
+    leftovers = [
+        x
+        for x in _threading.enumerate()
+        if x.name == "visus-session-conn" and x.ident not in baseline
+    ]
+    assert leftovers == [], f"worker threads outlived serve(): {leftovers}"
+
+
 @pytest.mark.browser
 def test_closing_the_last_tab_really_stops_the_daemon(tmp_path: Path) -> None:
     """The socket must close and session.json must go — otherwise the next op

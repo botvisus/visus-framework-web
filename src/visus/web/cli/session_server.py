@@ -771,6 +771,22 @@ def _claim_lock(sf: Path) -> Path:
     raise SessionLockedError(f"another daemon already holds {lock}")
 
 
+# How long serve() waits for in-flight ops before tearing the driver down. Kept
+# under session_client.stop()'s 10 s wait so a normal stop still observes the
+# session file disappear.
+SHUTDOWN_GRACE_SECONDS = 8.0
+
+
+def _prune(threads: list[threading.Thread]) -> list[threading.Thread]:
+    """Drop finished workers so the list cannot grow without bound.
+
+    Every command costs about two connections (``find_session`` probes liveness
+    with its own connect), so an unpruned list leaks a Thread object per probe
+    for the whole life of the daemon.
+    """
+    return [t for t in threads if t.is_alive()]
+
+
 def serve(
     handler: SessionHandler,
     *,
@@ -814,17 +830,30 @@ def serve(
     threads: list[threading.Thread] = []
     try:
         while not stop.is_set():
+            threads = _prune(threads)
             try:
                 conn, _ = srv.accept()
             except TimeoutError:
                 continue
             t = threading.Thread(
-                target=_handle_conn, args=(conn, handler, token, stop), daemon=True
+                target=_handle_conn,
+                args=(conn, handler, token, stop),
+                name="visus-session-conn",
+                daemon=True,
             )
             t.start()
             threads.append(t)
     finally:
         srv.close()
+        # Let in-flight ops finish BEFORE the driver is torn down: a concurrent
+        # `wait`/`expect_text` can block for tens of seconds and would otherwise
+        # run against a driver closing underneath it.
+        deadline = time.monotonic() + SHUTDOWN_GRACE_SECONDS
+        for worker in _prune(threads):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            worker.join(timeout=remaining)
         handler.close()
         try:
             sf.unlink()

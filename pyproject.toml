@@ -64,6 +64,10 @@ dev = [
     # [tool.coverage.report] exclude_also needs coverage >= 7.2.0; on anything
     # older the key is silently ignored and TYPE_CHECKING blocks count as missed.
     "coverage[toml]>=7.2.0,<8",
+    # tests/test_installed_entry_points.py builds the real wheel with
+    # `python -m build --no-isolation`, which needs the backend present locally.
+    "build>=1.0.0,<2",
+    "hatchling>=1.21.0,<2",
 ]
 vision = [
     "rapidocr-onnxruntime>=1.3.0,<2",
@@ -108,6 +112,7 @@ packages = ["src/visus"]
 testpaths = ["tests"]
 markers = [
     "browser: integration test that launches a real headless browser",
+    "packaging: builds the real wheel and installs it into a temp venv (needs network)",
 ]
 timeout = 60
 asyncio_mode = "auto"

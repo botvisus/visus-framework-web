@@ -7,6 +7,7 @@ catch packaging mistakes that no unit test would notice because they only bite o
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ else:  # pragma: no cover - exercised only on the 3.10 floor
     import tomli as tomllib
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+ROOT = PYPROJECT.parent
 
 # `docs` never reaches a user's environment and is not installed in CI, so a new
 # major there cannot break anything we ship.
@@ -122,3 +124,62 @@ def test_the_license_is_stated_consistently_everywhere() -> None:
     )
     assert "all rights reserved" not in lowered
     assert "Apache" in readme
+
+
+def test_gitignore_ignores_the_installed_self_skill_but_keeps_the_contributor_one() -> None:
+    """`visus install --skills` writes build artifacts; the contributor skill is source.
+
+    The installed copy under ``.claude/skills/visus-web/`` (and its ``.agents/``
+    twin) must stay untracked, while ``.claude/skills/developing-visus-web/`` — the
+    skill for people contributing to this repo — must remain tracked.
+    """
+    lines = [ln.strip() for ln in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    assert ".claude/skills/visus-web/" in lines
+    assert ".agents/" in lines
+    assert ".claude/" not in lines, "that would untrack the contributor skill"
+    assert (ROOT / ".claude" / "skills" / "developing-visus-web" / "SKILL.md").is_file()
+
+
+def test_gitignore_still_hides_planning_docs_but_allows_the_docs_page() -> None:
+    """`/docs/` is local-only planning material except the one page the site needs.
+
+    Git cannot un-ignore a file whose parent directory is excluded, so the rule has
+    to be ``/docs/*`` plus a negated re-include rather than a blanket ``/docs/``.
+    """
+    lines = [ln.strip() for ln in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    assert "/docs/*" in lines
+    assert "!/docs/agent-skill.md" in lines
+
+
+def test_readme_clone_url_matches_the_package_repository_url() -> None:
+    """The README's `git clone` instructions must name the same org as PyPI does."""
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    match = re.search(r'^Repository = "([^"]+)"', pyproject, re.M)
+    assert match, "pyproject.toml has no Repository URL"
+    assert f"git clone {match.group(1)}" in readme
+
+
+def test_pypi_metadata_is_not_thin() -> None:
+    """PyPI search and filtering rely on keywords and a full classifier set."""
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "keywords = [" in pyproject
+    for version in ("3.10", "3.11", "3.12", "3.13"):
+        assert f'"Programming Language :: Python :: {version}"' in pyproject
+    for classifier in (
+        "Intended Audience :: Developers",
+        "Topic :: Software Development :: Testing",
+        "Typing :: Typed",
+    ):
+        assert classifier in pyproject, f"missing classifier {classifier!r}"
+
+
+def test_docs_site_carries_the_agent_skill() -> None:
+    """The mkdocs nav must reach the agent-skill page, and the page must exist."""
+    mkdocs = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    assert "agent-skill.md" in mkdocs, "the mkdocs nav does not reach the skill"
+    page = ROOT / "docs" / "agent-skill.md"
+    assert page.is_file()
+    text = page.read_text(encoding="utf-8")
+    assert "visus install --skills" in text
+    assert "visus session start" in text

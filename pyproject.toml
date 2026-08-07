@@ -11,9 +11,33 @@ requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Matheus Pereira" }]
+keywords = [
+    "browser-automation",
+    "selenium",
+    "web-testing",
+    "rpa",
+    "playwright-style",
+    "locators",
+    "mcp",
+    "agent-skill",
+    "ocr",
+    "captcha",
+]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Testing :: Acceptance",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Typing :: Typed",
 ]
 dependencies = ["selenium>=4.38,<5"]
 

@@ -4,7 +4,10 @@
 /botcity-framework-web-python/
 
 # ---- Local-only planning docs (specs/plans kept on disk, NOT tracked) ----
-/docs/
+# `/docs/*` (not `/docs/`) so a single tracked page can be re-included below —
+# git cannot un-ignore a file whose parent directory is excluded.
+/docs/*
+!/docs/agent-skill.md
 
 # ---- Workflow research temp files ----
 _synthesis.tmp.md
@@ -58,3 +61,10 @@ IEDriverServer.exe
 *.swp
 .DS_Store
 Thumbs.db
+
+# ---- Agent skills installed into this repo (build artifacts) ----
+# `visus install --skills` writes the shipped skill here; the source of truth is
+# src/visus/web/skills/visus-web/. The contributor skill under
+# .claude/skills/developing-visus-web/ IS tracked — do not widen this to `.claude/`.
+.claude/skills/visus-web/
+.agents/

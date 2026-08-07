@@ -31,6 +31,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Agent skill: agent-skill.md
   - API reference:
       - Sync API: api.md
       - Async API: api-async.md

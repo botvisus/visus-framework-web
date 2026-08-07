@@ -960,7 +960,7 @@ visus-framework-web/
 ## Development & testing
 
 ```bash
-git clone https://github.com/matheuszwilk/visus-framework-web.git
+git clone https://github.com/botvisus/visus-framework-web.git
 cd visus-framework-web
 
 uv venv && uv pip install -e ".[dev,vision,mcp,cli]"

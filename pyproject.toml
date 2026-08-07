@@ -125,7 +125,14 @@ asyncio_mode = "auto"
 # tests) can never reach 90% and would fail on arrival. Measurement stays on;
 # the gate is passed explicitly by whoever enforces it (TESTING.md, CI) and
 # waived with --cov-fail-under=0 by whoever cannot.
-addopts = "-p no:visus_web -n auto --dist loadfile --cov=visus.web --cov-report=term-missing"
+addopts = "-p no:visus_web -n auto --dist loadfile --strict-markers --strict-config --cov=visus.web --cov-report=term-missing"
+# pytest's OWN warnings are defects in this repo, so they are fatal. A blanket
+# `error` is NOT used: selenium/urllib3/onnxruntime deprecations would fail
+# tests across the suite for reasons this repo cannot fix.
+filterwarnings = [
+    "error::pytest.PytestUnknownMarkWarning",
+    "error::pytest.PytestCollectionWarning",
+]
 
 [tool.coverage.run]
 source = ["visus.web"]

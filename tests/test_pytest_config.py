@@ -96,3 +96,24 @@ def test_partial_run_waives_the_gate_but_keeps_measuring(tmp_path: Path) -> None
     assert proc.returncode == 0, combined
     assert "Required test coverage" not in combined
     assert "visus" in proc.stdout, "the term-missing table should still be printed"
+
+
+def test_markers_and_config_are_strict() -> None:
+    addopts = _addopts()
+    assert "--strict-markers" in addopts, "a typo'd marker must error, not silently register"
+    assert "--strict-config" in addopts, "an unknown ini key must error, not be ignored"
+
+
+def test_the_packaging_marker_is_registered() -> None:
+    markers = _pyproject()["tool"]["pytest"]["ini_options"]["markers"]
+    assert any(m.startswith("packaging:") for m in markers)
+
+
+def test_pytests_own_warnings_are_fatal() -> None:
+    filters = _pyproject()["tool"]["pytest"]["ini_options"]["filterwarnings"]
+    assert "error::pytest.PytestUnknownMarkWarning" in filters
+    assert "error::pytest.PytestCollectionWarning" in filters
+    assert not any(f.strip() == "error" for f in filters), (
+        "a blanket `error` would fail 775 tests on selenium/urllib3/onnxruntime "
+        "deprecations this repo cannot fix"
+    )

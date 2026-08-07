@@ -827,6 +827,44 @@ def test_find_session_cleans_corrupt_file(tmp_path: Path) -> None:
     assert not sf.exists()
 
 
+def test_cleanup_removes_the_lock_beside_the_session_file(tmp_path: Path) -> None:
+    sf = _write_session(tmp_path, {"pid": 1, "port": 2, "token": "t"})
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text("999999", encoding="utf-8")
+    session_client._cleanup(sf)
+    assert not sf.exists()
+    assert not lock.exists(), "the orphaned lock survived cleanup"
+
+
+def test_find_session_stale_cleanup_removes_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sf = _write_session(tmp_path, {"pid": 999999, "port": 1, "token": "t"})
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text("999999", encoding="utf-8")
+    monkeypatch.setattr(session_client, "_pid_alive", lambda pid: False)
+    assert session_client.find_session(tmp_path) is None
+    assert not sf.exists() and not lock.exists()
+
+
+def test_stop_on_a_wedged_daemon_removes_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`visus session stop` must not print success while leaving the lock."""
+    sf = _write_session(tmp_path, {"pid": 1, "port": 9, "token": "t"})
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text("1", encoding="utf-8")
+    info = {"pid": 1, "port": 9, "token": "t", "_file": str(sf)}
+    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None: info)
+    monkeypatch.setattr(
+        session_client,
+        "_send_raw",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("connection refused")),
+    )
+    assert session_client.stop(start_dir=tmp_path) == "session stopped"
+    assert not sf.exists() and not lock.exists()
+
+
 def test_send_without_session_raises(tmp_path: Path) -> None:
     with pytest.raises(session_client.SessionError, match="no live session"):
         session_client.send("status", start_dir=tmp_path)

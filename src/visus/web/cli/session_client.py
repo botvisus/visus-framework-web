@@ -90,10 +90,17 @@ def find_session(start_dir: str | Path | None = None) -> dict[str, Any] | None:
 
 
 def _cleanup(sf: Path) -> None:
-    try:
-        sf.unlink()
-    except OSError:
-        pass
+    """Remove a dead session's state: the session file AND its ownership lock.
+
+    Deleting only ``session.json`` leaves ``session.json.lock`` behind, and the
+    daemon claims that lock BEFORE binding — so the next ``session start`` aborts
+    on a lock nobody owns and the user only sees a 20 s timeout.
+    """
+    for path in (sf, sf.with_name(sf.name + ".lock")):
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def _send_raw(port: int, payload: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:

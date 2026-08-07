@@ -11,6 +11,9 @@ Everything is isolated under ``tmp_path`` so no ``.visus`` leaks into the repo.
 from __future__ import annotations
 
 import os
+import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -107,3 +110,42 @@ def test_cross_process_start_refuses_duplicate(tmp_path: Path) -> None:
     while time.monotonic() < deadline and _pid_alive(pid):
         time.sleep(0.2)
     assert not _pid_alive(pid)
+
+
+def _hard_kill(pid: int) -> None:
+    """SIGKILL / `taskkill /F` — no cleanup handler runs, exactly like a crash."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=15
+        )
+    else:
+        os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.browser
+def test_start_recovers_after_the_daemon_is_hard_killed(tmp_path: Path) -> None:
+    """A hard-killed daemon leaves session.json AND session.json.lock behind.
+
+    The next `session start` must come up anyway instead of wedging until the
+    20 s timeout with a message that never mentions the lock.
+    """
+    first = session_client.start_daemon("chrome", headless=True, url=_PAGE, cwd=tmp_path)
+    first_pid = int(first["pid"])
+    lock = tmp_path / ".visus" / "session.json.lock"
+    assert lock.is_file(), "the daemon should hold a lock while serving"
+
+    _hard_kill(first_pid)
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline and _pid_alive(first_pid):
+        time.sleep(0.2)
+    assert not _pid_alive(first_pid)
+    assert lock.is_file(), "the orphaned lock is the precondition of this test"
+
+    second = session_client.start_daemon(
+        "chrome", headless=True, url=_PAGE, cwd=tmp_path, timeout=30.0
+    )
+    try:
+        assert int(second["pid"]) != first_pid
+        assert session_client.send("url", start_dir=tmp_path)
+    finally:
+        session_client.stop(start_dir=tmp_path)

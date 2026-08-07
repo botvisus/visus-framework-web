@@ -1149,6 +1149,57 @@ def test_serve_second_daemon_aborts_via_lock(tmp_path: Path) -> None:
     assert not (tmp_path / ".visus" / "session.json.lock").exists()
 
 
+def _exited_pid() -> int:
+    """A pid that genuinely belonged to a process which has now exited."""
+    import subprocess
+    import sys as _sys
+
+    proc = subprocess.Popen([_sys.executable, "-c", ""])
+    proc.wait(timeout=30)
+    return proc.pid
+
+
+def test_claim_lock_reclaims_a_lock_whose_owner_is_dead(tmp_path: Path) -> None:
+    """A `kill -9`'d daemon leaves its lock behind; the next daemon must reclaim it."""
+    import os as _os
+
+    sf = session_server.session_file(tmp_path)
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text(str(_exited_pid()), encoding="utf-8")
+
+    claimed = session_server._claim_lock(sf)
+    assert claimed == lock
+    assert lock.read_text(encoding="utf-8") == str(_os.getpid())
+
+
+def test_claim_lock_refuses_while_the_owner_is_alive(tmp_path: Path) -> None:
+    """A live owner still wins: the TOCTOU guard must not become a no-op."""
+    import os as _os
+
+    sf = session_server.session_file(tmp_path)
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text(str(_os.getpid()), encoding="utf-8")  # THIS process is alive
+
+    with pytest.raises(session_server.SessionLockedError, match="already holds"):
+        session_server._claim_lock(sf)
+    assert lock.read_text(encoding="utf-8") == str(_os.getpid())  # untouched
+
+
+def test_claim_lock_reclaims_an_unreadable_lock(tmp_path: Path) -> None:
+    """An empty/garbage lock carries no owner, so it is orphaned by definition."""
+    import os as _os
+
+    sf = session_server.session_file(tmp_path)
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text("", encoding="utf-8")
+
+    session_server._claim_lock(sf)
+    assert lock.read_text(encoding="utf-8") == str(_os.getpid())
+
+
 # ---------------------------------------------------------------------------
 # Typer CliRunner arg parsing (session_client monkeypatched — no real daemon)
 # ---------------------------------------------------------------------------

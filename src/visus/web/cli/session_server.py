@@ -32,6 +32,7 @@ from visus.web.api.fields import Field
 from visus.web.api.locator import Locator
 from visus.web.api.page import Page
 from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
+from visus.web.cli import session_client
 
 
 def _any_match_visible(loc: Locator) -> bool:
@@ -695,6 +696,14 @@ class SessionLockedError(RuntimeError):
     """Raised when another daemon already holds the session lock."""
 
 
+def _read_lock_pid(lock: Path) -> int:
+    """The pid recorded in *lock*, or ``-1`` when it is missing/empty/garbage."""
+    try:
+        return int(lock.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return -1
+
+
 def _claim_lock(sf: Path) -> Path:
     """Atomically claim ownership for this daemon (O_CREAT|O_EXCL lock file).
 
@@ -702,17 +711,34 @@ def _claim_lock(sf: Path) -> Path:
     client: two concurrent daemons cannot both claim the lock, so the loser
     exits immediately (before serving / launching a browser) instead of running
     forever untracked with a live driver.
+
+    A lock left behind by a daemon that was killed (``kill -9``, reboot, power
+    cut) would otherwise wedge every future ``visus session start`` forever, so
+    the pid written into the lock is read back: when its owner is gone the lock
+    is removed and claimed on ONE retry. A live rival that grabs it in between
+    wins that retry, which keeps the mutual-exclusion guarantee intact.
     """
     lock = sf.with_name(sf.name + ".lock")
-    try:
-        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise SessionLockedError(f"another daemon already holds {lock}") from exc
-    try:
-        os.write(fd, str(os.getpid()).encode("utf-8"))
-    finally:
-        os.close(fd)
-    return lock
+    for attempt in (0, 1):
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as exc:
+            owner = _read_lock_pid(lock)
+            if attempt == 0 and not session_client._pid_alive(owner):
+                try:
+                    lock.unlink()
+                except OSError:
+                    pass
+                continue
+            raise SessionLockedError(
+                f"another daemon already holds {lock} (owner pid {owner})"
+            ) from exc
+        try:
+            os.write(fd, str(os.getpid()).encode("utf-8"))
+        finally:
+            os.close(fd)
+        return lock
+    raise SessionLockedError(f"another daemon already holds {lock}")
 
 
 def serve(

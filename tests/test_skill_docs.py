@@ -14,6 +14,7 @@ SKILL_DIR = (
     Path(__file__).resolve().parents[1] / "src" / "visus" / "web" / "skills" / "visus-web"
 )
 SKILL_MD = SKILL_DIR / "SKILL.md"
+COMMANDS_MD = SKILL_DIR / "references" / "cli-commands.md"
 
 
 def _frontmatter() -> dict[str, str]:
@@ -87,3 +88,38 @@ def test_skill_has_a_decision_guide_and_a_skills_less_prompt() -> None:
     assert "## Which interface" in text
     assert "## Skills-less operation" in text
     assert "visus --help" in text
+
+
+def _cli_command_names() -> list[str]:
+    """Every invocable command name, e.g. 'list-fields' and 'session start'."""
+    from typer.main import get_command_name
+
+    from visus.web.cli.main import app
+
+    names: list[str] = []
+    for info in app.registered_commands:
+        names.append(info.name or get_command_name(info.callback.__name__))
+    for group in app.registered_groups:
+        prefix = group.name or ""
+        for info in group.typer_instance.registered_commands:
+            sub = info.name or get_command_name(info.callback.__name__)
+            names.append(f"{prefix} {sub}".strip())
+    return names
+
+
+def test_every_cli_command_is_documented() -> None:
+    """Adding a command without a doc row must fail here, not in the field."""
+    text = COMMANDS_MD.read_text(encoding="utf-8")
+    missing = [
+        name
+        for name in _cli_command_names()
+        # `(?![\w-])` stops `visus clear-input` from satisfying `visus clear`.
+        if not re.search(rf"`visus {re.escape(name)}(?![\w-])", text)
+    ]
+    assert not missing, (
+        f"{len(missing)} command(s) missing from {COMMANDS_MD.name}: {sorted(missing)}"
+    )
+
+
+def test_command_reference_is_linked_from_the_skill() -> None:
+    assert "references/cli-commands.md" in SKILL_MD.read_text(encoding="utf-8")

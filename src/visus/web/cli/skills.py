@@ -73,3 +73,28 @@ def install_skills(cwd: Path, *, flavor: str = "claude", force: bool = False) ->
         shutil.copytree(src, target.dir, dirs_exist_ok=True)
         written.extend(sorted(p for p in target.dir.rglob("*") if p.is_file()))
     return written
+
+
+#: The spelling playwright-cli users type. Kept in one place so Task 5's entry
+#: point and this module cannot drift apart.
+SKILLS_FLAG = "--skills"
+
+
+def normalize_skills_argv(argv: list[str]) -> list[str]:
+    """Rewrite a bare ``--skills`` into ``--skills=claude``.
+
+    Typer cannot express click's "optional value" option: it builds the click
+    option itself and never forwards ``flag_value``. Rewriting argv once, in the
+    console-script entry point, keeps ``--skills`` declared as an ordinary value
+    option while still accepting the bare spelling users bring from
+    playwright-cli. ``--skills=agents`` and ``--skills agents`` pass through
+    untouched.
+    """
+    out: list[str] = []
+    for i, token in enumerate(argv):
+        if token != SKILLS_FLAG:
+            out.append(token)
+            continue
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        out.append(f"{SKILLS_FLAG}=claude" if nxt is None or nxt.startswith("-") else token)
+    return out

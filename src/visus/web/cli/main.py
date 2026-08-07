@@ -107,11 +107,48 @@ def doctor(engine: str = "chrome") -> None:
         raise typer.Exit(1) from exc
 
 
+def _install_skills(flavor: str, *, force: bool) -> None:
+    """Copy the bundled agent skill into the current repo and report the paths."""
+    from visus.web.cli.skills import install_skills
+
+    if flavor not in ("claude", "agents", "both"):
+        typer.echo(f"error: unknown skill target {flavor!r} — use claude, agents, or both")
+        raise typer.Exit(2)
+    written = install_skills(Path.cwd(), flavor=flavor, force=force)
+    for path in written:
+        typer.echo(f"wrote {path}")
+    typer.echo(f"installed the visus-web skill ({len(written)} files)")
+
+
 @app.command()
-def install(engine: str = "chrome") -> None:
-    """Resolve/download the driver via Selenium Manager (by launching once)."""
+def install(
+    engine: str = typer.Option("chrome", "--engine", help="Engine to resolve a driver for."),
+    skills: str = typer.Option(
+        None,
+        "--skills",
+        help="Install the agent skill instead of a driver: --skills or --skills=agents.",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="With --skills: wipe the target directory before copying."
+    ),
+) -> None:
+    """Resolve/download the driver via Selenium Manager, or install the agent skill."""
+    if skills is not None:
+        _install_skills(skills, force=force)
+        return
     with launch(Engine.from_str(engine), headless=True):
         typer.echo(f"{engine} driver is ready (Selenium Manager).")
+
+
+@app.command("install-skills")
+def install_skills_cmd(
+    target: str = typer.Option("claude", "--target", help="claude | agents | both"),
+    force: bool = typer.Option(
+        False, "--force", help="Wipe the target directory before copying."
+    ),
+) -> None:
+    """Install the bundled `visus-web` agent skill into this repository."""
+    _install_skills(target, force=force)
 
 
 @app.command()

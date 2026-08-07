@@ -20,7 +20,17 @@ def test_version() -> None:
 def test_help_lists_commands() -> None:
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
-    for cmd in ("doctor", "screenshot", "pdf", "codegen", "mcp", "open", "run", "translate"):
+    for cmd in (
+        "doctor",
+        "screenshot",
+        "pdf",
+        "codegen",
+        "mcp",
+        "open",
+        "run",
+        "translate",
+        "install-skills",
+    ):
         assert cmd in r.output, f"command {cmd!r} missing from --help output"
 
 

@@ -157,6 +157,22 @@ Verify a browser + driver launch correctly:
 visus doctor --engine chrome      # OK: chrome launches and navigates ...
 ```
 
+### Installing the agent skill
+
+`visus-web` ships an agent skill (Claude Code, Copilot, and any agent that reads
+`.claude/skills/`). One command copies it into the repository you are working in:
+
+```bash
+visus install --skills            # -> ./.claude/skills/visus-web/
+visus install --skills=agents     # -> ./.agents/skills/visus-web/
+visus install-skills --target both --force   # both, mirroring the bundle exactly
+```
+
+Every later `visus` invocation compares the installed copy against the one inside
+the package and prints a framed warning **to stderr** if they diverge, naming the
+command that fixes it. Line endings are normalised, so a CRLF checkout never
+triggers a false alarm.
+
 ---
 
 ## Quickstart
@@ -370,7 +386,9 @@ Targeting: most commands accept a positional **field index** (from the last `lis
 |---|---|
 | `visus codegen <URL> -o <file> --engine <e>` | Record interactions in a headed browser and generate `visus.web` code. |
 | `visus doctor --engine <e>` | Check a browser + driver launch correctly. |
-| `visus install --engine <e>` | Resolve/download the driver via Selenium Manager. |
+| `visus install --engine <e>` | Resolve/download the browser driver via Selenium Manager. |
+| `visus install --skills` / `--skills=agents` | Install the bundled agent skill into `./.claude/` or `./.agents/`. |
+| `visus install-skills --target <claude\|agents\|both> --force` | Same, with an explicit target. |
 | `visus mcp` | Start the MCP server over stdio (same as `visus-web-mcp`). |
 | `visus run <script.py>` | Run a Python script with the active interpreter. |
 | `visus version` | Print the `visus.web` version. |

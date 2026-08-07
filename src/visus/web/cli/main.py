@@ -11,8 +11,19 @@ import typer
 
 from visus.web import Engine, launch
 
+#: Shown at the bottom of `visus --help`. The skill is packaged in the wheel but
+#: inert until a repo installs a copy, and nothing else in the help output would
+#: tell a user that it exists — so the discovery hint lives here.
+_EPILOG = (
+    "Installing skills\n"
+    "Claude Code, GitHub Copilot and others will use the locally installed skills.\n"
+    "\n"
+    "visus install --skills\n"
+)
+
 app = typer.Typer(
     help="visus.web — Playwright-style web automation on Selenium.",
+    epilog=_EPILOG,
     no_args_is_help=True,
 )
 

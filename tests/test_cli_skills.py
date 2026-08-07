@@ -319,3 +319,20 @@ def test_python_dash_m_runs_the_cli() -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert __version__ in proc.stdout
+
+
+def test_help_advertises_the_skill_install() -> None:
+    """`visus --help` must tell the user the agent skill exists.
+
+    The skill ships inside the wheel but is inert until a repo installs a copy,
+    and the command list alone never explains why anyone would want one. Mirrors
+    the epilog `playwright-cli --help` prints for the same reason.
+    """
+    from typer.testing import CliRunner
+
+    from visus.web.cli.main import app
+
+    result = CliRunner().invoke(app, ["--help"])
+    assert result.exit_code == 0, result.output
+    assert "Installing skills" in result.output
+    assert "visus install --skills" in result.output

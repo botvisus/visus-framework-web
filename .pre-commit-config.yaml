@@ -1,0 +1,30 @@
+# Local-only hooks. Every hook shells out to the exact command CI runs, so
+# `pre-commit run --all-files` and the `lint` job in .github/workflows/ci.yml
+# cannot disagree, and no hook needs a network clone or a second pinned copy of
+# ruff/mypy.
+#
+# Setup (see TESTING.md):
+#   uv venv && uv pip install -e ".[dev,vision,mcp,cli]"
+#   uv run pre-commit install
+#
+# Requires `uv` on PATH.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check (src, tests, scripts)
+        entry: uv run ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^(src|tests|scripts)/
+        require_serial: true
+
+      - id: mypy
+        name: mypy --strict (visus.web)
+        entry: uv run mypy
+        language: system
+        types_or: [python, pyi]
+        files: ^src/
+        # [tool.mypy] packages = ["visus.web"] — mypy selects its own inputs.
+        pass_filenames: false
+        require_serial: true

@@ -11,9 +11,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS = REPO_ROOT / "tests"
 SELF = Path(__file__).name
+PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
 #: Pre-existing conditional skips. Both run for real when the environment allows.
 ALLOWED_SKIPS = {
@@ -72,4 +75,32 @@ def test_no_test_function_returns_a_value() -> None:
                 offenders.append(f"{path.name}:{lineno}: {node.name} returns a value")
     assert not offenders, (
         "a test that returns instead of asserting proves nothing:\n" + "\n".join(offenders)
+    )
+
+
+def _pre_commit_hooks() -> dict[str, dict[str, object]]:
+    config = yaml.safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
+    return {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+
+
+def test_pre_commit_config_exists() -> None:
+    assert PRE_COMMIT.is_file(), (
+        "pyproject.toml declares pre-commit in [dev]; without this file "
+        "`pre-commit install` fails and the dependency is dead weight"
+    )
+
+
+def test_pre_commit_hooks_are_the_ci_gates_verbatim() -> None:
+    hooks = _pre_commit_hooks()
+    assert {"ruff", "mypy"} <= set(hooks)
+    assert str(hooks["ruff"]["entry"]).startswith("uv run ruff check")
+    assert str(hooks["mypy"]["entry"]).startswith("uv run mypy")
+    assert hooks["mypy"]["pass_filenames"] is False  # [tool.mypy] packages = ["visus.web"]
+
+
+def test_pre_commit_hooks_are_local_only() -> None:
+    config = yaml.safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
+    assert [repo["repo"] for repo in config["repos"]] == ["local"], (
+        "remote hook repos would need a network clone and could pin a different "
+        "ruff/mypy than the CI gates"
     )

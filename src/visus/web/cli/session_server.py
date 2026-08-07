@@ -113,6 +113,9 @@ class SessionHandler:
         self._known_handles: list[str] = []
         self._active_handle: str | None = None
         self._stop: threading.Event | None = None
+        # One WebDriver, one thread per connection in serve(): every op body runs
+        # under this mutex. RLock (not Lock) so an op may re-enter handle().
+        self._lock = threading.RLock()
 
     def bind_stop(self, stop: threading.Event) -> None:
         """Give the handler the server's stop event so an op can end the daemon.
@@ -271,15 +274,21 @@ class SessionHandler:
 
     # --- ops -------------------------------------------------------------
     def handle(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Dispatch one op. Returns ``{ok:True,result:...}`` or ``{ok:False,error:str}``."""
+        """Dispatch one op. Returns ``{ok:True,result:...}`` or ``{ok:False,error:str}``.
+
+        The whole body runs under ``self._lock``: ``serve()`` runs one thread per
+        connection over a SHARED handler, and a WebDriver plus the tab bookkeeping
+        in ``_known_handles``/``_active_handle`` are not safe to interleave.
+        """
         args = args or {}
-        try:
-            method = getattr(self, f"_op_{op}", None)
-            if method is None:
-                raise ValueError(f"unknown op {op!r}")
-            return {"ok": True, "result": method(args)}
-        except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        with self._lock:
+            try:
+                method = getattr(self, f"_op_{op}", None)
+                if method is None:
+                    raise ValueError(f"unknown op {op!r}")
+                return {"ok": True, "result": method(args)}
+            except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     def _op_list_fields(self, args: dict[str, Any]) -> dict[str, Any]:
         kinds = args.get("kinds")

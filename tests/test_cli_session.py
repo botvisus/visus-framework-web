@@ -1265,6 +1265,56 @@ def test_bind_stop_is_optional_and_binds() -> None:
     assert not ev.is_set(), "bind_stop must only wire the event, never set it"
 
 
+def test_handle_serialises_concurrent_ops() -> None:
+    """One handler, many connection threads: op bodies must never overlap.
+
+    `serve()` runs one thread per connection over a SHARED handler, and the ops
+    mutate `_known_handles`/`_active_handle` and switch the driver's window.
+    """
+    import threading as _threading
+    import time as _time
+
+    counter_lock = _threading.Lock()
+    inside = {"now": 0, "max": 0}
+
+    class _SlowPage(_FakePage):
+        def title(self) -> str:
+            with counter_lock:
+                inside["now"] += 1
+                inside["max"] = max(inside["max"], inside["now"])
+            _time.sleep(0.05)
+            with counter_lock:
+                inside["now"] -= 1
+            return "FakeTitle"
+
+    h = _handler_with_fake_page(_SlowPage())
+    results: list[dict[str, Any]] = []
+    results_lock = _threading.Lock()
+
+    def drive() -> None:
+        resp = h.handle("title", {})
+        with results_lock:
+            results.append(resp)
+
+    threads = [_threading.Thread(target=drive) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+
+    assert len(results) == 8
+    assert all(r["ok"] is True and r["result"] == "FakeTitle" for r in results)
+    assert inside["max"] == 1, f"{inside['max']} ops ran concurrently on one driver"
+
+
+def test_handle_lock_is_reentrant() -> None:
+    """RLock, not Lock: an op that dispatches another op must not deadlock."""
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    with h._lock:
+        assert h.handle("title", {})["result"] == "FakeTitle"
+
+
 def _exited_pid() -> int:
     """A pid that genuinely belonged to a process which has now exited."""
     import subprocess

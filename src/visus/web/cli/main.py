@@ -83,7 +83,7 @@ def version() -> None:
     """Print the visus.web version."""
     from visus.web import __version__
 
-    typer.echo(__version__)
+    output.emit(__version__)
 
 
 def _read_clipboard() -> str | None:
@@ -127,32 +127,32 @@ def translate(
     elif src is None:
         src = (None if sys.stdin.isatty() else sys.stdin.read()) or _read_clipboard()
     if not src or "<" not in src:
-        typer.echo(
+        output.emit_error(
             "No element HTML found. Pass it as an argument, use --file <path>, pipe it via "
-            "stdin, or copy the element to your clipboard first."
+            "stdin, or copy the element to your clipboard first.",
+            code=2,
         )
-        raise typer.Exit(2)
 
     r = _translate(src)
     if as_json:
-        import json
-
-        typer.echo(json.dumps(r, indent=2, ensure_ascii=False))
+        output.set_mode(as_json=True)
+    if output.mode() is output.Mode.JSON:
+        output.emit(r)
         return
-    typer.echo(f"tag    : {r['tag']}")
-    if r["id"]:
-        typer.echo(f"id     : {r['id']}")
-    if r["name"]:
-        typer.echo(f"name   : {r['name']}")
-    if r["css"]:
-        typer.echo(f"css    : {r['css']}")
-    if r["xpath"]:
-        typer.echo(f"xpath  : {r['xpath']}")
-    if r["class"]:
-        typer.echo(f"class  : {r['class']}")
-    typer.echo("candidates (the smart locator tries these in order):")
+    lines = [f"tag    : {r['tag']}"]
+    for key, label in (
+        ("id", "id     "),
+        ("name", "name   "),
+        ("css", "css    "),
+        ("xpath", "xpath  "),
+        ("class", "class  "),
+    ):
+        if r[key]:
+            lines.append(f"{label}: {r[key]}")
+    lines.append("candidates (the smart locator tries these in order):")
     for c in [*r["candidates_css"], *r["candidates_xpath"]]:  # type: ignore[misc]
-        typer.echo(f"  - {c}")
+        lines.append(f"  - {c}")
+    output.emit(r, table="\n".join(lines))
 
 
 @app.command()
@@ -162,10 +162,9 @@ def doctor(engine: str = "chrome") -> None:
         with launch(Engine.from_str(engine), headless=True) as b:
             p = b.new_page()
             p.goto("data:text/html,<title>ok</title>")
-            typer.echo(f"OK: {engine} launches and navigates (title: {p.title()!r})")
+            output.emit(f"OK: {engine} launches and navigates (title: {p.title()!r})")
     except Exception as exc:  # noqa: BLE001
-        typer.echo(f"FAILED: {exc}")
-        raise typer.Exit(1) from exc
+        output.emit_error(f"FAILED: {exc}")
 
 
 def _install_skills(flavor: str, *, force: bool) -> None:
@@ -198,7 +197,7 @@ def install(
         _install_skills(skills, force=force)
         return
     with launch(Engine.from_str(engine), headless=True):
-        typer.echo(f"{engine} driver is ready (Selenium Manager).")
+        output.emit(f"{engine} driver is ready (Selenium Manager).")
 
 
 @app.command("install-skills")
@@ -215,7 +214,7 @@ def install_skills_cmd(
 @app.command()
 def screenshot(
     url: str,
-    output: str = typer.Option("screenshot.png", "-o", "--output"),
+    input_path: str = typer.Option("screenshot.png", "-o", "--output"),
     full_page: bool = False,
     headless: bool = True,
     engine: str = "chrome",
@@ -224,22 +223,22 @@ def screenshot(
     with launch(Engine.from_str(engine), headless=headless) as b:
         p = b.new_page()
         p.goto(url)
-        p.screenshot(path=output, full_page=full_page)
-    typer.echo(f"saved {output}")
+        p.screenshot(path=input_path, full_page=full_page)
+    output.emit(input_path, table=f"saved {input_path}")
 
 
 @app.command()
 def pdf(
     url: str,
-    output: str = typer.Option("page.pdf", "-o", "--output"),
+    input_path: str = typer.Option("page.pdf", "-o", "--output"),
     engine: str = "chrome",
 ) -> None:
     """Print a URL to a PDF (Chromium)."""
     with launch(Engine.from_str(engine), headless=True) as b:
         p = b.new_page()
         p.goto(url)
-        p.pdf(path=output)
-    typer.echo(f"saved {output}")
+        p.pdf(path=input_path)
+    output.emit(input_path, table=f"saved {input_path}")
 
 
 @app.command()
@@ -268,7 +267,7 @@ def mcp() -> None:
 @app.command()
 def codegen(
     url: str,
-    output: str | None = typer.Option(None, "-o", "--output"),
+    input_path: str | None = typer.Option(None, "-o", "--output"),
     engine: str = "chrome",
 ) -> None:
     """Record interactions in a headed browser and generate visus.web code."""
@@ -285,11 +284,11 @@ def codegen(
         finally:
             events = drain(p)
     code = generate_script(url, events)
-    if output:
-        Path(output).write_text(code, encoding="utf-8")
-        typer.echo(f"saved {output}")
+    if input_path:
+        Path(input_path).write_text(code, encoding="utf-8")
+        output.emit(input_path, table=f"saved {input_path}")
     else:
-        typer.echo(code)
+        output.emit(code)
 
 
 # ---------------------------------------------------------------------------
@@ -364,9 +363,11 @@ def session_start(
     try:
         info = session_client.start_daemon(engine, headless, url, idle_timeout=idle_timeout)
     except session_client.SessionError as exc:
-        typer.echo(f"error: {exc}")
-        raise typer.Exit(1) from exc
-    typer.echo(f"session started (pid {info['pid']}, port {info['port']}, engine {engine})")
+        output.emit_error(f"error: {exc}")
+    output.emit(
+        info,
+        table=f"session started (pid {info['pid']}, port {info['port']}, engine {engine})",
+    )
 
 
 @session_app.command("stop")
@@ -374,7 +375,7 @@ def session_stop() -> None:
     """Stop the running session (closes the browser)."""
     from visus.web.cli import session_client
 
-    typer.echo(session_client.stop())
+    output.emit(session_client.stop())
 
 
 @session_app.command("kill")
@@ -387,7 +388,7 @@ def session_kill() -> None:
     """
     from visus.web.cli import session_client
 
-    typer.echo(session_client.kill())
+    output.emit(session_client.kill())
 
 
 @session_app.command("status")
@@ -397,18 +398,17 @@ def session_status(
     """Show the running session's status."""
     from visus.web.cli import session_client
 
+    if as_json:
+        output.set_mode(as_json=True)
     info = session_client.status()
     if info is None:
-        typer.echo("no session running")
-        raise typer.Exit(1)
-    if as_json:
-        typer.echo(_json.dumps(info, indent=2, ensure_ascii=False))
-        return
+        output.emit_error("no session running")
     keys = ("pid", "port", "engine", "headless", "url", "title", "windows", "active_tab",
             "fields_cached")
-    for k in keys:
-        if k in info:
-            typer.echo(f"{k:14}: {info[k]}")
+    output.emit(
+        info,
+        table="\n".join(f"{k:14}: {info[k]}" for k in keys if k in info),
+    )
 
 
 @app.command("list-fields")
@@ -426,9 +426,8 @@ def list_fields(
     )
     fields = result.get("fields", [])
     if as_json:
-        typer.echo(_json.dumps(fields, indent=2, ensure_ascii=False))
-        return
-    typer.echo(_format_fields(fields))
+        output.set_mode(as_json=True)
+    output.emit(fields, table=_format_fields(fields))
 
 
 @app.command()
@@ -440,7 +439,7 @@ def click(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Click a field by index or by --selector/--role/--text."""
-    typer.echo(_send("click", _target_args(index, selector, role, name, text)))
+    output.emit(_send("click", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -459,10 +458,9 @@ def fill(
     args = _target_args(index, selector, role, name, by_text)
     fill_value = text if text is not None else value
     if fill_value is None:
-        typer.echo("error: no text to fill — use `visus fill <index> <text>` or `--value`")
-        raise typer.Exit(1)
+        output.emit_error("error: no text to fill — use `visus fill <index> <text>` or `--value`")
     args["text"] = fill_value
-    typer.echo(_send("fill", args))
+    output.emit(_send("fill", args))
 
 
 @app.command()
@@ -473,7 +471,7 @@ def check(
     name: str = typer.Option(None, "--name"),
 ) -> None:
     """Check a checkbox/radio field."""
-    typer.echo(_send("check", _target_args(index, selector, role, name, None)))
+    output.emit(_send("check", _target_args(index, selector, role, name, None)))
 
 
 @app.command()
@@ -484,7 +482,7 @@ def uncheck(
     name: str = typer.Option(None, "--name"),
 ) -> None:
     """Uncheck a checkbox field."""
-    typer.echo(_send("uncheck", _target_args(index, selector, role, name, None)))
+    output.emit(_send("uncheck", _target_args(index, selector, role, name, None)))
 
 
 @app.command()
@@ -503,10 +501,11 @@ def select(
     args = _target_args(index, selector, role, name, by_text)
     val = value if value is not None else option_value
     if val is None:
-        typer.echo("error: no option value — use `visus select <index> <value>` or `--value`")
-        raise typer.Exit(1)
+        output.emit_error(
+            "error: no option value — use `visus select <index> <value>` or `--value`"
+        )
     args["value"] = val
-    typer.echo(_send("select", args))
+    output.emit(_send("select", args))
 
 
 @app.command()
@@ -525,16 +524,16 @@ def press(
     args = _target_args(index, selector, role, name, by_text)
     k = key if key is not None else key_value
     if k is None:
-        typer.echo("error: no key — use `visus press <index> <key>` or `--key`")
-        raise typer.Exit(1)
+        output.emit_error("error: no key — use `visus press <index> <key>` or `--key`")
     args["key"] = k
-    typer.echo(_send("press", args))
+    output.emit(_send("press", args))
 
 
 @app.command()
 def goto(url: str = typer.Argument(..., help="URL to navigate to.")) -> None:
     """Navigate the session's page to a URL."""
-    typer.echo(f"navigated to {_send('goto', {'url': url})}")
+    result = _send("goto", {"url": url})
+    output.emit(result, table=f"navigated to {result}")
 
 
 @app.command("get-text")
@@ -546,12 +545,13 @@ def get_text(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Print a field's text content."""
-    typer.echo(_render_value(_send("get_text", _target_args(index, selector, role, name, text))))
+    result = _send("get_text", _target_args(index, selector, role, name, text))
+    output.emit(result, table=_render_value(result))
 
 
 @app.command("session-screenshot")
 def session_screenshot(
-    output: str = typer.Option("screenshot.png", "-o", "--output"),
+    input_path: str = typer.Option("screenshot.png", "-o", "--output"),
     full_page: bool = typer.Option(
         False, "--full-page", help="Capture the full scrollable page, not just the viewport."
     ),
@@ -569,17 +569,18 @@ def session_screenshot(
     """
     # Resolve the path against the CLIENT's cwd (not the daemon's) so the PNG
     # lands where the user invoked the command, not under the daemon's base dir.
-    abs_output = str(Path(output).resolve())
+    abs_output = output.resolve_out(input_path)
     args: dict[str, Any] = {"path": abs_output, "full_page": full_page}
     if index is not None or selector or role or text:
         args.update(_target_args(index, selector, role, name, text))
-    typer.echo(f"saved {_send('screenshot', args)}")
+    saved = _send("screenshot", args)
+    output.emit(saved, table=f"saved {saved}")
 
 
 @app.command("clear")
 def clear_highlights() -> None:
     """Remove the numbered field-highlight overlay."""
-    typer.echo(_send("clear_highlights", {}))
+    output.emit(_send("clear_highlights", {}))
 
 
 @app.command()
@@ -587,15 +588,17 @@ def tabs(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) -> No
     """List open tabs/windows (the active one is marked with *)."""
     result = _send("tabs", {})
     if as_json:
-        typer.echo(_json.dumps(result, indent=2, ensure_ascii=False))
-        return
+        output.set_mode(as_json=True)
     items = result.get("tabs", [])
     if not items:
-        typer.echo("(no tabs)")
+        output.emit(result, table="(no tabs)")
         return
-    for t in items:
-        mark = "*" if t.get("active") else " "
-        typer.echo(f"{mark} [{t['index']}] {str(t.get('title', ''))!r}  {t.get('url', '')}")
+    table = "\n".join(
+        f"{'*' if t.get('active') else ' '} [{t['index']}] "
+        f"{str(t.get('title', ''))!r}  {t.get('url', '')}"
+        for t in items
+    )
+    output.emit(result, table=table)
 
 
 @app.command()
@@ -604,7 +607,9 @@ def tab(
 ) -> None:
     """Switch the session to a tab/window by index (or the newest if omitted)."""
     result = _send("tab", {"index": index})
-    typer.echo(f"switched to tab {result['active']}: {str(result.get('title', ''))!r}")
+    output.emit(
+        result, table=f"switched to tab {result['active']}: {str(result.get('title', ''))!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -615,19 +620,22 @@ def tab(
 @app.command()
 def back() -> None:
     """Navigate back in the session's history."""
-    typer.echo(f"went back to {_send('back', {})}")
+    result = _send("back", {})
+    output.emit(result, table=f"went back to {result}")
 
 
 @app.command()
 def forward() -> None:
     """Navigate forward in the session's history."""
-    typer.echo(f"went forward to {_send('forward', {})}")
+    result = _send("forward", {})
+    output.emit(result, table=f"went forward to {result}")
 
 
 @app.command()
 def reload() -> None:
     """Reload the session's current page."""
-    typer.echo(f"reloaded {_send('reload', {})}")
+    result = _send("reload", {})
+    output.emit(result, table=f"reloaded {result}")
 
 
 # ---------------------------------------------------------------------------
@@ -638,13 +646,13 @@ def reload() -> None:
 @app.command()
 def title() -> None:
     """Print the session page's title."""
-    typer.echo(_send("title", {}))
+    output.emit(_send("title", {}))
 
 
 @app.command()
 def url() -> None:
     """Print the session page's current URL."""
-    typer.echo(_send("url", {}))
+    output.emit(_send("url", {}))
 
 
 @app.command()
@@ -685,7 +693,8 @@ def get_attribute(
     """Print an element's attribute value."""
     args = _target_args(index, selector, role, name, text)
     args["attr_name"] = attr_name
-    typer.echo(_render_value(_send("get_attribute", args)))
+    result = _send("get_attribute", args)
+    output.emit(result, table=_render_value(result))
 
 
 @app.command()
@@ -697,7 +706,7 @@ def count(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Print how many elements match the target."""
-    typer.echo(_send("count", _target_args(index, selector, role, name, text)))
+    output.emit(_send("count", _target_args(index, selector, role, name, text)))
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +723,7 @@ def hover(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Hover over a field by index or by --selector/--role/--text."""
-    typer.echo(_send("hover", _target_args(index, selector, role, name, text)))
+    output.emit(_send("hover", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -726,7 +735,7 @@ def dblclick(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Double-click a field by index or by --selector/--role/--text."""
-    typer.echo(_send("dblclick", _target_args(index, selector, role, name, text)))
+    output.emit(_send("dblclick", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -738,7 +747,7 @@ def focus(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Focus a field by index or by --selector/--role/--text."""
-    typer.echo(_send("focus", _target_args(index, selector, role, name, text)))
+    output.emit(_send("focus", _target_args(index, selector, role, name, text)))
 
 
 @app.command("clear-input")
@@ -750,7 +759,7 @@ def clear_input(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Clear an input field's value (distinct from `clear`, which removes highlights)."""
-    typer.echo(_send("clear_input", _target_args(index, selector, role, name, text)))
+    output.emit(_send("clear_input", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -773,9 +782,10 @@ def drag(
     elif target_index is not None:
         args["target_index"] = target_index
     else:
-        typer.echo("error: provide a drag target — `<target_index>`, --to-selector, or --to-index")
-        raise typer.Exit(1)
-    typer.echo(_send("drag", args))
+        output.emit_error(
+            "error: provide a drag target — `<target_index>`, --to-selector, or --to-index"
+        )
+    output.emit(_send("drag", args))
 
 
 # Module-level singleton default (B008: a function call cannot be a mutable
@@ -794,12 +804,11 @@ def upload(
 ) -> None:
     """Set file(s) on a file input. By index: `visus upload 4 a.png b.png`."""
     if not paths:
-        typer.echo("error: provide at least one file path to upload")
-        raise typer.Exit(1)
+        output.emit_error("error: provide at least one file path to upload")
     args = _target_args(index, selector, role, name, text)
     # Resolve paths against the CLIENT's cwd so the daemon receives absolute paths.
     args["paths"] = [str(Path(p).resolve()) for p in paths]
-    typer.echo(_send("upload", args))
+    output.emit(_send("upload", args))
 
 
 # ---------------------------------------------------------------------------
@@ -822,7 +831,7 @@ def wait(
     args["state"] = state
     if timeout is not None:
         args["timeout"] = timeout
-    typer.echo(_send("wait", args))
+    output.emit(_send("wait", args))
 
 
 @app.command("expect-text")
@@ -842,12 +851,13 @@ def expect_text(
     args = _target_args(index, selector, role, name, text)
     want = expected if expected is not None else expected_text
     if want is None:
-        typer.echo("error: no expected text — use `visus expect-text <index> <text>` or --expected")
-        raise typer.Exit(1)
+        output.emit_error(
+            "error: no expected text — use `visus expect-text <index> <text>` or --expected"
+        )
     args["expected_text"] = want
     if timeout is not None:
         args["timeout"] = timeout
-    typer.echo(_send("expect_text", args))
+    output.emit(_send("expect_text", args))
 
 
 # ---------------------------------------------------------------------------
@@ -861,7 +871,7 @@ def tab_new(
 ) -> None:
     """Open a new tab/window (optionally at URL) and switch the session to it."""
     result = _send("tab_new", {"url": url})
-    typer.echo(f"opened tab {result['index']}: {str(result.get('title', ''))!r}")
+    output.emit(result, table=f"opened tab {result['index']}: {str(result.get('title', ''))!r}")
 
 
 @app.command("tab-close")
@@ -871,12 +881,15 @@ def tab_close(
     """Close a tab/window by index (or the active one if omitted)."""
     result = _send("tab_close", {"index": index})
     if result.get("remaining", 0) == 0:
+        # PLAN 3 Task 7 split this into two honest branches — keep both.
         if result.get("session_stopped"):
-            typer.echo("closed the last tab — session stopped")
+            output.emit(result, table="closed the last tab — session stopped")
         else:
-            typer.echo("closed the last tab — the browser is closed")
+            output.emit(result, table="closed the last tab — the browser is closed")
         return
-    typer.echo(f"closed tab {result['closed']} ({result['remaining']} remaining)")
+    output.emit(
+        result, table=f"closed tab {result['closed']} ({result['remaining']} remaining)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -892,7 +905,7 @@ def dialog(
     prompt_text: str = typer.Option(None, "--prompt-text", help="Text for a prompt() dialog."),
 ) -> None:
     """Handle the next pending dialog (alert/confirm/prompt)."""
-    typer.echo(_send("dialog", {"accept": accept, "prompt_text": prompt_text}))
+    output.emit(_send("dialog", {"accept": accept, "prompt_text": prompt_text}))
 
 
 # ---------------------------------------------------------------------------
@@ -906,13 +919,14 @@ def cookies(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) ->
     result = _send("cookies", {})
     items = result.get("cookies", [])
     if as_json:
-        typer.echo(_json.dumps(items, indent=2, ensure_ascii=False))
-        return
+        output.set_mode(as_json=True)
     if not items:
-        typer.echo("(no cookies)")
+        output.emit(items, table="(no cookies)")
         return
-    for c in items:
-        typer.echo(f"{c.get('name', '')}={c.get('value', '')}  ({c.get('domain', '')})")
+    table = "\n".join(
+        f"{c.get('name', '')}={c.get('value', '')}  ({c.get('domain', '')})" for c in items
+    )
+    output.emit(items, table=table)
 
 
 @app.command("add-cookies")
@@ -923,18 +937,16 @@ def add_cookies(
     try:
         parsed = _json.loads(cookies_json)
     except _json.JSONDecodeError as exc:
-        typer.echo(f"error: invalid JSON — {exc}")
-        raise typer.Exit(1) from exc
+        output.emit_error(f"error: invalid JSON — {exc}")
     if not isinstance(parsed, list):
-        typer.echo("error: expected a JSON list of cookie objects")
-        raise typer.Exit(1)
-    typer.echo(_send("add_cookies", {"cookies": parsed}))
+        output.emit_error("error: expected a JSON list of cookie objects")
+    output.emit(_send("add_cookies", {"cookies": parsed}))
 
 
 @app.command("clear-cookies")
 def clear_cookies() -> None:
     """Clear all cookies in the session's context."""
-    typer.echo(_send("clear_cookies", {}))
+    output.emit(_send("clear_cookies", {}))
 
 
 # ---------------------------------------------------------------------------
@@ -956,11 +968,9 @@ def eval_js(
         except _json.JSONDecodeError:
             parsed_arg = arg  # treat as a plain string when not valid JSON
     result = _send("eval", {"expression": expression, "arg": parsed_arg})
-    value = result.get("result")
     if as_json:
-        typer.echo(_json.dumps(value, indent=2, ensure_ascii=False))
-        return
-    typer.echo(value)
+        output.set_mode(as_json=True)
+    output.emit(result.get("result"))
 
 
 # ---------------------------------------------------------------------------
@@ -977,7 +987,7 @@ def read_text(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """OCR the targeted element's screenshot and print the recognized text."""
-    typer.echo(_send("read_text", _target_args(index, selector, role, name, text)))
+    output.emit(_send("read_text", _target_args(index, selector, role, name, text)))
 
 
 @app.command("solve-captcha")
@@ -989,7 +999,7 @@ def solve_captcha(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """OCR-solve a text CAPTCHA in the targeted element and print the solution."""
-    typer.echo(_send("solve_captcha", _target_args(index, selector, role, name, text)))
+    output.emit(_send("solve_captcha", _target_args(index, selector, role, name, text)))
 
 
 @app.command("find-image")
@@ -1017,14 +1027,12 @@ def find_image(
         args["target_text"] = text
     result = _send("find_image", args)
     if as_json:
-        typer.echo(_json.dumps(result, indent=2, ensure_ascii=False))
-        return
+        output.set_mode(as_json=True)
     if result.get("found"):
-        typer.echo(
-            f"found at ({result['x']}, {result['y']}) confidence={result['confidence']:.3f}"
-        )
+        table = f"found at ({result['x']}, {result['y']}) confidence={result['confidence']:.3f}"
     else:
-        typer.echo("not found")
+        table = "not found"
+    output.emit(result, table=table)
 
 
 @app.command()

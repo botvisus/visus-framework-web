@@ -186,6 +186,37 @@ class SessionHandler:
             self._active_handle = handles[-1]
         return self._active_handle
 
+    def _peek_active(self, handles: list[str]) -> str:
+        """The active handle WITHOUT adopting new windows or mutating state.
+
+        ``status``/``tabs`` are observations: polling them must never change where
+        the next click lands. ``_resolve_active`` auto-follows a new window on
+        purpose — that belongs to the ACTION path only.
+        """
+        active = self._active_handle
+        if active is not None and active in handles:
+            return active
+        return handles[-1]
+
+    def _peek_page(self) -> Page:
+        """The active page WITHOUT auto-following newly-opened windows."""
+        self._ensure()
+        if self._page is None:
+            raise RuntimeError("session page is not available")
+        driver = self._driver()
+        if driver is None:
+            return self._page  # non-selenium page (tests) — no tab tracking
+        try:
+            handles = list(driver.window_handles)
+        except Exception:  # noqa: BLE001
+            return self._page
+        if not handles:
+            return self._page
+        handle = self._peek_active(handles)
+        if getattr(self._page._delegate, "_handle", None) == handle:
+            return self._page
+        return Page(SeleniumPageDelegate(driver, handle), self._page._defaults)
+
     def close(self) -> None:
         if self._browser is not None:
             self._browser.close()
@@ -596,13 +627,17 @@ class SessionHandler:
         return {"found": True, "x": match.x, "y": match.y, "confidence": match.confidence}
 
     def _op_tabs(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List every open tab/window with its title/url and the active marker."""
+        """List every open tab/window with its title/url and the active marker.
+
+        READ-ONLY: uses ``_peek_active``, never ``_resolve_active`` — listing tabs
+        must not silently adopt a background popup as the active one.
+        """
         self._ensure()
         driver = self._driver()
         if driver is None:
             return {"tabs": [], "active": None}
         handles = list(driver.window_handles)
-        active = self._resolve_active(handles)
+        active = self._peek_active(handles)
         tabs: list[dict[str, Any]] = []
         for i, h in enumerate(handles):
             try:
@@ -644,6 +679,7 @@ class SessionHandler:
         return {"active": handles.index(self._active_handle), "title": title}
 
     def _op_status(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Report session state. READ-ONLY: never adopts a background window."""
         running = self._browser is not None
         info: dict[str, Any] = {
             "running": running,
@@ -653,12 +689,19 @@ class SessionHandler:
         }
         if running:
             try:
-                p = self._active_page()
+                p = self._peek_page()
                 info["url"] = p.url
                 info["title"] = p.title()
-                info["windows"] = len(self._known_handles)
-                if self._active_handle in self._known_handles:
-                    info["active_tab"] = self._known_handles.index(self._active_handle)
+                driver = self._driver()
+                handles = (
+                    list(driver.window_handles)
+                    if driver is not None
+                    else list(self._known_handles)
+                )
+                info["windows"] = len(handles)
+                active = self._peek_active(handles) if handles else None
+                if active is not None and active in handles:
+                    info["active_tab"] = handles.index(active)
             except Exception:  # noqa: BLE001
                 pass
         return info

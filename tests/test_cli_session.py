@@ -1364,6 +1364,57 @@ def test_handle_lock_is_reentrant() -> None:
         assert h.handle("title", {})["result"] == "FakeTitle"
 
 
+def test_peek_active_never_adopts_a_new_handle() -> None:
+    """`_peek_active` observes; `_resolve_active` deliberately auto-follows."""
+    h = session_server.SessionHandler(engine="chrome", headless=True)
+    h._known_handles = ["A"]
+    h._active_handle = "A"
+
+    assert h._peek_active(["A", "B"]) == "A"
+    assert h._known_handles == ["A"], "an observation mutated _known_handles"
+    assert h._active_handle == "A", "an observation mutated _active_handle"
+
+    # A closed active handle still falls back to the newest window.
+    assert h._peek_active(["B", "C"]) == "C"
+    assert h._active_handle == "A"
+
+    # Contrast: the ACTION path adopts the new window on purpose.
+    assert h._resolve_active(["A", "B"]) == "B"
+    assert h._active_handle == "B"
+
+
+@pytest.mark.browser
+def test_status_and_tabs_do_not_adopt_a_background_window() -> None:
+    """Polling status/tabs must not silently move the session to a popup."""
+    h = session_server.SessionHandler(
+        engine="chrome",
+        headless=True,
+        url="data:text/html,<title>first</title><button id=firstbtn>First</button>",
+    )
+    try:
+        h.handle("list_fields", {"highlight": False})  # tab 0 becomes active
+        driver = h._page._delegate._driver  # type: ignore[attr-defined]
+        driver.switch_to.new_window("window")
+        driver.get("data:text/html,<title>second</title><button id=b2>Second</button>")
+        driver.switch_to.window(driver.window_handles[0])
+
+        st = h.handle("status", {})["result"]
+        assert st["title"] == "first", "status adopted the background window"
+        assert st["windows"] == 2
+        assert st["active_tab"] == 0
+
+        tabs = h.handle("tabs", {})["result"]
+        assert len(tabs["tabs"]) == 2
+        assert tabs["active"] == 0, "tabs adopted the background window"
+        assert tabs["tabs"][0]["active"] is True
+
+        # Repeat polling is still stable.
+        assert h.handle("status", {})["result"]["title"] == "first"
+        assert h.handle("tabs", {})["result"]["active"] == 0
+    finally:
+        h.close()
+
+
 def _exited_pid() -> int:
     """A pid that genuinely belonged to a process which has now exited."""
     import subprocess

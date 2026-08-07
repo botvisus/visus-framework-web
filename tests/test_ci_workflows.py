@@ -106,13 +106,36 @@ def test_workflow_files_are_well_formed_yaml() -> None:
 PUBLISH = REPO_ROOT / ".github" / "workflows" / "publish.yml"
 
 
+GUARD = (
+    "github.event_name == 'release' && "
+    "github.event.release.target_commitish == 'main'"
+)
+
+
 def test_every_publish_job_is_guarded_to_a_real_release() -> None:
     jobs = _load(PUBLISH)["jobs"]
     assert jobs, "publish.yml declares no jobs"
     for name, job in jobs.items():
-        assert job.get("if") == "github.event_name == 'release'", (
-            f"job {name!r} has no release guard — a workflow_dispatch from ANY "
-            f"branch would publish that branch to PyPI"
+        assert job.get("if") == GUARD, (
+            f"job {name!r} has no release guard — without it a workflow_dispatch "
+            f"from ANY branch, or a Release cut from ANY branch, publishes to PyPI"
+        )
+
+
+def test_the_branch_half_of_the_guard_uses_target_commitish_not_github_ref() -> None:
+    """On a `release` event GITHUB_REF is the TAG ref, never a branch ref.
+
+    So `github.ref == 'refs/heads/main'` — the obvious-looking way to write "only
+    from main" — is never true on a release, and would silently block every
+    publish while looking like a working guard. The branch a Release was cut from
+    lives in `github.event.release.target_commitish`.
+    """
+    for job in _load(PUBLISH)["jobs"].values():
+        condition = job.get("if", "")
+        assert "target_commitish" in condition
+        assert "github.ref" not in condition, (
+            "github.ref is the tag ref on a release event — this guard would "
+            "never pass and no release would ever publish"
         )
 
 

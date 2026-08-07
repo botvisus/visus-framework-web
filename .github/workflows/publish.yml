@@ -3,9 +3,22 @@ name: Publish to PyPI
 # Publishes to PyPI when you cut a GitHub Release (tag vX.Y.Z).
 #
 # A plain `git push` does NOT publish. Neither does `workflow_dispatch`: EVERY job
-# below is guarded by `if: github.event_name == 'release'`, so a manual run from
-# the Actions tab — on any branch — builds nothing and publishes nothing. The
-# dispatch trigger is kept only so the guard stays visible and testable.
+# below is guarded, so a manual run from the Actions tab — on any branch — builds
+# nothing and publishes nothing. The dispatch trigger is kept only so the guard
+# stays visible and testable.
+#
+# The guard has two halves:
+#   github.event_name == 'release'                     -> not a dispatch
+#   github.event.release.target_commitish == 'main'    -> cut from main
+#
+# It is `target_commitish`, NOT `github.ref`: on a release event GITHUB_REF is the
+# TAG ref (refs/tags/vX.Y.Z), so `github.ref == 'refs/heads/main'` is never true
+# and would silently block every release. `target_commitish` carries the branch
+# the release was created from.
+#
+# Caveat: if a Release is cut from a pre-existing tag rather than a branch, GitHub
+# sets target_commitish to a commit SHA and this guard rejects it. Cut releases
+# from the `main` branch, as RELEASING.md describes.
 #
 # Nothing is built until the full CI matrix (lint, types, unit, packaging and the
 # real-browser suite with both coverage gates) is green on the released commit.
@@ -23,12 +36,14 @@ permissions:
 jobs:
   test:
     name: CI gates
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' &&
+        github.event.release.target_commitish == 'main'
     uses: ./.github/workflows/ci.yml
 
   build:
     name: Build distribution
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' &&
+        github.event.release.target_commitish == 'main'
     needs: [test]
     runs-on: ubuntu-latest
     steps:
@@ -74,7 +89,8 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' &&
+        github.event.release.target_commitish == 'main'
     needs: [build]
     runs-on: ubuntu-latest
     # The environment name MUST match what you set on PyPI's trusted publisher.

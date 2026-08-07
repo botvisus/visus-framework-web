@@ -15,12 +15,14 @@ entrypoint: it reads engine/headless/url from argv/env, writes
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import socket
 import sys
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, cast
 
@@ -945,6 +947,39 @@ def _idle_timeout_from_env() -> float | None:
     return seconds if seconds > 0 else None
 
 
+LOG_MAX_BYTES = 1_048_576
+LOG_BACKUP_COUNT = 3
+
+
+def _make_logger(
+    log_path: Path,
+    *,
+    max_bytes: int = LOG_MAX_BYTES,
+    backup_count: int = LOG_BACKUP_COUNT,
+) -> logging.Logger:
+    """The daemon's logger, writing to a size-capped rotating file.
+
+    ``.visus/daemon.log`` used to be an unbounded append; a long-lived headed
+    session logs on every start/abort/crash and nothing ever truncated it.
+    Idempotent: re-creating the logger replaces its handler instead of stacking
+    a second one (which would double every line).
+    """
+    logger = logging.getLogger("visus.web.cli.session_server")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    for existing in list(logger.handlers):
+        logger.removeHandler(existing)
+        existing.close()
+    handler = RotatingFileHandler(
+        log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    logger.addHandler(handler)
+    return logger
+
+
 def main(argv: list[str] | None = None) -> None:
     """Daemon entrypoint: ``python -m visus.web.cli.session_server [engine] [headless] [url]``.
 
@@ -961,11 +996,10 @@ def main(argv: list[str] | None = None) -> None:
 
     log_dir = Path.cwd() / ".visus"
     log_dir.mkdir(parents=True, exist_ok=True)
-    log = log_dir / "daemon.log"
+    logger = _make_logger(log_dir / "daemon.log")
 
     def _log(msg: str) -> None:
-        with log.open("a", encoding="utf-8") as fh:
-            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+        logger.info(msg)
 
     _log(f"daemon starting engine={engine} headless={headless} url={url!r} pid={os.getpid()}")
     handler = SessionHandler(engine=engine, headless=headless, url=url)

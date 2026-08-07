@@ -2802,3 +2802,37 @@ def test_dispatch_tab_close_last_tab_messages() -> None:
     assert "session stopped" in console.dispatch("tab-close", send_stopped)
     out = console.dispatch("tab-close", send_alive)
     assert "browser is closed" in out and "session stopped" not in out
+
+
+def test_daemon_log_rotates_instead_of_growing_forever(tmp_path: Path) -> None:
+    log = tmp_path / "daemon.log"
+    logger = session_server._make_logger(log, max_bytes=2048, backup_count=2)
+    try:
+        for i in range(400):
+            logger.info("%s %d", "x" * 80, i)
+    finally:
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
+
+    assert log.is_file()
+    assert log.stat().st_size <= 4096, "the active log grew past its cap"
+    assert (tmp_path / "daemon.log.1").is_file(), "nothing rotated"
+    assert (tmp_path / "daemon.log.2").is_file()
+    assert not (tmp_path / "daemon.log.3").exists(), "backupCount was not honoured"
+
+
+def test_make_logger_is_idempotent(tmp_path: Path) -> None:
+    """Re-creating the logger must not stack handlers (double-written lines)."""
+    log = tmp_path / "daemon.log"
+    first = session_server._make_logger(log)
+    second = session_server._make_logger(log)
+    try:
+        assert first is second
+        assert len(second.handlers) == 1
+        second.info("hello")
+    finally:
+        for handler in list(second.handlers):
+            second.removeHandler(handler)
+            handler.close()
+    assert log.read_text(encoding="utf-8").count("hello") == 1

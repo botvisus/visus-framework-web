@@ -327,6 +327,85 @@ def test_handle_target_without_target_errors() -> None:
     assert "provide one of" in resp["error"]
 
 
+def test_handle_mutating_op_carries_page_state() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    resp = h.handle("click", {"selector": "#go"})
+    assert resp["ok"] is True and resp["result"] == "clicked"
+    assert resp["page"] == {
+        "url": "about:blank",
+        "title": "FakeTitle",
+        "fields_stale": False,
+    }
+
+
+def test_handle_read_op_carries_no_page_state() -> None:
+    """Reads stay bare so `visus --raw get-text 3 | wc -c` is not polluted."""
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    resp = h.handle("get_text", {"selector": "#x"})
+    assert resp["ok"] is True
+    assert "page" not in resp
+
+
+def test_handle_failed_op_carries_no_page_state() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    resp = h.handle("click", {})  # no target at all
+    assert resp["ok"] is False
+    assert "page" not in resp
+
+
+def test_post_state_flags_a_stale_field_cache() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("list_fields", {})          # stamps _fields_url = "about:blank"
+    resp = h.handle("goto", {"url": "http://elsewhere"})
+    assert resp["ok"] is True
+    # PLAN 3's navigation ops clear the cache, so a fresh index is impossible to
+    # misuse; when JS moved the page instead, the URL stamp still catches it.
+    h._fields = list(page._fields)       # simulate a JS-driven navigation
+    h._fields_url = "about:blank"
+    state = h._post_state()
+    assert state["fields_stale"] is True
+
+
+def test_post_state_never_raises() -> None:
+    h = session_server.SessionHandler(engine="chrome", headless=True)  # no browser
+    h._browser = _FakeBrowser()
+    h._page = None  # type: ignore[assignment]
+    assert h._post_state() == {}
+
+
+def test_mutating_ops_cover_every_state_changing_op() -> None:
+    """Exact-equality inventory — a cross-plan tripwire.
+
+    A later plan that adds a new state-changing `_op_*` without adding its name
+    here fails LOUDLY, right here, rather than silently shipping a mutating op
+    with no `page` footer. The assert message names exactly which op(s) are
+    missing/extra so the fix is a one-line diff, not an investigation.
+    """
+    expected = frozenset(
+        {
+            "click", "dblclick", "fill", "check", "uncheck", "select", "press",
+            "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
+            "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
+            "add_cookies", "clear_cookies", "eval",
+        }
+    )
+    actual = session_server._MUTATING_OPS
+    missing = expected - actual
+    extra = actual - expected
+    assert actual == expected, (
+        f"_MUTATING_OPS drifted from the expected inventory — "
+        f"missing (add these to _MUTATING_OPS): {sorted(missing) or 'none'}; "
+        f"extra (remove or update this test): {sorted(extra) or 'none'}. "
+        f"A new state-changing op MUST be added to _MUTATING_OPS in the same "
+        f"commit that adds its _op_<name> method, or it silently ships with no "
+        f"`page` footer."
+    )
+
+
 # ---------------------------------------------------------------------------
 # New ops — parity with the MCP browser_* tools (fake page/locator/context)
 # ---------------------------------------------------------------------------

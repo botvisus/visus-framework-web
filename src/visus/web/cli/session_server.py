@@ -85,6 +85,24 @@ class StaleFieldIndexError(RuntimeError):
     """
 
 
+# Ops that change what the agent is looking at. Only these get a `page` footer;
+# reads stay bare so piping (`visus --raw get-text 3`) is never polluted.
+#
+# This set is a cross-plan tripwire: PLANS 5, 6 and 7 each add new mutating ops
+# and are REQUIRED to add their names here too. test_mutating_ops_cover_every_state_changing_op
+# in tests/test_cli_session.py asserts this set by exact equality, so forgetting
+# to update it turns that test red at the offending plan's own commit gate —
+# that failure is the whole point of the test, not a bug in it.
+_MUTATING_OPS: frozenset[str] = frozenset(
+    {
+        "click", "dblclick", "fill", "check", "uncheck", "select", "press",
+        "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
+        "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
+        "add_cookies", "clear_cookies", "eval",
+    }
+)
+
+
 class SessionHandler:
     """Holds a live browser/context/page and dispatches ops to page operations.
 
@@ -316,8 +334,31 @@ class SessionHandler:
         )
 
     # --- ops -------------------------------------------------------------
+    def _post_state(self) -> dict[str, Any]:
+        """Page state AFTER a mutating op: ``{url, title, fields_stale}``.
+
+        Best-effort telemetry — it must never turn a successful action into a
+        failed response, so every failure collapses to ``{}``.
+
+        Staleness is NOT re-derived here: ``fields_stale()`` (PLAN 3) is the single
+        definition, and it also treats an unreadable page as stale. It reports True
+        when there is no cache at all, so the guard is ``bool(self._fields) and …``
+        — an agent that never ran ``list-fields`` must not be warned that its
+        non-existent indexes went stale.
+        """
+        try:
+            page = self.page()
+            stale = bool(self._fields) and self.fields_stale()
+            return {"url": page.url, "title": page.title(), "fields_stale": stale}
+        except Exception:  # noqa: BLE001 — page state is telemetry, not the result
+            return {}
+
     def handle(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Dispatch one op. Returns ``{ok:True,result:...}`` or ``{ok:False,error:str}``.
+        """Dispatch one op.
+
+        Returns ``{ok:True, result:...}`` plus, for a mutating op, the ``page``
+        state the agent needs to choose its next command — the perception half of
+        the perception-action loop. Failures return ``{ok:False, error:str}``.
 
         The whole body runs under ``self._lock``: ``serve()`` runs one thread per
         connection over a SHARED handler, and a WebDriver plus the tab bookkeeping
@@ -330,9 +371,12 @@ class SessionHandler:
                 method = getattr(self, f"_op_{op}", None)
                 if method is None:
                     raise ValueError(f"unknown op {op!r}")
-                return {"ok": True, "result": method(args)}
+                resp: dict[str, Any] = {"ok": True, "result": method(args)}
             except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
                 return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            if op in _MUTATING_OPS:
+                resp["page"] = self._post_state()
+            return resp
 
     def _op_list_fields(self, args: dict[str, Any]) -> dict[str, Any]:
         kinds = args.get("kinds")

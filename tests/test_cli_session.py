@@ -1035,6 +1035,24 @@ def test_start_daemon_refuses_when_running(tmp_path: Path, monkeypatch: pytest.M
         session_client.start_daemon("chrome", True, None, cwd=tmp_path)
 
 
+def test_start_daemon_forwards_the_idle_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _FakePopen:
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            captured["env"] = kw["env"]
+
+    monkeypatch.setattr(session_client, "find_session", lambda d=None: None)
+    monkeypatch.setattr(session_client.subprocess, "Popen", _FakePopen)
+    with pytest.raises(session_client.SessionError):
+        session_client.start_daemon(
+            "chrome", True, None, cwd=tmp_path, timeout=0.3, idle_timeout=900.0
+        )
+    assert captured["env"]["VISUS_WEB_IDLE_TIMEOUT"] == "900.0"
+
+
 def test_start_daemon_timeout_reports_the_real_daemon_log(tmp_path: Path) -> None:
     """A wedged start must show WHY, not just "did not come up within Ns".
 
@@ -1324,6 +1342,70 @@ def test_serve_second_daemon_aborts_via_lock(tmp_path: Path) -> None:
         _shutdown_thread(t, port, token)
     # Lock is released on shutdown so a fresh daemon can claim it again.
     assert not (tmp_path / ".visus" / "session.json.lock").exists()
+
+
+def test_serve_reaps_itself_after_the_idle_timeout(tmp_path: Path) -> None:
+    import threading as _threading
+    import time as _time
+
+    handler = _handler_with_fake_page(_FakePage())
+    t = _threading.Thread(
+        target=session_server.serve,
+        kwargs={
+            "handler": handler,
+            "token": "tok",
+            "cwd": tmp_path,
+            "idle_timeout": 0.5,
+        },
+        daemon=True,
+    )
+    t.start()
+    sf = session_server.session_file(tmp_path)
+    for _ in range(200):
+        if sf.is_file():
+            break
+        _time.sleep(0.02)
+    assert sf.is_file()
+
+    t.join(timeout=20)
+    assert not t.is_alive(), "the idle daemon never reaped itself"
+    assert not sf.is_file()
+    assert not sf.with_name(sf.name + ".lock").exists()
+
+
+def test_activity_postpones_the_idle_timeout(tmp_path: Path) -> None:
+    import threading as _threading
+    import time as _time
+
+    handler = _handler_with_fake_page(_FakePage())
+    t = _threading.Thread(
+        target=session_server.serve,
+        kwargs={
+            "handler": handler,
+            "token": "tok",
+            "cwd": tmp_path,
+            "idle_timeout": 1.5,
+        },
+        daemon=True,
+    )
+    t.start()
+    sf = session_server.session_file(tmp_path)
+    for _ in range(200):
+        if sf.is_file():
+            break
+        _time.sleep(0.02)
+    port = int(json.loads(sf.read_text(encoding="utf-8"))["port"])
+
+    deadline = _time.monotonic() + 3.0
+    while _time.monotonic() < deadline:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            f = sock.makefile("rwb")
+            f.write((json.dumps({"token": "tok", "op": "status"}) + "\n").encode("utf-8"))
+            f.flush()
+            assert json.loads(f.readline().decode("utf-8"))["ok"] is True
+        _time.sleep(0.4)
+    assert t.is_alive(), "an actively-used daemon reaped itself"
+    _shutdown_thread(t, port, "tok")
 
 
 def test_prune_drops_finished_threads() -> None:
@@ -2099,6 +2181,23 @@ def test_cli_session_start(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     r = runner.invoke(app, ["session", "start", "http://x", "--engine", "chrome"])
     assert r.exit_code == 0 and "pid 42" in r.output and "port 5555" in r.output
+
+
+def test_cli_session_start_forwards_the_idle_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_start(engine: str, headless: bool, url: str | None, **kw: Any) -> Any:
+        captured.update(kw)
+        return {"pid": 1, "port": 2}
+
+    monkeypatch.setattr(session_client, "start_daemon", fake_start)
+    r = runner.invoke(app, ["session", "start", "--idle-timeout", "600"])
+    assert r.exit_code == 0
+    assert captured["idle_timeout"] == 600.0
+    r2 = runner.invoke(app, ["session", "start"])
+    assert r2.exit_code == 0 and captured["idle_timeout"] is None
 
 
 def test_cli_session_start_error(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -325,12 +325,17 @@ def session_start(
     url: str = typer.Argument(None, help="URL to open once the browser starts."),
     engine: str = typer.Option("chrome", "--engine", "-e"),
     headless: bool = typer.Option(False, "--headless", help="Run headless (default: headed)."),
+    idle_timeout: float = typer.Option(
+        None,
+        "--idle-timeout",
+        help="Stop the daemon after N seconds with no command (omit = never).",
+    ),
 ) -> None:
     """Start a persistent browser session (detached daemon)."""
     from visus.web.cli import session_client
 
     try:
-        info = session_client.start_daemon(engine, headless, url)
+        info = session_client.start_daemon(engine, headless, url, idle_timeout=idle_timeout)
     except session_client.SessionError as exc:
         typer.echo(f"error: {exc}")
         raise typer.Exit(1) from exc

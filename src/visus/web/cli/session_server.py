@@ -116,6 +116,7 @@ class SessionHandler:
         # One WebDriver, one thread per connection in serve(): every op body runs
         # under this mutex. RLock (not Lock) so an op may re-enter handle().
         self._lock = threading.RLock()
+        self._last_op_at = time.monotonic()
 
     def bind_stop(self, stop: threading.Event) -> None:
         """Give the handler the server's stop event so an op can end the daemon.
@@ -126,6 +127,15 @@ class SessionHandler:
         whatever session state (logins, cookies in memory) the user built up.
         """
         self._stop = stop
+
+    def last_op_at(self) -> float:
+        """``time.monotonic()`` of the most recently dispatched op (idle reaper).
+
+        Read WITHOUT taking ``self._lock``: the reaper runs on the accept thread
+        and must not queue behind an in-flight ``wait``. A float assignment is
+        atomic, and a one-tick-stale read only postpones reaping by 0.5 s.
+        """
+        return self._last_op_at
 
     # --- lifecycle -------------------------------------------------------
     def _ensure(self) -> None:
@@ -313,6 +323,7 @@ class SessionHandler:
         """
         args = args or {}
         with self._lock:
+            self._last_op_at = time.monotonic()
             try:
                 method = getattr(self, f"_op_{op}", None)
                 if method is None:
@@ -844,8 +855,13 @@ def serve(
     token: str,
     cwd: str | Path | None = None,
     host: str = "127.0.0.1",
+    idle_timeout: float | None = None,
 ) -> None:
-    """Bind a JSON-lines TCP server, write the session file, serve until shutdown."""
+    """Bind a JSON-lines TCP server, write the session file, serve until shutdown.
+
+    *idle_timeout* (seconds, ``None`` = never) reaps a session nobody is using:
+    an abandoned headed browser otherwise sits on the desktop forever.
+    """
     sf = session_file(cwd)
     sf.parent.mkdir(parents=True, exist_ok=True)
     # Claim ownership atomically BEFORE binding / writing session.json so a
@@ -885,6 +901,10 @@ def serve(
             try:
                 conn, _ = srv.accept()
             except TimeoutError:
+                if idle_timeout is not None and (
+                    time.monotonic() - handler.last_op_at() > idle_timeout
+                ):
+                    break
                 continue
             t = threading.Thread(
                 target=_handle_conn,
@@ -916,6 +936,15 @@ def serve(
             pass
 
 
+def _idle_timeout_from_env() -> float | None:
+    """``VISUS_WEB_IDLE_TIMEOUT`` in seconds; ``0``/unset/garbage means never."""
+    try:
+        seconds = float(os.environ.get("VISUS_WEB_IDLE_TIMEOUT", "") or 0)
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
 def main(argv: list[str] | None = None) -> None:
     """Daemon entrypoint: ``python -m visus.web.cli.session_server [engine] [headless] [url]``.
 
@@ -941,7 +970,7 @@ def main(argv: list[str] | None = None) -> None:
     _log(f"daemon starting engine={engine} headless={headless} url={url!r} pid={os.getpid()}")
     handler = SessionHandler(engine=engine, headless=headless, url=url)
     try:
-        serve(handler, token=token)
+        serve(handler, token=token, idle_timeout=_idle_timeout_from_env())
     except SessionLockedError as exc:
         # A duplicate daemon lost the ownership race: exit cleanly (no browser
         # was launched, the winner owns session.json) instead of crashing.

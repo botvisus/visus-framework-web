@@ -185,6 +185,7 @@ def start_daemon(
     *,
     cwd: str | Path | None = None,
     timeout: float = 20.0,
+    idle_timeout: float | None = None,
 ) -> dict[str, Any]:
     """Spawn a detached daemon and block until its socket accepts.
 
@@ -203,6 +204,8 @@ def start_daemon(
     env["VISUS_WEB_HEADLESS"] = "1" if headless else "0"
     if url:
         env["VISUS_WEB_URL"] = url
+    if idle_timeout is not None:
+        env["VISUS_WEB_IDLE_TIMEOUT"] = str(idle_timeout)
 
     creationflags = 0
     start_new_session = False

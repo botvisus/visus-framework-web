@@ -303,7 +303,7 @@ Targeting: most commands accept a positional **field index** (from the last `lis
 
 | Command | What it does |
 |---|---|
-| `visus session start [URL] --engine <e> --headless` | Start the persistent browser daemon (headed by default). |
+| `visus session start [URL] --engine <e> --headless --idle-timeout <seconds>` | Start the persistent browser daemon (headed by default). `--idle-timeout` (omit = never) stops the daemon after that many idle seconds; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |

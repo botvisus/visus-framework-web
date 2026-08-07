@@ -16,7 +16,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 
 | Command | What it does |
 |---|---|
-| `visus session start [URL] --engine <e> --headless` | Start the persistent browser daemon (headed by default). |
+| `visus session start [URL] --engine <e> --headless --idle-timeout <seconds>` | Start the persistent browser daemon (headed by default). `--idle-timeout` (omit = never) stops the daemon after that many seconds with no command — an opt-in reaper for an abandoned session; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |

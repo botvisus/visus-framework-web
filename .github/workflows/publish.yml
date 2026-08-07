@@ -1,17 +1,35 @@
 name: Publish to PyPI
 
 # Publishes to PyPI when you cut a GitHub Release (tag vX.Y.Z).
-# A plain `git push` does NOT publish — only a published Release does.
+#
+# A plain `git push` does NOT publish. Neither does `workflow_dispatch`: EVERY job
+# below is guarded by `if: github.event_name == 'release'`, so a manual run from
+# the Actions tab — on any branch — builds nothing and publishes nothing. The
+# dispatch trigger is kept only so the guard stays visible and testable.
+#
+# Nothing is built until the full CI matrix (lint, types, unit, packaging and the
+# real-browser suite with both coverage gates) is green on the released commit.
+#
 # Auth is via PyPI Trusted Publishing (OIDC): no tokens, no secrets.
 
 on:
   release:
     types: [published]
-  workflow_dispatch: # allow a manual run from the Actions tab
+  workflow_dispatch: # deliberately inert — see the guard on every job
+
+permissions:
+  contents: read
 
 jobs:
+  test:
+    name: CI gates
+    if: github.event_name == 'release'
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build distribution
+    if: github.event_name == 'release'
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +44,29 @@ jobs:
           python -m build
           twine check dist/*
 
+      # `twine check` validates metadata and never opens the wheel's payload.
+      # The agent skill and the Selenium JS bundle both live inside the package
+      # directory, so a packaging regression would silently ship a CLI that
+      # cannot install its own skill or drive a browser.
+      - name: Assert the wheel ships the agent skill and the runtime data files
+        run: |
+          python - "$(ls dist/*.whl)" <<'PY'
+          import sys, zipfile
+          wheel = sys.argv[1]
+          names = set(zipfile.ZipFile(wheel).namelist())
+          required = [
+              "visus/web/skills/visus-web/SKILL.md",
+              "visus/web/backends/selenium/js/bundle.js",
+              "visus/web/py.typed",
+          ]
+          print(f"{wheel}: {len(names)} entries")
+          for item in required:
+              print(("  OK   " if item in names else "  MISS ") + item)
+          missing = [item for item in required if item not in names]
+          if missing:
+              sys.exit(f"wheel is missing required files: {missing}")
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -33,7 +74,8 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: build
+    if: github.event_name == 'release'
+    needs: [build]
     runs-on: ubuntu-latest
     # The environment name MUST match what you set on PyPI's trusted publisher.
     environment:

@@ -101,3 +101,35 @@ def test_browser_lane_pins_xdist_parallelism_instead_of_auto() -> None:
 def test_workflow_files_are_well_formed_yaml() -> None:
     for path in (CI, REPO_ROOT / ".github" / "workflows" / "publish.yml"):
         assert _load(path)["jobs"], f"{path} has no jobs"
+
+
+PUBLISH = REPO_ROOT / ".github" / "workflows" / "publish.yml"
+
+
+def test_every_publish_job_is_guarded_to_a_real_release() -> None:
+    jobs = _load(PUBLISH)["jobs"]
+    assert jobs, "publish.yml declares no jobs"
+    for name, job in jobs.items():
+        assert job.get("if") == "github.event_name == 'release'", (
+            f"job {name!r} has no release guard — a workflow_dispatch from ANY "
+            f"branch would publish that branch to PyPI"
+        )
+
+
+def test_workflow_dispatch_is_still_declared_so_the_guard_is_observable() -> None:
+    triggers = _triggers(_load(PUBLISH))
+    assert "release" in triggers
+    assert "workflow_dispatch" in triggers
+
+
+def test_build_cannot_run_before_the_ci_gates() -> None:
+    jobs = _load(PUBLISH)["jobs"]
+    assert jobs["test"]["uses"] == "./.github/workflows/ci.yml"
+    assert jobs["build"]["needs"] == ["test"]
+    assert jobs["publish"]["needs"] == ["build"]
+
+
+def test_build_asserts_the_wheel_ships_the_agent_skill() -> None:
+    run = _run_text(_load(PUBLISH)["jobs"]["build"])
+    assert "visus/web/skills/visus-web/SKILL.md" in run
+    assert "visus/web/backends/selenium/js/bundle.js" in run

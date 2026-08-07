@@ -93,6 +93,21 @@ def format_fields(fields: list[dict[str, Any]], *, width: int | None = None) -> 
     return cap.get().rstrip("\n")
 
 
+def render_value(result: Any) -> str:
+    """Render a ``{value, present}`` daemon payload, keeping ``None`` distinct from ``""``.
+
+    An agent that reads a blank line cannot tell "this attribute does not exist"
+    from "this attribute is the empty string", and the two lead to opposite next
+    actions. Anything that is not such a payload passes straight through.
+    """
+    if not isinstance(result, dict) or "present" not in result:
+        return str(result)
+    if not result.get("present"):
+        return "(null)"
+    value = "" if result.get("value") is None else str(result["value"])
+    return value if value != "" else "(empty)"
+
+
 def dispatch(line: str, send: SendFn) -> str:
     """Parse one REPL line, run it via *send*, and return printable output.
 
@@ -156,9 +171,11 @@ def dispatch(line: str, send: SendFn) -> str:
                 f"{str(e.get('role', '')):16} {e.get('name', '')}" for e in elements
             )
         if cmd in ("text", "get-text"):
-            return str(send("get_text", _idx(rest[0])))
+            return render_value(send("get_text", _idx(rest[0])))
         if cmd in ("attr", "get-attribute"):
-            return str(send("get_attribute", {**_idx(rest[1]), "attr_name": rest[0]}))
+            return render_value(
+                send("get_attribute", {**_idx(rest[1]), "attr_name": rest[0]})
+            )
         if cmd == "count":
             return str(send("count", _idx(rest[0])))
         if cmd == "wait":

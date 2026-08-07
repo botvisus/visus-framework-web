@@ -298,6 +298,12 @@ def _format_fields(fields: list[dict[str, Any]]) -> str:
     return format_fields(fields)
 
 
+def _render_value(result: Any) -> str:
+    from visus.web.cli.console import render_value
+
+    return render_value(result)
+
+
 def _target_args(
     index: int | None,
     selector: str | None,
@@ -508,7 +514,7 @@ def get_text(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Print a field's text content."""
-    typer.echo(_send("get_text", _target_args(index, selector, role, name, text)))
+    typer.echo(_render_value(_send("get_text", _target_args(index, selector, role, name, text))))
 
 
 @app.command("session-screenshot")
@@ -647,7 +653,7 @@ def get_attribute(
     """Print an element's attribute value."""
     args = _target_args(index, selector, role, name, text)
     args["attr_name"] = attr_name
-    typer.echo(_send("get_attribute", args))
+    typer.echo(_render_value(_send("get_attribute", args)))
 
 
 @app.command()

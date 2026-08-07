@@ -67,9 +67,12 @@ def test_cross_process_daemon_full_cycle(tmp_path: Path) -> None:
         r = session_client.send("fill", {"index": name_idx, "text": "Ada"}, start_dir=tmp_path)
         transcript.append(f"fill[{name_idx}]='Ada' -> {r}")
         assert r == "filled with 'Ada'"
-        assert session_client.send(
+        text_payload = session_client.send(
             "get_text", {"selector": "#name"}, start_dir=tmp_path
-        ) is not None  # input has no text content but call succeeds
+        )
+        transcript.append(f"get_text[#name] -> {text_payload}")
+        # An <input> has no text node: the value is the empty string, not absent.
+        assert text_payload["present"] is True
 
         # 4) click the button by index → its onclick sets #name to 'clicked'.
         r = session_client.send("click", {"index": go_idx}, start_dir=tmp_path)

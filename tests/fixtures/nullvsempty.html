@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head><title>null vs empty</title></head>
+  <body>
+    <h1>Null vs empty</h1>
+
+    <!-- Text content is genuinely the empty string: present, but empty. -->
+    <span id="emptytext" style="display:inline-block;width:40px;height:12px;"></span>
+
+    <!-- Text content is a real value. -->
+    <span id="sometext">hello</span>
+
+    <!-- `data-flag` is PRESENT with an empty value; `data-missing` is ABSENT.
+         Both used to print an identical blank line on the client. -->
+    <button id="btn" data-flag="" style="width:120px;height:32px;">Press</button>
+  </body>
+</html>

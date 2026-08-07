@@ -361,8 +361,14 @@ class SessionHandler:
         self._target(args).press(key)
         return f"pressed {key!r}"
 
-    def _op_get_text(self, args: dict[str, Any]) -> str | None:
-        return self._target(args).first().text_content()
+    def _op_get_text(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Text content of the target, keeping "absent" distinct from "empty".
+
+        ``typer.echo(None)`` and ``typer.echo("")`` print an identical blank line,
+        so the two cases have to be separated here, in the payload.
+        """
+        value = self._target(args).first().text_content()
+        return {"value": value, "present": value is not None}
 
     def _op_goto(self, args: dict[str, Any]) -> str:
         url = args["url"]
@@ -419,9 +425,11 @@ class SessionHandler:
     def _op_snapshot(self, args: dict[str, Any]) -> dict[str, Any]:
         return {"elements": self.page().snapshot()}
 
-    def _op_get_attribute(self, args: dict[str, Any]) -> str | None:
+    def _op_get_attribute(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Attribute value of the target, keeping "absent" distinct from ``""``."""
         name = args.get("attr_name", "")
-        return self._target(args).first().get_attribute(name)
+        value = self._target(args).first().get_attribute(name)
+        return {"value": value, "present": value is not None}
 
     def _op_count(self, args: dict[str, Any]) -> int:
         return self._target(args).count()

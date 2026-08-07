@@ -296,7 +296,7 @@ def test_handle_get_text_by_role() -> None:
     h = _handler_with_fake_page(page)
     resp = h.handle("get_text", {"role": "button", "name": "OK"})
     assert resp["ok"] is True
-    assert resp["result"] == "text-of:role(button,OK)"
+    assert resp["result"] == {"value": "text-of:role(button,OK)", "present": True}
 
 
 def test_handle_get_text_by_index_reresolves_via_frame_and_deep() -> None:
@@ -306,7 +306,7 @@ def test_handle_get_text_by_index_reresolves_via_frame_and_deep() -> None:
     h.handle("list_fields", {})
     resp = h.handle("get_text", {"index": 1})  # field 1: frame=['#f1'], deep=True
     assert resp["ok"] is True
-    assert resp["result"] == "text-of:frame(#f1)>loc(#b,deep=True)"
+    assert resp["result"] == {"value": "text-of:frame(#f1)>loc(#b,deep=True)", "present": True}
 
 
 def test_handle_target_text_resolves_via_get_by_text_not_fill_value() -> None:
@@ -354,7 +354,7 @@ def test_handle_get_attribute_and_count() -> None:
     page = _FakePage()
     h = _handler_with_fake_page(page)
     resp = h.handle("get_attribute", {"selector": "#a", "attr_name": "href"})
-    assert resp["result"] == "attr:loc(#a,deep=False):href"
+    assert resp["result"] == {"value": "attr:loc(#a,deep=False):href", "present": True}
     assert h.handle("count", {"selector": "#a"})["result"] == 3
 
 
@@ -633,6 +633,23 @@ def test_dispatch_goto_text_screenshot() -> None:
     assert "navigated to http://dest" in console.dispatch("goto http://dest", send)
     assert console.dispatch("text 0", send) == "hello"
     assert "saved /tmp/shot.png" in console.dispatch("screenshot", send)
+
+
+def test_render_value_keeps_null_and_empty_apart() -> None:
+    assert console.render_value({"value": "hi", "present": True}) == "hi"
+    assert console.render_value({"value": "", "present": True}) == "(empty)"
+    assert console.render_value({"value": None, "present": False}) == "(null)"
+    # Anything that is not a {value, present} payload passes straight through.
+    assert console.render_value("plain") == "plain"
+    assert console.render_value(7) == "7"
+
+
+def test_dispatch_text_and_attr_render_the_distinction() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        return {"value": None, "present": False}
+
+    assert console.dispatch("text 0", send) == "(null)"
+    assert console.dispatch("attr href 0", send) == "(null)"
 
 
 def test_dispatch_unknown_and_missing_arg() -> None:
@@ -1856,6 +1873,20 @@ def test_cli_get_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls[-1][1]["selector"] == "#a" and calls[-1][1]["attr_name"] == "href"
 
 
+def test_cli_get_text_and_get_attribute_render_the_distinction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payloads = iter(
+        [
+            {"value": "", "present": True},
+            {"value": None, "present": False},
+        ]
+    )
+    monkeypatch.setattr(session_client, "send", lambda op, args=None: next(payloads))
+    assert "(empty)" in runner.invoke(app, ["get-text", "0"]).output
+    assert "(null)" in runner.invoke(app, ["get-attribute", "href", "0"]).output
+
+
 def test_cli_count(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _record(monkeypatch)
     r = runner.invoke(app, ["count", "--selector", ".item"])
@@ -2281,9 +2312,36 @@ def test_handle_real_get_attribute_and_count(base_url: str) -> None:
     h = session_server.SessionHandler(engine="chrome", headless=True, url=f"{base_url}/fields.html")
     try:
         href = h.handle("get_attribute", {"selector": "#lnk", "attr_name": "href"})
-        assert href["ok"] is True and href["result"] == "https://example.com/"
+        assert href["ok"] is True and href["result"] == {
+            "value": "https://example.com/",
+            "present": True,
+        }
         cnt = h.handle("count", {"selector": "input"})
         assert cnt["ok"] is True and cnt["result"] >= 5
+    finally:
+        h.close()
+
+
+@pytest.mark.browser
+def test_get_text_and_get_attribute_distinguish_null_from_empty(base_url: str) -> None:
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/nullvsempty.html"
+    )
+    try:
+        assert h.handle("get_text", {"selector": "#sometext"})["result"] == {
+            "value": "hello",
+            "present": True,
+        }
+        assert h.handle("get_text", {"selector": "#emptytext"})["result"] == {
+            "value": "",
+            "present": True,
+        }
+        flag = h.handle("get_attribute", {"selector": "#btn", "attr_name": "data-flag"})
+        assert flag["result"] == {"value": "", "present": True}
+        missing = h.handle(
+            "get_attribute", {"selector": "#btn", "attr_name": "data-missing"}
+        )
+        assert missing["result"] == {"value": None, "present": False}
     finally:
         h.close()
 

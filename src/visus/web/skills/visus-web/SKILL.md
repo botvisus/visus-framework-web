@@ -1,161 +1,159 @@
 ---
-name: using-visus-web
-description: Use when writing web automation or RPA with the visus.web library — a modern, Playwright-style API (Browser/Context/Page/Locator/expect with auto-wait and web-first assertions) running on a pure Selenium engine. Covers semantic locators, auto-waited actions, web-first expect() assertions, RPA (frames/popups/dialogs/cookies/screenshots/upload/evaluate), OCR + image vision (captcha), the `visus` CLI, and the `visus-web-mcp` MCP server for AI agents.
+name: visus-web
+description: Drive a real browser from the shell with the `visus` CLI — session daemon, list-fields/act-by-index, role/name targeting, expect-text, codegen, vision. Use when automating or testing a web page.
+allowed-tools: Bash(visus:*) Bash(visus-web-mcp:*) Bash(pip:*) Bash(uvx:*)
+version: "0.2.0"
 ---
 
-# Using visus.web
+# visus-web
 
-`visus.web` gives you Playwright's modern ergonomics — semantic locators, **auto-waiting** actions (no `sleep`), and **auto-retrying** `expect()` assertions — on a **pure Selenium engine** (broad browser/Grid/IE-mode compatibility), plus BotCity-style RPA reach (frames, popups, dialogs, cookies, screenshots, file upload) and an **OCR + image-matching** vision plugin for captchas.
+Drive a **real browser** from the shell. `visus` keeps a browser alive in a
+background daemon, so every command lands on the same live page — no re-launch,
+no lost login.
 
 ## Install
 
 ```bash
-pip install visus-web                 # core (Selenium engine)
-pip install "visus-web[vision]"       # + OCR (RapidOCR) and image matching (OpenCV)
-pip install "visus-web[mcp]"          # + MCP server for AI agents
-pip install "visus-web[cli]"          # + the `visus` CLI
+pip install "visus-web[cli]"   # the `visus` CLI
+visus install --skills         # (re)install this skill into ./.claude/skills/
+visus doctor                   # prove a browser + driver really launch
 ```
 
-## Quickstart
+No install rights? `uvx --from "visus-web[cli]" visus doctor`.
+Console script not on PATH? `python -m visus.web.cli doctor`.
 
-```python
-from visus.web import launch, expect
+Extras: `[cli]` the CLI · `[mcp]` the MCP server · `[vision]` OCR + image matching.
 
-with launch(headless=True) as browser:      # engine defaults to chrome
-    page = browser.new_page()
-    page.goto("https://example.com")
-    page.get_by_role("button", name="Sign in").click()   # auto-waits until actionable
-    page.get_by_label("Email").fill("ada@example.com")
-    expect(page.get_by_text("Welcome")).to_be_visible()  # auto-retries until true
-```
-
-## Core principles (why it's reliable)
-
-- **Auto-wait:** every action (`click`, `fill`, …) waits for the element to be visible / stable / enabled / editable / receiving events before acting. **Never add `sleep`.**
-- **Web-first assertions:** `expect(locator).to_*()` re-checks until it passes or the timeout elapses (default 5s).
-- **Lazy locators:** a `Locator` is a recipe, re-resolved on each use — no stale-element errors.
-- **Strict mode:** single-element ops raise `StrictModeViolation` if the locator matches >1 element. Disambiguate with `.first()` / `.last()` / `.nth(i)`.
-- **Timeouts** are in **milliseconds**; most methods accept `timeout=...` (default action 30000, assertion 5000, navigation 30000).
-
-## Locators (prefer semantic ones)
-
-```python
-page.get_by_role("button", name="Save")        # ARIA role + accessible name (best)
-page.get_by_text("Welcome back")                # visible text (substring, case-insensitive)
-page.get_by_label("Email")                      # form control by its <label>
-page.get_by_placeholder("Search")
-page.get_by_test_id("submit")                   # [data-testid="submit"]
-page.get_by_alt_text("Logo")
-page.get_by_title("Close")
-page.locator("css=.item")                       # css
-page.locator("//button[@id='x']")               # xpath
-page.get_by_role("listitem").filter(has_text="Logout").first()
-menu.get_by_text("Logout")                      # chaining scopes to descendants
-```
-Add `exact=True` to text/role-name matchers for exact (whitespace-normalized) matching.
-
-## Actions (all auto-waited)
-
-```python
-loc.click(); loc.dblclick()
-loc.fill("text"); loc.clear()
-loc.press("Enter"); loc.press("Control+a")
-loc.hover()
-loc.check(); loc.uncheck(); loc.set_checked(True)
-loc.select_option(value="y")        # also label=... or index=...
-loc.focus(); loc.blur()
-loc.drag_to(page.locator("#dropzone"))
-loc.set_input_files("/path/file.pdf")
-loc.click(force=True)               # skip actionability checks
-```
-
-## Reads
-
-```python
-loc.count(); loc.text_content(); loc.input_value(); loc.get_attribute("href")
-loc.is_visible(); loc.is_enabled(); loc.is_checked(); loc.is_editable(); loc.is_hidden()
-loc.all(); loc.all_text_contents()
-```
-
-## Web-first assertions
-
-```python
-from visus.web import expect
-
-expect(loc).to_be_visible(); expect(loc).to_be_hidden()
-expect(loc).to_be_enabled(); expect(loc).to_be_disabled(); expect(loc).to_be_editable()
-expect(loc).to_be_checked()
-expect(loc).to_have_text("Done"); expect(loc).to_contain_text("Do")
-expect(loc).to_have_value("ada"); expect(loc).to_have_attribute("type", "text")
-expect(loc).to_have_class("active"); expect(loc).to_contain_class("active")
-expect(loc).to_have_role("button"); expect(loc).to_have_count(3)
-expect(loc).not_.to_be_visible()    # negation (also auto-retries)
-```
-
-## RPA
-
-```python
-# frames / iframes (cross-origin OK; nesting OK)
-page.frame_locator("#checkout").get_by_role("button", name="Pay").click()
-page.frame_locator("#a").frame_locator("#b").locator("#deep").text_content()
-
-# popups / new tabs
-with page.expect_popup() as info:
-    page.get_by_role("link", name="Open").click()
-popup = info.value; popup.title(); popup.close()
-
-# dialogs (alert/confirm/prompt) — wrap the triggering action
-with page.expect_dialog(accept=True, prompt_text="Ada"):
-    page.get_by_role("button", name="Prompt").click()
-
-# evaluate / screenshots / pdf
-page.evaluate("() => document.title")
-page.evaluate("a => a + 1", 41)                 # -> 42
-png = page.screenshot(full_page=True); page.screenshot(path="shot.png")
-loc.screenshot(path="el.png")
-page.pdf(path="page.pdf")                        # Chromium
-
-# cookies (on the Context)
-ctx = browser.new_context(); p = ctx.new_page()
-ctx.add_cookies([{"name": "k", "value": "v", "url": "https://example.com"}])
-ctx.cookies(); ctx.clear_cookies()
-```
-
-## Vision (OCR text + image matching) — `[vision]` extra
-
-```python
-from visus.web.vision import read_text, solve_captcha, find_image, find_all_images
-
-read_text(image)                 # image: path | bytes | base64 str | PIL.Image | numpy array
-solve_captcha(image)             # OCR a (distorted) text captcha; collapses whitespace
-find_image(haystack, needle)     # -> Match(x, y, width, height, confidence) | None
-find_all_images(haystack, needle)
-
-# integrated with the page:
-page.get_by_role("img", name="captcha").ocr_text()       # OCR an element
-page.solve_captcha(page.locator("#captcha"))             # solve element's text captcha
-page.locator("#area").find_image("icon.png")            # locate a template inside the element
-```
-
-## CLI — `[cli]` extra
+## The session loop — start here
 
 ```bash
-visus doctor                       # verify browser + driver
-visus install                      # resolve the driver (Selenium Manager)
-visus screenshot https://x.com -o shot.png [--full-page]
-visus pdf https://x.com -o page.pdf
-visus open https://x.com           # headed, waits for Enter
-visus codegen https://x.com -o flow.py   # RECORD interactions -> generated visus.web code
-visus run flow.py
-visus mcp                          # start the MCP server
+visus session start https://practicetestautomation.com/practice-test-login/
+visus list-fields                        # numbered table + numbered overlay on the page
+visus fill 1 student                     # act by index
+visus fill 2 Password123
+visus click --role button --name Submit  # or target by role/name/selector/text
+visus expect-text --role heading "Logged In Successfully"   # PASSED / FAILED
+visus session stop                       # closes the browser
 ```
 
-## MCP server (for AI agents) — `[mcp]` extra
+`visus session status` shows pid, port, engine, url, title and `fields_cached`.
+Full reference: **[references/cli-session.md](references/cli-session.md)**.
 
-Run `visus-web-mcp` (or `visus mcp`). It exposes ~38 tools: `browser_navigate`, `browser_snapshot` (accessibility role+name list — use it to choose targets), `browser_click` / `browser_fill` / `browser_press` / `browser_check` / `browser_select_option` / `browser_hover` / `browser_drag` (target by `role`+`name`, `text`, or `selector`, optionally inside a `frame`), `browser_screenshot`, `browser_evaluate`, `browser_tab_*`, `browser_handle_dialog`, `browser_*_cookies`, and the vision tools `browser_read_text` / `browser_solve_captcha` / `browser_find_image`.
+## Rules that will bite you
 
-Configure browser via env: `VISUS_WEB_ENGINE` (chrome/edge/firefox), `VISUS_WEB_HEADLESS` (0/1).
+- **Field indexes belong to the page you listed.** After `goto` / `back` /
+  `forward` / `reload` / a form submit, run `list-fields` again before acting by
+  index.
+- **`--name` alone is not a target.** It only qualifies `--role`. A command with
+  no index and no `--selector` / `--role` / `--text` exits 1 with
+  `error: provide an index, or --selector / --role / --text`.
+- **Timeouts are milliseconds.** `--timeout 5000`, not `5`.
+- **Never sleep.** Every action auto-waits; `visus wait --state visible` and
+  `visus expect-text` are the synchronisation primitives.
+- **`visus clear` removes the highlight overlay. `visus clear-input` clears an
+  input's value.** They are different commands.
+- **`visus screenshot <URL>` launches a throwaway browser.** The session's
+  screenshot command is `visus session-screenshot`.
+
+Targeting in depth: **[references/cli-targeting.md](references/cli-targeting.md)**.
+When something goes wrong: **[references/troubleshooting.md](references/troubleshooting.md)**.
+
+## Which interface
+
+| You are | Use | Why |
+|---|---|---|
+| A coding agent with shell access | **the `visus` CLI** | Cheapest tokens: no tool schemas, one line per action, numbered indexes instead of an accessibility dump. This is the default. |
+| An MCP client without shell access | **`visus-web-mcp`** | **45 tools** over the same browser surface. Its browser is a *separate* process from the CLI daemon — the two never share a session. |
+| Writing a durable script or a test | **the Python library** | `from visus.web import launch, rpa, expect`. Auto-waiting actions, auto-retrying assertions, HTML run reports. |
+
+The CLI daemon and the MCP server hold **independent** browsers with opposite
+defaults (CLI: headed, auto-follows new tabs; MCP: headless, manual tab
+follow). Pick one per task.
+
+## Commands
+
+**54 commands** total (51 top-level + 3 under `visus session`), covering the
+persistent-session daemon, one-off screenshot/pdf/codegen helpers, and
+`install-skills`. The complete reference — targeting rules, every flag,
+grouped by task — is **[references/cli-commands.md](references/cli-commands.md)**.
+
+The ones you will use most:
+
+```bash
+visus goto <URL> | back | forward | reload
+visus list-fields [--kind input,button] [--all] [--no-highlight] [--json]
+visus snapshot [--json]                  # role/name table of interactive elements
+visus click|dblclick|hover|focus|check|uncheck [idx] [target]
+visus fill <idx> <text>                  # or: -s "#user" --value text
+visus select <idx> <value> | visus press <idx> Enter | visus clear-input <idx>
+visus get-text|get-attribute <attr>|count [idx] [target]
+visus title | visus url | visus tabs | visus tab <idx>
+visus wait [idx] --state visible|hidden|attached|detached --timeout <ms>
+visus expect-text [idx] <text> --timeout <ms>
+visus session-screenshot -o shot.png [--full-page] [idx]
+visus eval "() => document.title" [--json]
+visus cookies [--json] | visus add-cookies '<json>' | visus clear-cookies
+```
+
+`--json` is available on `translate`, `session status`, `list-fields`, `tabs`,
+`snapshot`, `cookies`, `eval` and `find-image`. Piping, exit codes and shell
+capture: **[references/cli-json-and-piping.md](references/cli-json-and-piping.md)**.
+
+On Windows, the shell mangles `<`, `>` and `"` — `visus translate` exists
+precisely for that. Read **[references/windows-shell.md](references/windows-shell.md)**
+before quoting a selector in PowerShell.
+
+`visus console` opens a REPL attached to the live session with a shorter
+vocabulary: **[references/cli-repl.md](references/cli-repl.md)**.
+
+## MCP server
+
+`visus-web-mcp` (or `visus mcp`) exposes **45 tools** — navigation, ARIA
+snapshot, `browser_list_fields`, every action, tabs, dialogs, cookies,
+network/console capture, screenshot, evaluate, and the vision tools. Configure
+with `VISUS_WEB_ENGINE` (chrome | edge | firefox | edge_ie) and
+`VISUS_WEB_HEADLESS` (0/1). Tool list and target parameters:
+**[references/mcp-tools.md](references/mcp-tools.md)**.
+
+The server also serves this skill: read the resource `visus://skill/SKILL.md`
+and `visus://skill/references/<file>.md`, or call the `visus_web_quickstart`
+prompt.
+
+## Beyond the CLI
+
+- **Vision** (`[vision]`): `visus read-text`, `visus solve-captcha`,
+  `visus find-image tmpl.png -c 0.8 --json` — OCR and OpenCV template matching.
+  **[references/vision.md](references/vision.md)**
+- **Tracing & HTML reports**: `rpa("login")` records the run and writes a
+  single-file `report.html` **even when a step raises**;
+  `tracing.record()` does the same around any block.
+  **[references/tracing-reports.md](references/tracing-reports.md)**
+- **pytest plugin**: loads automatically via the `pytest11` entry point, gives
+  you `visus_page` / `visus_context` / `visus_browser` with screenshot-on-failure
+  and automatic `expect.soft()` verification.
+  **[references/pytest-plugin.md](references/pytest-plugin.md)**
+- **Python API**: `launch()` / `rpa()` / `expect()`, `Field`, `is_active`,
+  `save_screenshot`, the 100 %-mirror `visus.web.async_api`, `NetworkCapture`
+  for reverse-engineering an API (`page.network_requests()` /
+  `page.expect_response()`), `launch(remote_url=...)` for Selenium Grid,
+  and the `edge_ie` engine for IE-mode legacy apps (Windows-only).
+  **[references/library-api.md](references/library-api.md)**
 
 ## Errors
 
-`visus.web.errors`: `VisusWebError` (base), `VisusTimeoutError`, `NavigationError`, `TargetClosedError`, `StrictModeViolation`, `ElementNotFoundError`, `UnsupportedEngineError`. Failed `expect()` raises `AssertionError`.
+`visus.web.errors`: `VisusWebError` (base), `VisusTimeoutError`,
+`NavigationError`, `TargetClosedError`, `StrictModeViolation`,
+`ElementNotFoundError`, `UnsupportedEngineError`. A failed `expect()` raises
+`AssertionError`. From the shell, a failed command exits **1** and prints
+`error: <type>: <message>`; a usage error exits **2**.
+
+## Skills-less operation
+
+If this skill is not installed, point the agent at the CLI and let it read its
+own help:
+
+```
+Automate <task> on <url> using the `visus` CLI.
+Run `visus --help` and `visus <command> --help` for the available commands.
+Start with `visus session start <url>`, then `visus list-fields`.
+```

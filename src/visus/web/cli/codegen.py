@@ -53,23 +53,49 @@ def drain(page: Page) -> list[dict]:  # type: ignore[type-arg]
 
 
 def _target_expr(t: dict) -> str:  # type: ignore[type-arg]
+    """The locator expression (without the leading ``page.``) for one target."""
     if t["kind"] == "role":
         return f"get_by_role({t['role']!r}, name={t['name']!r})"
+    if t["kind"] == "text":
+        return f"get_by_text({t['value']!r})"
     if t["kind"] == "testid":
         return f"get_by_test_id({t['value']!r})"
     return f"locator({t['value']!r})"
 
 
+# Actions whose generated call takes no argument.
+_NO_ARG_ACTIONS: dict[str, str] = {
+    "click": "click",
+    "dblclick": "dblclick",
+    "check": "check",
+    "uncheck": "uncheck",
+    "hover": "hover",
+    "focus": "focus",
+    "clear": "clear",
+}
+
+
 def generate_line(event: dict) -> str:  # type: ignore[type-arg]
-    """Generate a single visus.web Python statement for one recorded event."""
-    expr = "page." + _target_expr(event["target"])
-    if event["action"] == "click":
-        return f"{expr}.click()"
-    if event["action"] == "fill":
+    """Generate a single visus.web Python statement for one recorded event.
+
+    ``event["target"]["expr"]`` short-circuits selector synthesis: the daemon's
+    cached ``Field.code`` is already a complete, frame-aware expression and is
+    strictly better than anything reconstructible from a bare selector.
+    """
+    target = event["target"]
+    expr = target.get("expr") or ("page." + _target_expr(target))
+    action = event["action"]
+    if action in _NO_ARG_ACTIONS:
+        return f"{expr}.{_NO_ARG_ACTIONS[action]}()"
+    if action == "fill":
         return f"{expr}.fill({event.get('value', '')!r})"
-    if event["action"] == "select_option":
+    if action == "press":
+        return f"{expr}.press({event.get('value', '')!r})"
+    if action == "select_option":
         return f"{expr}.select_option(value={event.get('value', '')!r})"
-    return f"# unsupported: {event['action']}"
+    if action == "set_input_files":
+        return f"{expr}.set_input_files({event.get('value', [])!r})"
+    return f"# unsupported: {action}"
 
 
 def generate_script(url: str, events: list[dict]) -> str:  # type: ignore[type-arg]

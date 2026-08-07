@@ -49,7 +49,9 @@ def test_generate_line_select_option() -> None:
 
 
 def test_generate_line_unsupported() -> None:
-    ev = {"action": "hover", "target": {"kind": "css", "value": "div"}}
+    # "hover" became a supported no-arg action in Task 6 (test_generate_line_covers_
+    # every_daemon_action pins that); use a genuinely unrecognized action here instead.
+    ev = {"action": "scroll_into_view", "target": {"kind": "css", "value": "div"}}
     assert generate_line(ev).startswith("# unsupported:")
 
 
@@ -91,3 +93,44 @@ def test_generate_script_shape(browser, base_url: str) -> None:  # type: ignore[
     assert "from visus.web import launch" in code
     assert "page.goto(" in code
     assert ".click()" in code
+
+
+def test_generate_line_prefers_an_explicit_expression() -> None:
+    """A cached Field carries a full frame-aware expression; use it verbatim."""
+    from visus.web.cli.codegen import generate_line
+
+    event = {
+        "action": "fill",
+        "target": {"kind": "code", "expr": 'page.frame_locator("#f1").locator("#u")'},
+        "value": "ada",
+    }
+    assert generate_line(event) == "page.frame_locator(\"#f1\").locator(\"#u\").fill('ada')"
+
+
+def test_generate_line_covers_every_daemon_action() -> None:
+    from visus.web.cli.codegen import generate_line
+
+    target = {"kind": "css", "value": "#x"}
+    assert generate_line({"action": "click", "target": target}) == "page.locator('#x').click()"
+    assert (
+        generate_line({"action": "dblclick", "target": target}) == "page.locator('#x').dblclick()"
+    )
+    assert generate_line({"action": "check", "target": target}) == "page.locator('#x').check()"
+    assert generate_line({"action": "uncheck", "target": target}) == "page.locator('#x').uncheck()"
+    assert generate_line({"action": "hover", "target": target}) == "page.locator('#x').hover()"
+    assert generate_line({"action": "focus", "target": target}) == "page.locator('#x').focus()"
+    assert generate_line({"action": "clear", "target": target}) == "page.locator('#x').clear()"
+    assert (
+        generate_line({"action": "press", "target": target, "value": "Enter"})
+        == "page.locator('#x').press('Enter')"
+    )
+    assert (
+        generate_line({"action": "set_input_files", "target": target, "value": ["/a.png"]})
+        == "page.locator('#x').set_input_files(['/a.png'])"
+    )
+
+
+def test_target_expr_supports_a_text_target() -> None:
+    from visus.web.cli.codegen import _target_expr
+
+    assert _target_expr({"kind": "text", "value": "Save"}) == "get_by_text('Save')"

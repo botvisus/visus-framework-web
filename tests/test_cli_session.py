@@ -138,15 +138,20 @@ class _FakeField:
         self.deep = deep
         self.kind = "input"
         self.name = f"f{index}"
+        self.role = None
+        chain = "".join(f'.frame_locator("{sel}")' for sel in frame)
+        self.code = f'page{chain}.locator("{locator}")'
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
             "kind": self.kind,
             "name": self.name,
+            "role": self.role,
             "locator": self.locator,
             "frame": self.frame,
             "deep": self.deep,
+            "code": self.code,
         }
 
 
@@ -578,6 +583,48 @@ def test_handle_goto_screenshot_clear_status(tmp_path: Path) -> None:
     assert h.handle("clear_highlights", {})["result"] == "cleared"
     status = h.handle("status", {})["result"]
     assert status["running"] is True and status["url"] == "http://x"
+
+
+def test_handle_click_by_index_echoes_the_field_code() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("list_fields", {})
+    resp = h.handle("click", {"index": 1})
+    assert resp["ok"] is True
+    assert resp["code"] == 'page.frame_locator("#f1").locator("#b").click()'
+
+
+def test_handle_fill_by_role_echoes_a_role_call() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    resp = h.handle("fill", {"role": "textbox", "name": "Email", "text": "a@b.c"})
+    assert resp["code"] == "page.get_by_role('textbox', name='Email').fill('a@b.c')"
+
+
+def test_handle_goto_echoes_a_goto_call() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    resp = h.handle("goto", {"url": "http://x"})
+    assert resp["code"] == "page.goto('http://x')"
+
+
+def test_handle_read_op_has_no_code() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    assert "code" not in h.handle("get_text", {"selector": "#x"})
+
+
+def test_handle_records_a_replayable_script() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("goto", {"url": "http://x"})
+    h.handle("fill", {"selector": "#u", "text": "ada"})
+    h.handle("click", {"role": "button", "name": "Sign in"})
+    assert h._script == [
+        "page.goto('http://x')",
+        "page.locator('#u').fill('ada')",
+        "page.get_by_role('button', name='Sign in').click()",
+    ]
 
 
 def test_handle_status_not_running() -> None:

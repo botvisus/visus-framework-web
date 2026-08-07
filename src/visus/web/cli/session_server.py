@@ -35,6 +35,7 @@ from visus.web.api.locator import Locator
 from visus.web.api.page import Page
 from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
 from visus.web.cli import session_client
+from visus.web.cli.codegen import generate_line
 
 
 def _any_match_visible(loc: Locator) -> bool:
@@ -102,6 +103,26 @@ _MUTATING_OPS: frozenset[str] = frozenset(
     }
 )
 
+# op -> (codegen action, the args key holding its value)
+_CODE_ACTIONS: dict[str, tuple[str, str | None]] = {
+    "click": ("click", None),
+    "dblclick": ("dblclick", None),
+    "check": ("check", None),
+    "uncheck": ("uncheck", None),
+    "hover": ("hover", None),
+    "focus": ("focus", None),
+    "clear_input": ("clear", None),
+    "fill": ("fill", "text"),
+    "press": ("press", "key"),
+    "select": ("select_option", "value"),
+    "upload": ("set_input_files", "paths"),
+}
+
+
+def generate_script_goto(url: str) -> str:
+    """The generated line for a navigation."""
+    return f"page.goto({url!r})"
+
 
 class SessionHandler:
     """Holds a live browser/context/page and dispatches ops to page operations.
@@ -130,6 +151,7 @@ class SessionHandler:
         self._page: Page | None = None
         self._fields: list[Field] = []
         self._fields_url: str | None = None
+        self._script: list[str] = []
         self._known_handles: list[str] = []
         self._active_handle: str | None = None
         self._stop: threading.Event | None = None
@@ -333,6 +355,53 @@ class SessionHandler:
             frame=args.get("frame"),
         )
 
+    def _field_code(self, index: int) -> str | None:
+        """The cached field's ready-to-paste, frame-aware visus.web expression.
+
+        ``_resolve_field`` returns a Locator (its signature is fixed); this is the
+        sibling accessor for the same field's ``code``.
+        """
+        if index < 0 or index >= len(self._fields):
+            return None
+        return self._fields[index].code or None
+
+    def _target_event(self, args: dict[str, Any]) -> dict[str, Any] | None:
+        """The codegen ``target`` for an action's args, or None when unknowable."""
+        if args.get("index") is not None:
+            code = self._field_code(int(args["index"]))
+            return None if code is None else {"kind": "code", "expr": code}
+        if args.get("role"):
+            return {"kind": "role", "role": args["role"], "name": args.get("name") or ""}
+        if args.get("target_text"):
+            return {"kind": "text", "value": args["target_text"]}
+        if args.get("selector"):
+            return {"kind": "css", "value": args["selector"]}
+        return None
+
+    def _generated_code(self, op: str, args: dict[str, Any]) -> str | None:
+        """The visus.web line equivalent to this op, or None when it has none.
+
+        Computed BEFORE the op runs, so an index target resolves against the cache
+        the caller actually addressed. Never raises: a codegen failure must not
+        turn a successful action into an error.
+        """
+        try:
+            if op == "goto":
+                return generate_script_goto(str(args.get("url", "")))
+            entry = _CODE_ACTIONS.get(op)
+            if entry is None:
+                return None
+            action, value_key = entry
+            target = self._target_event(args)
+            if target is None:
+                return None
+            event: dict[str, Any] = {"action": action, "target": target}
+            if value_key is not None:
+                event["value"] = args.get(value_key, "")
+            return generate_line(event)
+        except Exception:  # noqa: BLE001 — codegen is a convenience, never a failure
+            return None
+
     # --- ops -------------------------------------------------------------
     def _post_state(self) -> dict[str, Any]:
         """Page state AFTER a mutating op: ``{url, title, fields_stale}``.
@@ -371,11 +440,18 @@ class SessionHandler:
                 method = getattr(self, f"_op_{op}", None)
                 if method is None:
                     raise ValueError(f"unknown op {op!r}")
+                # Computed BEFORE method(args) runs: an index target must resolve
+                # against the cache the caller actually addressed, not the one the
+                # op is about to replace (list_fields, snapshot) or invalidate (goto).
+                code = self._generated_code(op, args)
                 resp: dict[str, Any] = {"ok": True, "result": method(args)}
             except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
                 return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             if op in _MUTATING_OPS:
                 resp["page"] = self._post_state()
+            if code:
+                resp["code"] = code
+                self._script.append(code)
             return resp
 
     def _op_list_fields(self, args: dict[str, Any]) -> dict[str, Any]:

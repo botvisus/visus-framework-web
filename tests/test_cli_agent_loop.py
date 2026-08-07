@@ -163,6 +163,31 @@ def test_snapshot_flag_is_forwarded_to_the_daemon(monkeypatch: pytest.MonkeyPatc
     assert "snapshot" not in calls[-1][1]
 
 
+def test_click_prints_the_generated_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    _envelope(
+        monkeypatch,
+        {
+            "ok": True,
+            "result": "clicked",
+            "code": "page.get_by_role('button', name='Sign in').click()",
+            "page": {"url": "u", "title": "t"},
+        },
+    )
+    r = runner.invoke(app, ["click", "--role", "button", "--name", "Sign in"])
+    assert r.exit_code == 0
+    assert "### Code" in r.output
+    assert "page.get_by_role('button', name='Sign in').click()" in r.output
+
+
+def test_raw_click_suppresses_the_generated_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    _envelope(
+        monkeypatch,
+        {"ok": True, "result": "clicked", "code": "page.locator('#go').click()", "page": {}},
+    )
+    r = runner.invoke(app, ["--raw", "click", "--selector", "#go"])
+    assert r.output == "clicked\n"
+
+
 @pytest.mark.browser
 def test_real_daemon_click_echoes_the_new_page(base_url: str, tmp_path: Path) -> None:
     """The loop closes: a click that navigates reports the URL it produced."""

@@ -16,6 +16,26 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+#: Subcommands that install the skill — they must never be nagged about it.
+#: May grow, must never shrink.
+_SKILL_INSTALL_COMMANDS: tuple[str, ...] = ("install", "install-skills")
+
+
+@app.callback()
+def _root(ctx: typer.Context) -> None:
+    """Global entry point for every `visus` subcommand.
+
+    This is the project's only group-level callback and therefore the single hook
+    for global flags (PLAN 4's `--json` / `--raw` / `--snapshot` /
+    `--output-dir` and PLAN 6's `--session` / `--config` attach here).
+    Note that click's eager `--help` exits before a group callback runs, so this
+    body does not execute for `visus --help` or bare `visus`.
+    """
+    from visus.web.cli.skill_check import check_installed_skills
+
+    if ctx.invoked_subcommand not in _SKILL_INSTALL_COMMANDS:
+        check_installed_skills()
+
 
 @app.command()
 def version() -> None:

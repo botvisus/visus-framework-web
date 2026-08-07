@@ -212,3 +212,49 @@ def test_check_never_raises_when_the_bundle_is_unreadable(
 
     monkeypatch.setattr(skill_check, "bundled_skill_dir", _boom)
     skill_check.check_installed_skills(tmp_path)  # must not raise
+
+
+def test_cli_warns_after_the_skill_is_edited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Port of playwright-cli tests/integration.spec.ts:75-86."""
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["install", "--skills=claude"]).exit_code == 0
+    installed = tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md"
+    with installed.open("a", encoding="utf-8") as fh:
+        fh.write("x")
+
+    r = runner.invoke(app, ["version"])
+    assert r.exit_code == 0
+    assert "does not match the tool version" in r.stderr
+    assert "visus install --skills" in r.stderr
+    assert "does not match the tool version" not in r.stdout
+
+
+def test_cli_does_not_warn_on_a_line_ending_only_difference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Port of playwright-cli tests/integration.spec.ts:88-99 — the CRLF regression."""
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["install", "--skills=claude"]).exit_code == 0
+    installed = tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md"
+    installed.write_bytes(installed.read_text(encoding="utf-8").replace("\n", "\r\n").encode())
+
+    r = runner.invoke(app, ["version"])
+    assert r.exit_code == 0
+    assert "does not match the tool version" not in r.stderr
+
+
+def test_install_commands_never_emit_the_drift_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["install", "--skills=claude"]).exit_code == 0
+    installed = tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md"
+    with installed.open("a", encoding="utf-8") as fh:
+        fh.write("x")
+
+    for argv in (["install", "--skills=claude"], ["install-skills", "--target", "claude"]):
+        r = runner.invoke(app, argv)
+        assert r.exit_code == 0, r.output
+        assert "does not match the tool version" not in r.stderr, argv

@@ -12,15 +12,30 @@ uv venv && uv pip install -e ".[dev,vision,mcp,cli]"
 ## Run the suite
 
 ```bash
-uv run pytest -q
+uv run pytest -q --cov-fail-under=90
 ```
 - Runs in **parallel** via `pytest-xdist` (`-n auto`, `--dist loadfile`).
-- Enforces a **90% coverage gate** on `visus.web` (`--cov-fail-under=90`).
+- The **90% coverage gate** on `visus.web` lives in `[tool.coverage.report]
+  fail_under` and is no longer baked into `addopts`, so it must be passed
+  explicitly by whoever intends to enforce it. `addopts` still turns coverage
+  *measurement* on by default (`--cov=visus.web --cov-report=term-missing`).
+- A filtered lane (e.g. `-m "not browser"`) can never reach 90% coverage — it
+  only exercises part of the code — so it waives the gate with
+  `--cov-fail-under=0` instead of enforcing it:
+  ```bash
+  uv run pytest -q -m "not browser" --cov-fail-under=0
+  ```
+  This keeps coverage **measured** (the term-missing table still prints)
+  without throwing the numbers away, unlike `--no-cov`.
 - Browser tests are marked `@pytest.mark.browser`.
 
-Run a single file fast (skip the coverage gate, which only makes sense on the full run):
+Run a single file fast — drop coverage entirely:
 ```bash
 uv run pytest tests/test_e2e_locators.py -m browser --no-cov
+```
+…or keep the coverage table and only waive the gate:
+```bash
+uv run pytest tests/test_e2e_locators.py -m browser --cov-fail-under=0
 ```
 
 ## The Edge IE-mode test (special)

@@ -107,8 +107,8 @@ daemon (pattern: `tests/test_cli_session.py:1152-1642`).
 ## Test conventions (enforced)
 
 - **Real browser, no fakes.** Coverage is driven by real-browser integration tests (`@pytest.mark.browser`) against local fixture pages in `tests/fixtures/`, served by the session-scoped `base_url` fixture (an ephemeral `http.server`). Pure-logic units (errors/enum/config/exception-translation/step-encoding/vision-on-generated-images) are the only non-browser tests. Test doubles isolate a unit ONLY when its real behavior is also covered by an integration test — never as the sole proof of a feature. No `skip`/`xfail`/mock-to-pass.
-- **Parallel:** the suite runs under `pytest-xdist` (`-n auto`, `--dist loadfile`). Run a subset with `--no-cov` (the `--cov-fail-under=90` gate only makes sense on the full run).
-- **Gates:** `uv run ruff check src tests`, `uv run mypy` (`--strict`, no weakening — cast `execute_script`/CDP `Any` returns; selenium types only inside backend files), `uv run pytest -q` (≥90% coverage on `visus.web`).
+- **Parallel:** the suite runs under `pytest-xdist` (`-n auto`, `--dist loadfile`). The 90% gate lives in `[tool.coverage.report] fail_under`, not `addopts`, so it is no longer implicit — pass `--cov-fail-under=90` to enforce it, or `--cov-fail-under=0` on a filtered subset (e.g. `-m "not browser"`) to keep coverage measured without failing on a partial run; `--no-cov` drops measurement entirely.
+- **Gates:** `uv run ruff check src tests`, `uv run mypy` (`--strict`, no weakening — cast `execute_script`/CDP `Any` returns; selenium types only inside backend files), `uv run pytest -q --cov-fail-under=90` (≥90% coverage on `visus.web`).
 - **Commits:** small, TDD (failing test → minimal impl → green → commit).
 
 ### Change the shipped agent skill

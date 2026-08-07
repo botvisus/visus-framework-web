@@ -13,14 +13,29 @@ exception by design: it *prints* `PASSED` or `FAILED: <detail>` and still exits
 0, so an assertion never aborts a script.
 
 Every daemon-side failure funnels through the same path: `session_client.send()`
-catches `SessionError` and the CLI prints `error: <message>` to stdout, then
-exits 1. A bad flag or bad type (e.g. `visus press Enter` — one positional
-missing, so `Enter` fails int conversion) is caught by Typer/Click before the
-daemon is ever contacted and exits 2 instead.
+catches `SessionError` and the CLI prints `error: <message>` to **stderr**, then
+exits 1 — stdout stays clean, so `TOKEN=$(visus get-attribute value 5)` never
+captures an error message as if it were a value. A bad flag or bad type (e.g.
+`visus press Enter` — one positional missing, so `Enter` fails int conversion)
+is caught by Typer/Click before the daemon is ever contacted and exits 2
+instead.
 
-## `--json`
+## Global flags
 
-Eight commands emit machine-readable output:
+`--json`, `--raw`, `--snapshot` and `--output-dir` are declared on the root
+command (`visus --json ...`, before the subcommand name), not on individual
+subcommands:
+
+| Flag | What it does |
+|---|---|
+| `--json` | Emit exactly one JSON document per command. Wins over `--raw` if both are given. |
+| `--raw` | Print only the value — no table, no `### Code`, no `### Page` section. Safe to capture with `$(...)`. |
+| `--snapshot` | After every action, write `.visus/snapshots/page-<ts>.yml` and reference it in the output. |
+| `--output-dir <dir>` | Directory that relative screenshot/snapshot/script paths resolve against (also settable via `VISUS_WEB_OUTPUT_DIR`; default: the current directory). |
+
+## `--json` (per-command)
+
+Eight commands additionally accept their own `--json` option:
 
 | Command | Shape |
 |---|---|

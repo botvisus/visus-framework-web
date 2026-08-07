@@ -6,9 +6,13 @@ Every command below drives the **live session daemon** unless it is marked
 Targeting: most commands accept a positional **field index** (from the last
 `list-fields`) **or** `--selector` / `-s`, `--role`, `--name`, `--text`.
 `--name` on its own is not a target — see
-[cli-targeting.md](cli-targeting.md). Exactly eight commands accept `--json`:
-`translate`, `session status`, `list-fields`, `tabs`, `snapshot`, `cookies`,
-`eval` and `find-image` — see [cli-json-and-piping.md](cli-json-and-piping.md).
+[cli-targeting.md](cli-targeting.md). Exactly eight commands accept their own
+`--json`: `translate`, `session status`, `list-fields`, `tabs`, `snapshot`,
+`cookies`, `eval` and `find-image` — see
+[cli-json-and-piping.md](cli-json-and-piping.md).
+
+Global flags, on every command: `visus --json|--raw|--snapshot|--output-dir <dir>
+<command> ...` — see [cli-json-and-piping.md](cli-json-and-piping.md#global-flags).
 
 Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 

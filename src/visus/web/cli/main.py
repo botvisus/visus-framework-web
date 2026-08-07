@@ -10,6 +10,7 @@ from typing import Any
 import typer
 
 from visus.web import Engine, launch
+from visus.web.cli import output
 
 #: Shown at the bottom of `visus --help`. The skill is packaged in the wheel but
 #: inert until a repo installs a copy, and nothing else in the help output would
@@ -33,17 +34,46 @@ _SKILL_INSTALL_COMMANDS: tuple[str, ...] = ("install", "install-skills")
 
 
 @app.callback()
-def _root(ctx: typer.Context) -> None:
+def _root(
+    ctx: typer.Context,
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit exactly one JSON document per command."
+    ),
+    raw: bool = typer.Option(
+        False, "--raw", help="Print only the value — no table, no ### Code, no ### Page."
+    ),
+    snapshot_sink: bool = typer.Option(
+        False,
+        "--snapshot",
+        help="After every action, write .visus/snapshots/page-<ts>.yml and link it.",
+    ),
+    output_dir: str = typer.Option(
+        None,
+        "--output-dir",
+        envvar="VISUS_WEB_OUTPUT_DIR",
+        help="Directory for screenshots/snapshots/scripts (default: the current directory).",
+    ),
+) -> None:
     """Global entry point for every `visus` subcommand.
 
     This is the project's only group-level callback and therefore the single hook
-    for global flags (PLAN 4's `--json` / `--raw` / `--snapshot` /
-    `--output-dir` and PLAN 6's `--session` / `--config` attach here).
-    Note that click's eager `--help` exits before a group callback runs, so this
-    body does not execute for `visus --help` or bare `visus`.
+    for global flags (PLAN 6's `--session` / `--config` are reserved to attach
+    here too). Click's eager `--help` exits before a group callback runs, so this
+    body does not execute for `visus --help` or bare `visus` — the flags still
+    appear in the help text because they are declared here.
     """
+    # Local import: PLAN 1 keeps it inside the function so `visus` still starts
+    # when the skill package is unreadable.
     from visus.web.cli.skill_check import check_installed_skills
 
+    # set_mode FIRST (PLAN 1's extension contract, rule 3): a skill-drift warning
+    # must never be written before the output mode is decided.
+    output.set_mode(as_json=as_json, raw=raw)
+    output.set_output_dir(output_dir)
+    output.set_snapshot_sink(snapshot_sink)
+    # The guard tuple is PLAN 1's constant — never re-inline the literal, and never
+    # shrink it: warning a user while they run the command that fixes the warning
+    # is the bug it exists to prevent.
     if ctx.invoked_subcommand not in _SKILL_INSTALL_COMMANDS:
         check_installed_skills()
 
@@ -282,14 +312,11 @@ def _send(op: str, args: dict[str, Any] | None = None) -> Any:
     try:
         return session_client.send(op, args or {})
     except session_client.SessionError as exc:
-        typer.echo(f"error: {exc}")
-        raise typer.Exit(1) from exc
+        output.emit_error(f"error: {exc}")
     except _json.JSONDecodeError as exc:
-        typer.echo(f"error: daemon sent a malformed response — {exc}")
-        raise typer.Exit(1) from exc
+        output.emit_error(f"error: daemon sent a malformed response — {exc}")
     except OSError as exc:
-        typer.echo(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
-        raise typer.Exit(1) from exc
+        output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
 
 
 def _format_fields(fields: list[dict[str, Any]]) -> str:

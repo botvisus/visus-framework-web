@@ -7,12 +7,15 @@ nothing in this module may write ``.claude`` or ``.agents`` into the repo.
 from __future__ import annotations
 
 import io
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from visus.web.cli import skill_check
+from visus.web.cli._entry import cli_main, mcp_main
 from visus.web.cli.main import app
 from visus.web.cli.skills import (
     SKILL_NAME,
@@ -258,3 +261,61 @@ def test_install_commands_never_emit_the_drift_warning(
         r = runner.invoke(app, argv)
         assert r.exit_code == 0, r.output
         assert "does not match the tool version" not in r.stderr, argv
+
+
+def test_cli_main_accepts_a_bare_skills_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`visus install --skills` — the playwright-cli spelling — must work end to end."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["visus", "install", "--skills"])
+    with pytest.raises(SystemExit) as exc:
+        cli_main()
+    assert exc.value.code == 0
+    assert (tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md").is_file()
+
+
+def test_cli_main_reports_a_missing_cli_extra(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setitem(sys.modules, "typer", None)
+    with pytest.raises(SystemExit) as exc:
+        cli_main()
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "visus-web[cli]" in err
+    assert "pip install" in err
+
+
+def test_mcp_main_reports_a_missing_mcp_extra(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setitem(sys.modules, "mcp", None)
+    with pytest.raises(SystemExit) as exc:
+        mcp_main()
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "visus-web[mcp]" in err
+
+
+def test_mcp_main_delegates_to_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    import visus.web.mcp.server as server
+
+    calls: list[str] = []
+    monkeypatch.setattr(server, "main", lambda: calls.append("ran"))
+    mcp_main()
+    assert calls == ["ran"]
+
+
+def test_python_dash_m_runs_the_cli() -> None:
+    """`python -m visus.web.cli` is the fallback when the console script is off PATH."""
+    from visus.web import __version__
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "visus.web.cli", "version"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert __version__ in proc.stdout

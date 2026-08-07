@@ -219,7 +219,7 @@ def run(script: str) -> None:
 @app.command()
 def mcp() -> None:
     """Start the visus.web MCP server (stdio)."""
-    from visus.web.mcp.server import main as mcp_main
+    from visus.web.cli._entry import mcp_main
 
     mcp_main()
 

@@ -56,6 +56,10 @@ cli = [
     # Imported directly by cli/main.py and cli/console.py — Typer happens to pull it
     # in today, but that is transitive and could stop being true.
     "rich>=13,<16",
+    # 8.2 is the first click that keeps CliRunner's stderr separate from stdout
+    # (the drift-warning tests assert on result.stderr) and the version whose
+    # long-option parsing `--skills=agents` is pinned against.
+    "click>=8.2.0,<9",
 ]
 docs = [
     "mkdocs>=1.6.0",
@@ -64,8 +68,8 @@ docs = [
 ]
 
 [project.scripts]
-visus = "visus.web.cli.main:app"
-visus-web-mcp = "visus.web.mcp.server:main"
+visus = "visus.web.cli._entry:cli_main"
+visus-web-mcp = "visus.web.cli._entry:mcp_main"
 
 [project.entry-points.pytest11]
 visus_web = "visus.web.pytest_plugin"

@@ -138,8 +138,17 @@ These plans were adversarially verified, not just written.
 
 - **No gate was ever executed.** `uv`, `ruff`, `mypy`, `pytest` and `selenium` were all
   absent from the authoring environment. Every verification above is *static*: files
-  opened and read, never run. Expect the first task of any plan to surface something a
-  static read could not.
+  opened and read, never run.
+
+  This matters less than it sounds. The code these plans describe does not exist yet,
+  so no run today could validate it — that is what each task's own failing-test step
+  is for. What a run *would* establish is a green baseline, so an implementer whose
+  test goes red knows the break is theirs and not pre-existing.
+
+  **One concrete exposure: PLAN 2 Task 2 Step 6.** It runs the suite to freeze the
+  current per-package coverage numbers into `coverage-floors.json`. If real coverage
+  today is below the 90% the config claims, that step yields different floors than the
+  plan assumes. Check it before starting PLAN 2. Everything else degrades gracefully.
 - **Two citations point at reference clones not in this checkout** —
   `playwright.config.ts:22` and one `playwright-cli/…` path in PLAN 2. The
   playwright-cli citations in PLAN 7 are prefixed with that repo's path; it lives at

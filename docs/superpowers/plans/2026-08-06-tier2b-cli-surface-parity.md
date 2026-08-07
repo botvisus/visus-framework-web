@@ -4,7 +4,7 @@
 
 **Goal:** Expose, as `visus` CLI commands and REPL commands, the ~20 capabilities the `visus.web` library already implements but the shell cannot reach.
 
-**Architecture:** Every session command in this repo is a three-part mirror: a `@app.command()` in `src/visus/web/cli/main.py` that calls `_send(op, args)`, a matching `_op_<op>` method on `SessionHandler` in `src/visus/web/cli/session_server.py` (dispatched by `getattr(self, f"_op_{op}")`), and a dispatch branch plus a help line in `src/visus/web/cli/console.py` (the REPL). A fifth place, the command tables in `README.md`, documents it. Almost every task here adds all five and nothing else — the browser work already exists in `api/`, `backends/` and `network.py`. Three tasks deliberately reach one layer deeper: Task 9 adds a `button` parameter to the mouse device (Selenium's `pointer_down` has always taken one), Task 11 surfaces the bounding rect the JS bundle already computes, and Task 17 adds a non-context-manager tracing session so `_steps.run_step` can actually see a Recorder.
+**Architecture:** Every session command in this repo is a three-part mirror: a `@app.command()` in `src/visus/web/cli/main.py` that calls `_send(op, args)`, a matching `_op_<op>` method on `SessionHandler` in `src/visus/web/cli/session_server.py` (dispatched by `getattr(self, f"_op_{op}")`), and a dispatch branch plus a help line in `src/visus/web/cli/console.py` (the REPL). A fifth place, the command tables in `README.md`, documents it. Almost every task here adds all five and nothing else — the browser work already exists in `api/`, `backends/` and `network.py`. Five tasks deliberately reach one layer deeper: Task 9 adds a `button` parameter to the mouse device (Selenium's `pointer_down` has always taken one), Task 10 lets `bundle.js`'s `highlight()` take a style, Task 11 surfaces the bounding rect the bundle already computes, Task 17 adds a non-context-manager tracing session so `_steps.run_step` can actually see a Recorder, and Task 18 gives `NetworkCapture` a `rebind()` so a long-lived daemon can survive navigation and tab switches. Task 12 is the one task that also edits `mcp/server.py`, because fixing `eval` scoping in only one of the two surfaces would recreate the very CLI-vs-MCP asymmetry this plan exists to close.
 
 **Tech Stack:** Python 3.10+, Typer, Rich, Selenium 4.38, pytest + pytest-xdist, hatchling, mypy --strict, ruff
 
@@ -22,28 +22,136 @@
 
 ## Prerequisites
 
-**PLAN 4 (`2026-08-06-tier2c-agent-driving-loop.md`) MUST land before this plan.** This plan consumes these symbols from it and never redefines them:
+**PLAN 3 (`2026-08-06-tier2a-daemon-correctness.md`) AND PLAN 4 (`2026-08-06-tier2c-agent-driving-loop.md`) MUST both land before this plan.** This plan consumes the symbols below from them and never redefines them.
+
+### From PLAN 3 — `tier2a-daemon-correctness.md`
+
+```python
+# src/visus/web/cli/session_server.py  — owned by PLAN 3
+class StaleFieldIndexError(RuntimeError): ...          # PLAN 3 Task 1
+SessionHandler._fields_url: str | None                  # stamped by _op_list_fields
+SessionHandler._invalidate_fields(self) -> None
+SessionHandler.fields_stale(self) -> bool
+SessionHandler._lock: threading.RLock                   # PLAN 3 Task 8 — wraps handle()
+
+# _op_get_text / _op_get_attribute now return this shape (PLAN 3 Task 12):
+{"value": str | None, "present": bool}
+
+# src/visus/web/cli/console.py  — owned by PLAN 3 Task 12
+def render_value(result: Any) -> str: ...
+    # {"value": "hi", "present": True} -> "hi"
+    # {"value": "",   "present": True} -> "(empty)"
+    # {"value": None, "present": False} -> "(null)"
+```
+
+Where this plan relies on each:
+
+| PLAN 3 symbol | Used by |
+|---|---|
+| `{"value", "present"}` read shape + `console.render_value` | Task 1 (REPL `text`/`attr`), Task 14 (`storage_get` copies the shape), Task 15 (`cookie_get` copies the shape) |
+| `SessionHandler._lock` (RLock around `handle()`) | Task 17 (one process-global `Recorder`), Task 18 (one `NetworkCapture`) — both are safe *only* because ops cannot interleave |
+| `SessionHandler._fields_url` stamp in `_op_list_fields` | Task 11 (its `boxes` delta must not drop the stamp) |
+| PLAN 3 Task 13's B9 fix (REPL `screenshot` resolves against the CLIENT cwd) | Task 1 and Task 20 (both keep it) |
+| PLAN 3 Task 14's `idle_timeout` on `start_daemon`, `--idle-timeout` on `session start`, `VISUS_WEB_IDLE_TIMEOUT` | Task 7 rewrites both functions and must **keep** all three |
+| PLAN 3 Task 5's `visus session kill` and Task 17's single-probe `session status` | untouched here — no task in this plan edits either |
+
+### From PLAN 4 — `tier2c-agent-driving-loop.md`
 
 ```python
 # src/visus/web/cli/output.py  — owned by PLAN 4
 class Mode(str, Enum):
     TEXT = "text"      # default: human/agent readable, includes ### Page footer
     JSON = "json"      # one JSON object per invocation, no decoration
-    RAW  = "raw"       # bare value only; no ### Page, no ### Code, no table
+    RAW  = "raw"       # no ### Page, no ### Code — the primary value only
 
 def set_mode(*, as_json: bool = False, raw: bool = False) -> None: ...
 def mode() -> Mode: ...
 def emit(value: Any, *, table: str | None = None) -> None: ...
+    # RAW mode still prints `table` — see the rule below.
 def emit_error(message: str, *, code: int = 1) -> NoReturn: ...
 def emit_envelope(env: dict[str, Any], *, table: str | None = None) -> None: ...
+    # RAW mode prints ONLY env["result"] — no table, no ### Code, no ### Page.
+
+# src/visus/web/cli/session_server.py  — owned by PLAN 4
+_MUTATING_OPS: frozenset[str]           # Tasks 6, 8, 9, 13, 14, 15 append to it
+def _post_state(self) -> dict[str, Any]: ...
+
+# src/visus/web/cli/main.py + session_client.py  — owned by PLAN 4
+def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]: ...
+def send_envelope(op, args=None, *, start_dir=None) -> dict[str, Any]: ...
 ```
 
-Rules this plan follows so it never collides with PLAN 4:
+PLAN 3 and PLAN 4 between them **rewrite ten functions this plan then edits again**.
+Every one of them must be edited as a delta on PLAN 3's or PLAN 4's version — see Rule 5:
 
-1. **Every new command prints through `output.emit(...)` and fails through `output.emit_error(...)`.** No new `typer.echo` calls for command output (the two exceptions are Task 2's deprecation notice, which is a side-channel warning, and the pre-existing `typer.echo` lines this plan does not touch).
-2. **`output.emit_envelope` is NOT called by this plan.** PLAN 4 owns the envelope and the `_MUTATING_OPS` frozenset in `session_server.py`. Where a task adds a *mutating* op, its implementation step appends the new op name to that existing frozenset — one string, nothing else.
+| Function | PLAN 3/4's version keeps | Re-edited here by |
+|---|---|---|
+| `session_server._op_list_fields` (`:235-243`) | PLAN 3: `self._fields_url = page.url` stamp | Task 11 |
+| `session_server._op_snapshot` (`:323-324`) | PLAN 4: positional `selector`, `depth=`, `refs=True` re-enumeration, `url`/`title` keys, per-row `ref` | Task 11 |
+| `console.format_fields` (`:56-93`) | PLAN 4: `full: bool = False` (CSS/XPATH columns off by default) | Task 11 |
+| `main._format_fields` (`:216-219`) | PLAN 4: `full: bool = False` passthrough | Task 11 |
+| `main.list_fields` (`:284-301`) | PLAN 4: paired `--highlight/--no-highlight` flag, default **off** | Task 11 |
+| `main.snapshot` (`:520-543`) | PLAN 4: `selector` positional, `--depth`, `--filename`, `--refs/--no-refs` | Task 11 |
+| `console._HELP` (`:19-53`) | PLAN 4: the lines it added for `find`, `snapshot [selector]`, `export-script`, `highlight-all` | Task 1 (and Task 10, which adds the single-element `highlight` row **next to** PLAN 4's `highlight-all` row, never over it) |
+| `codegen._target_expr` (`:55-60`) | PLAN 4: still `repr`-based, plus a new `"text"` branch | Task 16 (adds `_pystr`/`locator_expr` beside it, never edits it) |
+| `session_client.start_daemon` (`:129-194`) | PLAN 3 Task 14: the keyword-only `idle_timeout: float \| None = None` parameter **and** the `VISUS_WEB_IDLE_TIMEOUT` line in its env block | Task 7 |
+| `main.session_start` (`:238-252`) | PLAN 3 Task 14: the `--idle-timeout FLOAT` option **and** its `idle_timeout=idle_timeout` argument in the `start_daemon(...)` call | Task 7 |
+
+Rules this plan follows so it never collides with PLAN 3 or PLAN 4:
+
+1. **Every new command prints through `output.emit(...)` and fails through `output.emit_error(...)`.** No new `typer.echo` calls for command output (the two exceptions are Task 2's and Task 21's deprecation notices, which are side-channel warnings on stderr, and the pre-existing `typer.echo` lines this plan does not touch).
+2. **This plan never *introduces* an `output.emit_envelope` call — but it must never *remove* one either.** PLAN 4 owns the envelope and the `_MUTATING_OPS` frozenset in `session_server.py`. Where a task adds a *mutating* op, its implementation step appends the new op name to that existing frozenset — one string, nothing else.
+
+   **Yes, the footer is computed and then dropped — on purpose.** A command this plan
+   creates uses `_send` + `emit`, and `send()` returns only `resp["result"]`, so the
+   `page` key the daemon just built never reaches this plan's stdout. It is still worth
+   adding the op to the frozenset: the same envelope is what PLAN 4's REPL `_act` path
+   and PLAN 7's `RemoteDispatcher`/MCP tools read, and a later plan that upgrades one of
+   these commands to `emit_envelope` gets a correct footer for free instead of a silent
+   omission. What is *not* acceptable is a mutating op missing from the frozenset — that
+   is a hole no later plan can see.
+
+   **And to the test in the same commit.** PLAN 4 Task 4 writes
+   `tests/test_cli_session.py::test_mutating_ops_cover_every_state_changing_op` as an
+   exact `==` inventory of the frozenset, so appending a name without adding the same
+   string to that expected set turns the suite red at your own commit gate. Every step
+   below that says "add `X` to `_MUTATING_OPS`" means: add it in `session_server.py`
+   **and** in that test's expected frozenset. This affects Tasks 6, 8, 9, 13, 14 and 15;
+   `tests/test_cli_session.py` is therefore a file this plan modifies.
+
+   PLAN 4 converted eleven **existing** commands from `output.emit(_send(op, args))` to
+   `output.emit_envelope(_send_env(op, args))`: `click`, `dblclick`, `fill`, `select`,
+   `press`, `drag`, `upload`, `dialog`, `add-cookies`, `clear-cookies`, `eval`. Five of
+   those are rewritten again here — **Task 8 (`fill`, `press`), Task 9 (`click`,
+   `dblclick`), Task 12 (`eval`)**. Each of those rewrites must keep PLAN 4's final line:
+
+   ```python
+   output.emit_envelope(_send_env("click", args))   # NOT output.emit(_send("click", args))
+   ```
+
+   and their CLI tests must monkeypatch `session_client.send_envelope` (returning a full
+   envelope dict) rather than `session_client.send`. The three tasks carry a
+   **Reconciliation** note with the exact substitution. Every command this plan *creates*
+   (`logs`, `requests`, `request`, `tab-activate`, `tab-follow`, `state-save`,
+   `state-load`, `type`, `keydown`, `keyup`, `mouse*`, `highlight`, `resize`, `storage *`,
+   `cookie-*`, `generate-locator`, `tracing-*`, `report`, `network *`, `session-pdf`)
+   uses plain `_send` + `output.emit`, as its code blocks show.
 3. **Where the brief specifies a per-command `--json`, this plan adds a local `--json` flag whose only job is `output.set_mode(as_json=True)`, guarded by `if as_json:`** so it can never clobber a globally-set mode. This is required because Click parses group-level options *before* the subcommand (`visus --json requests`), while agents and the existing 8 commands write `visus requests --json`.
 4. **`--session` / `-S` is reserved** by the conventions contract for PLAN 6's named sessions. Task 14 therefore spells the sessionStorage switch `--session-storage`, not `--session`.
+5. **Never re-paste a pre-plan original.** Every code block below that says "replace X" was written against the repo as it stands *today*. For the ten functions in the table above, PLAN 3 or PLAN 4 has already replaced them: apply this plan's delta on top of *their* version and keep everything the table says they keep. The affected tasks (1, 7, 11, 16) each carry a **Reconciliation** note at the exact step where this matters.
+6. **`--raw` keeps the value's rendering, drops its decoration — and `emit` decides that, not the call site.** PLAN 4 Task 1 settles the RAW contract and pins it with three tests. `emit_envelope` in RAW prints **only** `env["result"]`. `emit` in RAW prints its `table` when `value` is a list/dict (there the table *is* the rendering — without it `visus --raw list-fields` prints a Python repr and `visus --raw get-text 3` prints `{'value': 'hi', 'present': True}`) and prints the bare `str(value)` when `value` is a scalar (there the table is decoration — `visus --raw generate-locator 3` gives the expression alone, `visus --raw session-pdf -o r.pdf` gives the path alone, not `saved <path>`). **Consequence for this plan: nothing to remember.** Write every call as `output.emit(<the value>, table=<the pre-rendered text>)`, pass the *structured* value rather than a pre-stringified one, and never add an `if output.mode() is output.Mode.RAW` branch — `emit` already has it.
+7. **Every new command needs a row in `src/visus/web/skills/visus-web/references/cli-commands.md`, in the same commit.** PLAN 1 Task 7 ships `tests/test_skill_docs.py::test_every_cli_command_is_documented`, which walks `app.registered_commands` / `registered_groups` and fails unless the literal string `` `visus <name>` `` appears in that file. PLAN 1 is not listed as a direct prerequisite above because it arrives transitively — PLAN 4 requires it — but its gate runs inside this plan's mandatory `uv run pytest -q`. The rule covers the ~20 commands this plan creates **and** the renames in Task 2 (`repl`, `console`) and Task 21 (the `screenshot`/`pdf` collision). Add the row next to the `README.md` row each task already specifies; `src/visus/web/skills/visus-web/references/cli-commands.md` is therefore a file this plan modifies.
+
+### Explicitly out of scope (owned elsewhere — not silently dropped)
+
+| Gap | Owner |
+|---|---|
+| `visus find <text> [--regex] [--context N]` (synthesis C3, 2b table row 15) | **PLAN 4** — the conventions contract assigns `find` to `tier2c-agent-driving-loop` |
+| `snapshot --depth` / `--filename` / positional selector / `REF` column (C3, C5) | **PLAN 4** |
+| `drop`, file-chooser `upload`, `--mobile`/`--device`, `--config` (rows 6, 7, 9, 14) | **PLAN 6** — `tier2d-new-engineering` |
+| Named sessions, `route`/`unroute`, `run-code`, `attach`/`detach` (D1, D4, D8, D9) | **PLAN 6** |
+| `show`/`--annotate`, video, dashboard (rows 11, 12) | **PLAN 7** — `tier3-differentiation` |
+| `rich` missing from the `[cli]` extra (row 31), README license/URL drift (rows 16, 17) | **PLAN 1** — metadata hygiene |
 
 Symbols this plan consumes from the **existing** codebase (all verified present):
 
@@ -69,6 +177,7 @@ def _target_args(index, selector, role, name, text) -> dict[str, Any]: ...
 
 # src/visus/web/cli/console.py
 def format_fields(fields: list[dict[str, Any]], *, width: int | None = None) -> str: ...
+    # NOTE: PLAN 4 adds `full: bool = False` to this signature — see the table above.
 def dispatch(line: str, send: SendFn) -> str: ...
 SendFn = Callable[[str, dict[str, Any]], Any]
 
@@ -77,9 +186,12 @@ Page.network_requests() -> list[NetworkResponse]
 Page.console_messages() -> list[ConsoleMessage]
 Page.evaluate(expression: str, arg: object = None) -> object
 Page.pdf(*, path: str | None = None) -> bytes
+Page.screenshot(*, path: str | None = None, full_page: bool = False) -> bytes
 Page.set_viewport_size(width: int, height: int) -> None
 Page.set_device_metrics(width, height, *, device_scale_factor=1.0, mobile=False) -> None
-Page.snapshot() -> list[dict]
+Page.snapshot() -> list[dict]          # PLAN 4 widens this to (selector, *, depth)
+Page.list_fields(*, kinds=None, include_hidden=False, highlight=True) -> list[Field]
+Page.clear_highlights() -> None
 Page.mouse -> Mouse        # api/input.py
 Page.keyboard -> Keyboard  # api/input.py
 
@@ -95,6 +207,7 @@ Locator.evaluate(expression: str, arg: object = None) -> object
 Locator.highlight() -> None
 Locator.bounding_box() -> dict[str, float] | None
 Locator.scroll_into_view_if_needed() -> None
+Locator.screenshot(*, path: str | None = None) -> bytes
 Locator.first() -> Locator
 
 # src/visus/web/api/events.py
@@ -111,19 +224,27 @@ class NetworkCapture:
 
 # src/visus/web/tracing.py
 def enable(**opts: Any) -> None: ...
+def disable() -> None: ...
 def is_enabled() -> bool: ...
 def current_recorder() -> Recorder | None: ...
 def render_report(zip_path: str, output: str = "report.html") -> str: ...
+_STATE: _Tracing        # fields: enabled, screenshot_each_action, screenshot_on_failure,
+                        #         recorder, active_page, step_sink
 
 # src/visus/web/observability/recorder.py
 class Recorder:
     run_id: str
+    def summary(self) -> dict[str, Any]: ...   # {"total", "failures", "backtrack_steps", "steps"}
     def write_zip(self, path: str) -> None: ...
     def close(self) -> None: ...
 
 # src/visus/web/cli/session_client.py
-def start_daemon(engine="chrome", headless=False, url=None, *, cwd=None, timeout=20.0) -> dict[str, Any]: ...
+def start_daemon(engine="chrome", headless=False, url=None, *,
+                 cwd=None, timeout=20.0,
+                 idle_timeout=None) -> dict[str, Any]: ...   # idle_timeout: PLAN 3 Task 14
 def send(op, args=None, *, start_dir=None) -> Any: ...
+def find_session(base: Path) -> dict[str, Any] | None: ...
+def _socket_open(port: int, *, host: str = "127.0.0.1", timeout: float = 1.0) -> bool: ...
 class SessionError(RuntimeError): ...
 ```
 
@@ -143,6 +264,18 @@ NetworkCapture.rebind(self, page: Any) -> None                             # Tas
 
 # src/visus/web/api/fields.py
 Field.box: dict[str, float] | None = None                                  # Task 11
+
+# src/visus/web/api/locator.py
+Locator.highlight(self, *, style: str | None = None) -> None               # Task 10
+
+# src/visus/web/cli/codegen.py
+def locator_expr(*, selector=None, role=None, name=None,
+                 text=None, exact=False, frame=None) -> str: ...           # Task 16
+
+# src/visus/web/cli/session_server.py
+def _norm_rect(rect: Any) -> dict[str, float] | None: ...                  # Task 11
+def _cookie_matches(cookie, *, name, domain, path) -> bool: ...            # Task 15
+SessionHandler._pointer_center(self, args) -> tuple[float, float]          # Task 9
 
 # src/visus/web/api/input.py
 Mouse.down(self, *, button: str = "left") -> None                          # Task 9
@@ -173,6 +306,8 @@ Mouse.dblclick(self, x: float, y: float, *, button: str = "left") -> None  # Tas
 | `src/visus/web/cli/codegen.py` | Modify | `locator_expr` — the copy-paste expression for a non-index target |
 | `src/visus/web/async_api/__init__.py` | Modify | Async mirror of the two signature changes (`Mouse` button, `Locator.highlight` style) |
 | `README.md` | Modify | Command tables + the corrected `VISUS_WEB_TRACING` row |
+| `src/visus/web/skills/visus-web/references/cli-commands.md` (PLAN 1's file) | Modify | One row per command this plan adds or renames — required by PLAN 1 Task 7's `test_every_cli_command_is_documented` gate (Prerequisites rule 7) |
+| `tests/test_cli_session.py` | Modify | The `_MUTATING_OPS` expectation in `test_mutating_ops_cover_every_state_changing_op` gains this plan's 14 new op names — `state_load`; `type`, `key_down`, `key_up`; `mouse_move`, `mouse_down`, `mouse_up`, `mouse_wheel`; `resize`; `storage_set`, `storage_delete`, `storage_clear`; `cookie_set`, `cookie_delete` (Prerequisites rule 2) |
 | `tests/fixtures/mouse.html` | Create | Context-menu / middle-click / wheel fixture |
 | `tests/fixtures/storage.html` | Create | Seeded localStorage + sessionStorage fixture |
 | `tests/test_cli_repl_parity.py` | Create | REPL target parsing + the previously-missing REPL commands |
@@ -195,8 +330,8 @@ Closes gap **row 27**. Today `console.py:108-109` is `def _idx(token): return {"
 - Test: `tests/test_cli_repl_parity.py`
 
 **Interfaces:**
-- Consumes: `console.SendFn`, `console.format_fields`, `session_client.SessionError`
-- Produces: `def _target(tokens: list[str]) -> tuple[dict[str, Any], list[str]]`
+- Consumes: `console.SendFn`, `console.format_fields`, `console.render_value` (PLAN 3), `session_client.SessionError`
+- Produces: `def _target(tokens: list[str]) -> tuple[dict[str, Any], list[str]]`, `_drag_target`, `_is_confidence`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -300,7 +435,10 @@ def test_add_and_clear_cookies() -> None:
     calls, send = _recorder()
     console.dispatch('add-cookies [{"name":"a","value":"b","url":"http://x"}]', send)
     console.dispatch("clear-cookies", send)
-    assert calls[0] == ("add_cookies", {"cookies": [{"name": "a", "value": "b", "url": "http://x"}]})
+    assert calls[0] == (
+        "add_cookies",
+        {"cookies": [{"name": "a", "value": "b", "url": "http://x"}]},
+    )
     assert calls[1] == ("clear_cookies", {})
 
 
@@ -338,6 +476,24 @@ Expected: FAIL with `AttributeError: module 'visus.web.cli.console' has no attri
 
 - [ ] **Step 3: Write minimal implementation**
 
+> **Reconciliation with PLAN 3 / PLAN 4 (read before typing).** Both siblings have
+> already edited `console.py`. This step must keep their work:
+>
+> * `_HELP` — PLAN 4 replaced it wholesale (`:19-53`) and added lines for `find`,
+>   `snapshot [selector]`, `export-script` and `highlight-all`. Do **not** delete
+>   those. The block below is the *targets* preamble plus the per-verb lines this
+>   task owns; merge it into PLAN 4's `_HELP` rather than overwriting the string.
+> * `dispatch`'s `find` / `export-script` / `highlight-all` branches and its `_act`
+>   envelope path are PLAN 4 Task 16's. This task rewrites the *targeting* of the
+>   existing verbs and adds seven new ones; it does not touch those four.
+> * `dispatch`'s `text` / `attr` branches — PLAN 3 Task 12 changed
+>   `_op_get_text`/`_op_get_attribute` to return `{"value", "present"}` and added
+>   `console.render_value`. The body below already calls `render_value`; printing
+>   `str(send(...))` would emit `{'value': 'hi', 'present': True}`.
+> * `dispatch`'s `screenshot` branch — PLAN 3 Task 13 (B9) made it resolve the path
+>   against the **client's** cwd. The body below keeps that; the pre-plan
+>   `{"path": rest[0]}` form is the bug and must not come back.
+
 In `src/visus/web/cli/console.py`, add `import json` and `from pathlib import Path` to the imports at the top (after `from collections.abc import Callable`):
 
 ```python
@@ -351,7 +507,9 @@ from typing import Any
 from visus.web.cli import session_client
 ```
 
-Replace the `_HELP` block (`console.py:19-53`) with:
+Merge this into the `_HELP` block (`console.py:19-53`, as PLAN 4 left it) — the
+`targets:` preamble is new, and every verb line below either replaces its `N`-only
+predecessor or is new. Keep any line PLAN 4 added that is not listed here:
 
 ```python
 _HELP = """targets: a field index (`3`), a bare selector (`#submit`, `//button[1]`),
@@ -546,10 +704,12 @@ def dispatch(line: str, send: SendFn) -> str:
             )
         if cmd in ("text", "get-text"):
             tgt, _ = _target(rest)
-            return str(send("get_text", tgt))
+            # PLAN 3 Task 12: the op returns {"value", "present"}, so a stored ""
+            # and a missing element must not both print an empty line.
+            return render_value(send("get_text", tgt))
         if cmd in ("attr", "get-attribute"):
             tgt, _ = _target(rest[1:])
-            return str(send("get_attribute", {**tgt, "attr_name": rest[0]}))
+            return render_value(send("get_attribute", {**tgt, "attr_name": rest[0]}))
         if cmd == "count":
             tgt, _ = _target(rest)
             return str(send("count", tgt))
@@ -586,8 +746,11 @@ def dispatch(line: str, send: SendFn) -> str:
             accept = not (rest and rest[0].lower() in ("dismiss", "cancel", "no"))
             return str(send("dialog", {"accept": accept, "prompt_text": None}))
         if cmd == "screenshot":
-            args = {"path": rest[0]} if rest else {}
-            return f"saved {send('screenshot', args)}"
+            # PLAN 3 Task 13 (B9): resolve against the CLIENT's cwd, not the daemon's.
+            # A distinct name (not `args`) so mypy never sees a second annotation
+            # of the same local — Task 20 extends this same branch with `--hires`.
+            shot_args = {"path": str(Path(rest[0] if rest else "screenshot.png").resolve())}
+            return f"saved {send('screenshot', shot_args)}"
         if cmd == "read-text":
             tgt, _ = _target(rest)
             return str(send("read_text", tgt))
@@ -657,7 +820,7 @@ def _is_confidence(token: str) -> bool:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_repl_parity.py -v --no-cov`
-Expected: PASS (13 passed)
+Expected: PASS (12 passed)
 
 - [ ] **Step 5: Verify the pre-existing REPL tests still pass**
 
@@ -693,17 +856,29 @@ Closes the **D2 name collision**. `main.py:897-906` defines `visus console` as t
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_cli_repl_parity.py`:
+First extend the **top** import block of `tests/test_cli_repl_parity.py` (Task 1 wrote
+it without these). They must go at the top: ruff selects `E`, so `E402
+module-import-not-at-top-of-file` fails the gate on a mid-file import block.
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from typer.testing import CliRunner
+
+from visus.web.cli import console
+from visus.web.cli.main import app
+```
+
+Then append to `tests/test_cli_repl_parity.py`:
 
 ```python
 # ---------------------------------------------------------------------------
 # `visus repl` (canonical) and `visus console` (deprecated alias)
 # ---------------------------------------------------------------------------
-
-import pytest
-from typer.testing import CliRunner
-
-from visus.web.cli.main import app
 
 runner = CliRunner()
 
@@ -842,7 +1017,7 @@ git commit -m "feat(cli): add `visus repl`, keep `visus console` as a deprecated
 
 ### Task 3: `visus logs [LEVEL]` — the browser's console messages
 
-Closes half of **D2** and one of the four **D3** MCP-only capabilities. `Page.console_messages()` exists at `api/page.py:377-384` and is already exposed as `browser_console_messages` (`mcp/server.py:588-599`); the CLI has zero hits.
+Closes half of **D2** and one of the four **D3** MCP-only capabilities. `Page.console_messages()` exists at `api/page.py:377-385` and is already exposed as `browser_console_messages` (`mcp/server.py:588-599`); the CLI has zero hits.
 
 **Files:**
 - Modify: `src/visus/web/cli/session_server.py` (new `_op_console_messages`, after `_op_eval`)
@@ -1092,7 +1267,7 @@ git commit -m "feat(cli): add `visus logs` for browser console messages"
 
 ### Task 4: `visus requests [--filter]` and `visus request <N>`
 
-Closes the other half of **D2**. `Page.network_requests()` (`api/page.py:369-375`) is already exposed as `browser_network_requests` (`mcp/server.py:570-585`) but not in the CLI. `request <N>` adds what MCP does not have: the response body, via the `NetworkResponse.body()` already on the object.
+Closes the other half of **D2**. `Page.network_requests()` (`api/page.py:369-375`) is already exposed as `browser_network_requests` (`mcp/server.py:569-584`) but not in the CLI. `request <N>` adds what MCP does not have: the response body, via the `NetworkResponse.body()` already on the object.
 
 **Files:**
 - Modify: `src/visus/web/cli/session_server.py` (`_op_network_requests`, `_op_network_request`)
@@ -2243,6 +2418,18 @@ Replace the startup log line (`:760`) and the handler construction (`:761`) with
     )
 ```
 
+> **Reconciliation (read before typing) — PLAN 3 Task 14 got here first.** It already
+> added `idle_timeout: float | None = None` (keyword-only) to `start_daemon`, an
+> `if idle_timeout: env["VISUS_WEB_IDLE_TIMEOUT"] = str(idle_timeout)` line to its env
+> block, a `--idle-timeout FLOAT` option to `session_start`, and
+> `idle_timeout=idle_timeout` to the `start_daemon(...)` call. The two blocks below are
+> written as if only today's repo existed, so **merge, do not replace**: keep
+> `idle_timeout` in both signatures (after `timeout`), keep its env line, keep the
+> option and keep the argument. Dropping it silently deletes PLAN 3's issue-#29 fix and
+> breaks its `test_serve_reaps_itself_after_the_idle_timeout`. PLAN 6 Task 1 then adds
+> `name=` on top of the union of all of it — its Prerequisites spell out the same
+> post-PLAN-3-and-5 signature.
+
 In `src/visus/web/cli/session_client.py`, replace `start_daemon`'s signature, docstring and env block (`:129-153`) with:
 
 ```python
@@ -2346,8 +2533,11 @@ Expected: PASS — every `SessionHandler(...)` call site is keyword-only and the
 In `README.md`, in the **Session & lifecycle** table, replace the `visus session start` row with:
 
 ```markdown
-| `visus session start [URL] --engine <e> --headless --user-data-dir <dir> --remote-url <url> --slow-mo <ms>` | Start the persistent browser daemon (headed by default); optionally on a persistent profile, a Selenium Grid, or slowed down. |
+| `visus session start [URL] --engine <e> --headless --user-data-dir <dir> --remote-url <url> --slow-mo <ms> --idle-timeout <s>` | Start the persistent browser daemon (headed by default); optionally on a persistent profile, a Selenium Grid, slowed down, or self-reaping when idle. |
 ```
+
+(`--idle-timeout` is PLAN 3 Task 14's; it is repeated in this row because the row
+*replaces* the one PLAN 3 wrote, and dropping it would undocument a shipped flag.)
 
 In the environment-variable table, add three rows after `VISUS_WEB_URL`:
 
@@ -2674,6 +2864,24 @@ Replace `_op_press` (`:267-270`) and add the three new ops right after it:
 ```
 
 Add `"type"`, `"key_down"` and `"key_up"` to the `_MUTATING_OPS` frozenset PLAN 4 created in this module.
+
+> **Reconciliation (read before typing).** PLAN 4 already converted `fill` and `press`
+> to the envelope. Both bodies below end with `output.emit(_send(...))` for readability;
+> **substitute `output.emit_envelope(_send_env(...))` on those two commands only** — the
+> new `type` / `keydown` / `keyup` commands stay on plain `_send` + `emit`. In the tests,
+> `test_cli_press_standalone_and_by_index` and `test_cli_fill_submit_only_sent_when_asked`
+> must therefore patch `session_client.send_envelope` instead of `session_client.send`:
+>
+> ```python
+>     monkeypatch.setattr(
+>         session_client,
+>         "send_envelope",
+>         lambda op, args=None, **_: calls.append((op, args or {}))
+>         or {"ok": True, "result": "ok", "page": {"url": "http://x/", "title": "T"}},
+>     )
+> ```
+>
+> The recorded `(op, args)` assertions are unchanged — only the funnel moves.
 
 In `src/visus/web/cli/main.py`, replace `fill` (`:316-335`) with:
 
@@ -3414,6 +3622,16 @@ Add `"mouse_move"`, `"mouse_down"`, `"mouse_up"` and `"mouse_wheel"` to the `_MU
 
 - [ ] **Step 7: Add the CLI commands**
 
+> **Reconciliation (read before typing).** PLAN 4 already converted `click` and
+> `dblclick` to the envelope. Both bodies below end with `output.emit(_send(...))` for
+> readability; **substitute `output.emit_envelope(_send_env(...))` on those two commands
+> only** — the four new `mouse*` commands stay on plain `_send` + `emit`. In the tests,
+> `test_cli_click_button_flag_only_sent_when_not_left` must therefore patch
+> `session_client.send_envelope` (returning `{"ok": True, "result": "clicked", "page":
+> {"url": "http://x/", "title": "T"}}`) instead of `session_client.send`;
+> `test_cli_mouse_commands` keeps patching `session_client.send`. The recorded
+> `(op, args)` assertions are unchanged in both.
+
 In `src/visus/web/cli/main.py`, replace `click` (`:304-313`) and `dblclick` (`:590-599`) with:
 
 ```python
@@ -3637,6 +3855,13 @@ git commit -m "feat(cli): standalone mouse commands and --button on click/dblcli
 Closes the first half of **row 26**. The primitive already exists — `bundle.js:426-445` defines `highlight(el)` and exports it at `:879`, `bundle.js:446-449` defines `unhighlight` (exported `:880`), and `api/locator.py:479-482` already wraps the draw call. The CLI has only the all-or-nothing pair: `list-fields` highlights *everything* and `visus clear` erases *everything*. There is no way to point at one element, which is exactly what a human reviewing an agent's choice needs.
 
 `--style` needs one small bundle change: `highlight(el)` hard-codes its border and glow, so it takes an optional second argument that replaces them.
+
+**Name reconciliation with PLAN 4 (read before writing the REPL branch).** PLAN 4
+Task 16 rewrites `console.dispatch` and `_HELP` wholesale and adds its own
+whole-page verb for redrawing the numbered overlay. It is called **`highlight-all`**
+precisely so this task can own the bare `highlight` verb for the single-element
+command. Add the branch below *beside* PLAN 4's `highlight-all` branch — do not
+replace it, do not rename it, and make sure `_HELP` ends up with **both** rows.
 
 **Files:**
 - Modify: `src/visus/web/backends/selenium/js/bundle.js:426-445` (`highlight(el, style)`)
@@ -3964,12 +4189,17 @@ The rect is **opt-in**: it is stripped from both payloads unless `boxes` is aske
 - Modify: `src/visus/web/cli/session_server.py:235-243` (`_op_list_fields`), `:323-324` (`_op_snapshot`)
 - Modify: `src/visus/web/cli/console.py:56-93` (`format_fields`), REPL branches + `_HELP`
 - Modify: `src/visus/web/cli/main.py:216-219` (`_format_fields`), `:284-301` (`list-fields`), `:520-543` (`snapshot`)
+
+> **All six of those functions have already been replaced once — `_op_list_fields` by
+> PLAN 3, the other five by PLAN 4.** Every code block in this task is a delta on
+> *their* version, never on the pre-plan original. The Reconciliation notes in Steps
+> 3-5 spell out what each must keep.
 - Modify: `README.md` (Inspect table)
 - Test: `tests/test_cli_page_ops.py`
 
 **Interfaces:**
 - Consumes: `Field.to_dict`, `Page.list_fields`, `Page.snapshot`, `output.emit`
-- Produces: `Field.box: dict[str, float] | None = None`; `session_server._norm_rect(rect: Any) -> dict[str, float] | None`; `console.format_fields(..., boxes: bool = False)`; `list_fields`/`snapshot` ops accept `boxes: bool`
+- Produces: `Field.box: dict[str, float] | None = None`; `session_server._norm_rect(rect: Any) -> dict[str, float] | None`; `console.format_fields(fields, *, width=None, full=False, boxes=False)`; `main._format_fields(fields, *, full=False, boxes=False)`; `list_fields`/`snapshot` ops accept `boxes: bool`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4012,12 +4242,18 @@ def _field(index: int, name: str, box: dict[str, float] | None) -> Field:
 class _BoxPage:
     url = "http://x/"
 
+    def title(self) -> str:
+        return "box fixture"
+
     def list_fields(
         self, *, kinds: Any = None, include_hidden: bool = False, highlight: bool = True
     ) -> list[Field]:
         return [_field(0, "Go", {"x": 1.0, "y": 2.0, "width": 30.0, "height": 12.0})]
 
-    def snapshot(self) -> list[dict[str, Any]]:
+    # PLAN 4 widened Page.snapshot to (selector, *, depth) — mirror the real shape.
+    def snapshot(
+        self, selector: str | None = None, *, depth: int | None = None
+    ) -> list[dict[str, Any]]:
         return [
             {"role": "button", "name": "Go", "rect": {"x": 1.0, "y": 2.0, "w": 30.0, "h": 12.0}}
         ]
@@ -4043,15 +4279,19 @@ def test_op_list_fields_strips_the_box_unless_asked() -> None:
 
 
 def test_op_snapshot_strips_the_rect_unless_asked() -> None:
+    """The raw bundle `rect` never leaks; `boxes` renames it to the box shape.
+
+    PLAN 4 owns the rest of this op's payload (`ref` per row, plus `url`/`title`),
+    so this asserts only on the keys THIS task adds and removes.
+    """
     h = _handler(_BoxPage())
     plain = h.handle("snapshot", {})["result"]["elements"][0]
-    assert plain == {"role": "button", "name": "Go"}
+    assert plain["role"] == "button" and plain["name"] == "Go"
+    assert "rect" not in plain and "box" not in plain
     boxed = h.handle("snapshot", {"boxes": True})["result"]["elements"][0]
-    assert boxed == {
-        "role": "button",
-        "name": "Go",
-        "box": {"x": 1.0, "y": 2.0, "width": 30.0, "height": 12.0},
-    }
+    assert boxed["role"] == "button" and boxed["name"] == "Go"
+    assert "rect" not in boxed
+    assert boxed["box"] == {"x": 1.0, "y": 2.0, "width": 30.0, "height": 12.0}
 
 
 def test_format_fields_adds_a_box_column() -> None:
@@ -4060,6 +4300,9 @@ def test_format_fields_adds_a_box_column() -> None:
     assert "BOX" not in plain
     boxed = console.format_fields(rows, width=200, boxes=True)
     assert "BOX" in boxed and "1,3,30,12" in boxed
+    # PLAN 4's `full` flag still works, and composes with `boxes`.
+    both = console.format_fields(rows, width=200, full=True, boxes=True)
+    assert "XPATH" in both and "BOX" in both
 
 
 def test_cli_list_fields_and_snapshot_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4090,7 +4333,8 @@ def test_cli_list_fields_and_snapshot_boxes(monkeypatch: pytest.MonkeyPatch) -> 
     assert "BOX" in r1.output
     r2 = runner.invoke(app, ["snapshot", "--boxes"])
     assert r2.exit_code == 0
-    assert calls[1] == ("snapshot", {"boxes": True})
+    # PLAN 4's snapshot command also sends selector/depth/refs — assert the subset.
+    assert calls[1][0] == "snapshot" and calls[1][1]["boxes"] is True
     assert "BOX" in r2.output and "1,2,30,12" in r2.output
 
 
@@ -4106,7 +4350,7 @@ def test_repl_boxes() -> None:
     console.dispatch("list --boxes", send)
     console.dispatch("snapshot --boxes", send)
     assert calls[0] == ("list_fields", {"boxes": True})
-    assert calls[1] == ("snapshot", {"boxes": True})
+    assert calls[1][0] == "snapshot" and calls[1][1]["boxes"] is True
 
 
 @pytest.mark.browser
@@ -4168,24 +4412,16 @@ and one argument to the `Field(...)` construction, right after `deep=bool(d.get(
                     box=_box(d),
 ```
 
-In `src/visus/web/backends/selenium/js/bundle.js`, replace `snapshot` (`:415-424`) with:
+In `src/visus/web/backends/selenium/js/bundle.js`, `snapshot` has already been replaced
+by PLAN 4 with the `snapshot(opts)` form that honours `opts.selector` / `opts.depth`
+and pushes `{ role, name, depth }`. Keep all of that; change only its single `out.push`
+line so the rect rides along (the same shape `listFields` already emits at `:695`;
+every caller drops it unless `boxes` was asked for):
 
 ```js
-  function snapshot() {
-    var roles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox",
-                 "heading", "tab", "menuitem", "option", "switch", "slider", "spinbutton"];
-    var out = [], all = document.querySelectorAll("*");
-    for (var i = 0; i < all.length; i++) {
-      var e = all[i], r = computeRole(e);
-      if (roles.indexOf(r) >= 0 && isVisible(e)) {
-        // Same rect shape listFields already emits; callers drop it unless asked.
-        var b = e.getBoundingClientRect();
-        out.push({ role: r, name: accessibleName(e),
-                   rect: { x: b.left, y: b.top, w: b.width, h: b.height } });
-      }
-    }
-    return out;
-  }
+      var b = e.getBoundingClientRect();
+      out.push({ role: r, name: accessibleName(e), depth: d,
+                 rect: { x: b.left, y: b.top, w: b.width, h: b.height } });
 ```
 
 - [ ] **Step 4: Gate it behind `boxes` in the daemon**
@@ -4205,7 +4441,16 @@ def _norm_rect(rect: Any) -> dict[str, float] | None:
     }
 ```
 
-Replace `_op_list_fields` (`:235-243`):
+> **Reconciliation (read before typing).** PLAN 3 already replaced
+> `_op_list_fields` (it stamps `self._fields_url = page.url`) and PLAN 4 already
+> replaced `_op_snapshot` (positional `selector`, `depth=`, `refs=True`
+> re-enumeration, per-row `ref`, `url`/`title` keys). The two bodies below are
+> **their** versions with this task's `boxes` delta folded in — dropping the
+> `_fields_url` stamp would silently break PLAN 3's staleness contract, and
+> dropping `ref`/`selector`/`depth` would silently undo PLAN 4's addressable
+> snapshot.
+
+Replace `_op_list_fields` — this is PLAN 3's body plus the last four lines:
 
 ```python
     def _op_list_fields(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -4217,10 +4462,13 @@ Replace `_op_list_fields` (`:235-243`):
         kinds = args.get("kinds")
         include_hidden = bool(args.get("include_hidden", False))
         highlight = bool(args.get("highlight", True))
-        fields = self.page().list_fields(
+        page = self.page()
+        fields = page.list_fields(
             kinds=kinds, include_hidden=include_hidden, highlight=highlight
         )
         self._fields = list(fields)
+        # PLAN 3: stamp the page identity so a later index op can tell it moved.
+        self._fields_url = page.url
         rows = [f.to_dict() for f in fields]
         if not args.get("boxes"):
             for row in rows:
@@ -4228,41 +4476,59 @@ Replace `_op_list_fields` (`:235-243`):
         return {"fields": rows}
 ```
 
-Replace `_op_snapshot` (`:323-324`):
+In `_op_snapshot`, keep PLAN 4's body verbatim and replace only its `elements = [...]`
+comprehension (the line that attaches `ref`) with this one:
 
 ```python
-    def _op_snapshot(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Interactive elements as role/name dicts; ``boxes`` adds the viewport rect."""
-        elements = self.page().snapshot()
-        if not args.get("boxes"):
-            return {
-                "elements": [
-                    {k: v for k, v in e.items() if k != "rect"} for e in elements
-                ]
+        # `boxes` renames the bundle's {x,y,w,h} rect to bounding_box()'s keys;
+        # without it the raw `rect` is stripped, as it was before this task.
+        want_boxes = bool(args.get("boxes"))
+        elements = [
+            {
+                **{k: v for k, v in row.items() if k != "rect"},
+                "ref": refs[i],
+                **({"box": _norm_rect(row.get("rect"))} if want_boxes else {}),
             }
-        return {
-            "elements": [
-                {"role": e.get("role"), "name": e.get("name"), "box": _norm_rect(e.get("rect"))}
-                for e in elements
-            ]
-        }
+            for i, row in enumerate(rows)
+        ]
+```
+
+and extend its docstring with one line:
+
+```
+        ``boxes`` adds each element's viewport rect as ``box`` (``{x, y, width,
+        height}``); without it the raw bundle ``rect`` is dropped entirely.
 ```
 
 - [ ] **Step 5: Render the column**
 
-In `src/visus/web/cli/console.py`, change `format_fields`'s signature and body (`:56-93`) — the header, the column set and the row loop:
+> **Reconciliation (read before typing).** PLAN 4 already replaced `format_fields`,
+> `main._format_fields`, `main.list_fields` and `main.snapshot`. Its versions add
+> `full: bool = False` (CSS/XPATH columns **off** by default), the paired
+> `--highlight/--no-highlight` flag (default **off**), and `snapshot`'s positional
+> `selector` + `--depth` / `--filename` / `--refs`. The blocks below are **their**
+> versions with the `boxes` delta folded in. `boxes` and `full` are independent —
+> `--full --boxes` prints CSS, XPATH *and* BOX.
+
+In `src/visus/web/cli/console.py`, change `format_fields`'s signature and body (`:56-93`, as PLAN 4 left it) — the header, the column set and the row loop:
 
 ```python
 def format_fields(
-    fields: list[dict[str, Any]], *, width: int | None = None, boxes: bool = False
+    fields: list[dict[str, Any]],
+    *,
+    width: int | None = None,
+    full: bool = False,
+    boxes: bool = False,
 ) -> str:
-    """Render fields as a pretty table: #, KIND, NAME, the ready VISUS call, CSS, XPATH.
+    """Render fields as a table: #, KIND, NAME, and the ready-to-paste VISUS call.
 
     The VISUS column is copy-paste-ready and *frame-aware* — for an element inside
     an iframe it is wrapped in ``frame_locator(...)`` so a click/fill actually
-    reaches it (a bare css/xpath would not). An ASCII box is used so the table
-    renders correctly on any console encoding. ``boxes`` appends the field's
-    viewport rect as ``x,y,w,h`` (from ``visus list-fields --boxes``).
+    reaches it (a bare css/xpath would not). ``full=True`` adds the CSS and XPATH
+    columns (PLAN 4: off by default because on a large page they triple what an
+    agent must read for no gain over the VISUS column). ``boxes`` appends the
+    field's viewport rect as ``x,y,w,h`` (from ``visus list-fields --boxes``).
+    An ASCII box is used so the table renders on any console encoding.
     """
     if not fields:
         return "(no fields found)"
@@ -4270,13 +4536,14 @@ def format_fields(
     from rich.console import Console
     from rich.table import Table
 
-    table = Table(box=rich_box.ASCII, header_style="bold", pad_edge=False, show_lines=True)
+    table = Table(box=rich_box.ASCII, header_style="bold", pad_edge=False)
     table.add_column("#", justify="right", no_wrap=True)
     table.add_column("KIND", no_wrap=True)
     table.add_column("NAME", overflow="fold")
     table.add_column("VISUS (copy-paste)", overflow="fold", style="green")
-    table.add_column("CSS", overflow="fold")
-    table.add_column("XPATH", overflow="fold")
+    if full:
+        table.add_column("CSS", overflow="fold")
+        table.add_column("XPATH", overflow="fold")
     if boxes:
         table.add_column("BOX x,y,w,h", no_wrap=True)
     for f in fields:
@@ -4286,9 +4553,9 @@ def format_fields(
             str(f.get("kind", "")),
             name,
             str(f.get("code", "")),
-            str(f.get("css", "")),
-            str(f.get("xpath", "")),
         ]
+        if full:
+            cells.extend([str(f.get("css", "")), str(f.get("xpath", ""))])
         if boxes:
             b = f.get("box")
             cells.append(
@@ -4351,74 +4618,60 @@ and these two `_HELP` lines replacing the existing `list` and `snapshot` lines:
   snapshot [--boxes]   list interactive elements (role/name)
 ```
 
-In `src/visus/web/cli/main.py`, replace `_format_fields` (`:216-219`):
+In `src/visus/web/cli/main.py`, replace `_format_fields` (`:216-219`, as PLAN 4 left it):
 
 ```python
-def _format_fields(fields: list[dict[str, Any]], *, boxes: bool = False) -> str:
+def _format_fields(
+    fields: list[dict[str, Any]], *, full: bool = False, boxes: bool = False
+) -> str:
     from visus.web.cli.console import format_fields
 
-    return format_fields(fields, boxes=boxes)
+    return format_fields(fields, full=full, boxes=boxes)
 ```
 
-Add `boxes` to `list_fields` (`:284-301`) — the new option and the two lines that use it:
+In `list_fields` (`:284-301`, as PLAN 4 left it — keep its `--highlight/--no-highlight`
+paired flag and its `--full` flag) add ONE option and change TWO lines:
 
 ```python
-@app.command("list-fields")
-def list_fields(
-    kind: str = typer.Option(None, "--kind", help="Comma-separated kinds (e.g. input,button)."),
-    show_all: bool = typer.Option(False, "--all", help="Include hidden/disabled fields."),
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
-    no_highlight: bool = typer.Option(False, "--no-highlight", help="Skip the numbered overlay."),
     boxes: bool = typer.Option(False, "--boxes", help="Include each field's viewport rect."),
-) -> None:
-    """Enumerate interactive fields on the current page (numbered, highlighted)."""
-    from visus.web.cli import output
+```
 
-    kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
+```python
     result = _send(
         "list_fields",
         {
             "kinds": kinds,
             "include_hidden": show_all,
-            "highlight": not no_highlight,
+            "highlight": highlight,   # PLAN 4's paired flag, default off
             "boxes": boxes,
         },
     )
-    fields = result.get("fields", [])
-    if as_json:
-        output.set_mode(as_json=True)
-    output.emit(fields, table=_format_fields(fields, boxes=boxes))
 ```
 
-and replace `snapshot` (`:520-543`):
+```python
+    output.emit(fields, table=_format_fields(fields, full=full, boxes=boxes))
+```
+
+In the `snapshot` command (`:520-543`, as PLAN 4 left it — keep its positional
+`selector`, `--depth`, `--filename` and `--refs/--no-refs`) add ONE option, forward it
+in the payload, and add the BOX column to the table it already builds:
 
 ```python
-@app.command()
-def snapshot(
-    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
     boxes: bool = typer.Option(False, "--boxes", help="Include each element's viewport rect."),
-) -> None:
-    """List the page's interactive elements as a role/name table."""
-    from visus.web.cli import output
+```
 
-    result = _send("snapshot", {"boxes": boxes})
-    elements = result.get("elements", [])
-    if as_json:
-        output.set_mode(as_json=True)
-    if not elements:
-        output.emit(elements, table="(no elements)")
-        return
-    from rich import box as rich_box
-    from rich.console import Console
-    from rich.table import Table
+```python
+    # add to the dict PLAN 4's version already passes to _send("snapshot", …)
+    "boxes": boxes,
+```
 
-    table = Table(box=rich_box.ASCII, header_style="bold", pad_edge=False)
-    table.add_column("ROLE", no_wrap=True)
-    table.add_column("NAME", overflow="fold")
+```python
     if boxes:
         table.add_column("BOX x,y,w,h", no_wrap=True)
-    for e in elements:
-        cells = [str(e.get("role", "")), str(e.get("name", ""))]
+```
+
+```python
+    # inside PLAN 4's per-element row loop, after the cells it already appends:
         if boxes:
             b = e.get("box")
             cells.append(
@@ -4426,11 +4679,6 @@ def snapshot(
                 if isinstance(b, dict)
                 else "-"
             )
-        table.add_row(*cells)
-    console_obj = Console()
-    with console_obj.capture() as cap:
-        console_obj.print(table)
-    output.emit(elements, table=cap.get().rstrip("\n"))
 ```
 
 - [ ] **Step 6: Run test to verify it passes**
@@ -4450,11 +4698,13 @@ Expected: PASS — `Field.box` defaults to `None`, `list_fields`/`snapshot` stri
 
 - [ ] **Step 9: Update the README**
 
-In `README.md`, in the **Inspect / search the DOM** table, replace the `visus snapshot` and `visus list-fields` rows with:
+In `README.md`, in the **Inspect / search the DOM** table, add `[--boxes]` to the
+`visus snapshot` and `visus list-fields` rows **as PLAN 4 left them** (PLAN 4 already
+rewrote both rows for `[selector] --depth --filename --refs` and
+`--highlight/--no-highlight --full`) and extend each description with the same clause:
 
 ```markdown
-| `visus snapshot [--boxes] [--json]` | List interactive elements as a role/name table (`--boxes` adds each viewport rect). |
-| `visus list-fields --kind <k> --all --no-highlight [--boxes] [--json]` | Enumerate interactive fields, numbered + highlighted (`--boxes` adds each viewport rect). |
+… (`--boxes` adds each element's viewport rect as `x,y,w,h`).
 ```
 
 - [ ] **Step 10: Run the gates and commit**
@@ -4633,6 +4883,15 @@ In `src/visus/web/cli/session_server.py`, replace `_op_eval` (`:486-489`):
 ```
 
 - [ ] **Step 4: Give the CLI command a target**
+
+> **Reconciliation (read before typing).** PLAN 4 already converted `eval` to the
+> envelope, unwrapping `env["result"]["result"]` for the table. The body below ends with
+> `output.emit(result.get("result"))` for readability; **substitute PLAN 4's
+> `output.emit_envelope(_send_env("eval", args), table=…)` form**, keeping its unwrapping.
+> In the test, `test_cli_eval_forwards_the_target` must patch
+> `session_client.send_envelope` returning
+> `{"ok": True, "result": {"result": "v"}, "page": {"url": "http://x/", "title": "T"}}`;
+> the recorded `(op, args)` assertions are unchanged.
 
 In `src/visus/web/cli/main.py`, replace `eval_js` (`:812-830`):
 
@@ -5820,6 +6079,8 @@ Closes **row 13**. `Field.code` is computed frame-aware on every enumeration (`d
 
 `--raw` here is the per-command spelling of PLAN 4's global `--raw`, exactly as the per-command `--json` in Tasks 3-6: it only ever *sets* the mode, guarded so it can never clobber a globally-set one.
 
+**Why `--raw` here prints one line and not three, with no extra code** (Rule 6 in the Prerequisites). The table is the expression *plus* a `css :` and an `xpath :` line — decoration, not the value's rendering — and the emitted value is `result["code"]`, a plain `str`. PLAN 4's `emit` drops the table for a scalar under `--raw`, so `visus generate-locator 3 --raw` prints a single copy-pasteable expression while text mode still shows all three lines. The call below therefore needs no mode branch; just make sure the emitted value is the `str` code and not the whole dict.
+
 **Files:**
 - Modify: `src/visus/web/cli/codegen.py:55-72` (new `locator_expr` + `_pystr`)
 - Modify: `src/visus/web/cli/session_server.py` (new `_op_generate_locator`)
@@ -5896,6 +6157,26 @@ def test_cli_generate_locator(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "//input" in r.output
 
 
+def test_cli_generate_locator_raw_prints_only_the_expression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--raw` means the expression alone: the emitted value is a `str`, so PLAN 4's
+    `emit` drops the css/xpath table under RAW (Prerequisites rule 6)."""
+    from visus.web.cli import output
+
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {"code": 'page.locator("#u")', "css": "#u", "xpath": "//input"},
+    )
+    try:
+        r = runner.invoke(app, ["generate-locator", "3", "--raw"])
+        assert r.exit_code == 0, r.output
+        assert r.output == 'page.locator("#u")\n'
+    finally:
+        output.set_mode()
+
+
 def test_repl_generate_locator() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -5930,6 +6211,14 @@ Run: `uv run pytest tests/test_cli_page_ops.py -m "not browser" -k "locator_expr
 Expected: FAIL — `ImportError: cannot import name 'locator_expr' from 'visus.web.cli.codegen'`.
 
 - [ ] **Step 3: Add the expression builder**
+
+> **Reconciliation (read before typing).** PLAN 4 already replaced `_target_expr` and
+> `generate_line` in this file (it added a `"text"` branch to `_target_expr` and a
+> `_NO_ARG_ACTIONS` table above `generate_line`). This task **adds two new functions
+> beside them and edits neither** — `_target_expr` keeps its `repr`-based spelling,
+> whose exact output is the golden text asserted in `tests/test_codegen.py`. Insert the
+> block below immediately after PLAN 4's `_target_expr` (the pre-plan line numbers
+> `:55-60` no longer point at its last line).
 
 In `src/visus/web/cli/codegen.py`, add after `_target_expr` (`:55-60`):
 
@@ -6041,6 +6330,8 @@ def generate_locator(
         lines.append(f"css   : {result['css']}")
     if result.get("xpath"):
         lines.append(f"xpath : {result['xpath']}")
+    # The value is a str, so `emit` drops the table under --raw all by itself and
+    # this prints the expression alone (Prerequisites rule 6).
     output.emit(result.get("code"), table="\n".join(lines))
 ```
 
@@ -6061,7 +6352,7 @@ and this `_HELP` line right after `count TARGET`:
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_page_ops.py -m "not browser" -k "locator_expr or generate_locator" -v --no-cov`
-Expected: PASS (5 passed)
+Expected: PASS (6 passed)
 
 - [ ] **Step 6: Run the browser test**
 
@@ -6686,7 +6977,7 @@ and these two `_HELP` lines right after `eval-on`:
 - [ ] **Step 7: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_tracing.py -m "not browser" -v --no-cov`
-Expected: PASS (10 passed)
+Expected: PASS (11 passed)
 
 - [ ] **Step 8: Run the browser test**
 
@@ -6925,24 +7216,31 @@ def test_network_capture_export_against_a_real_page(base_url: str, tmp_path: Pat
     )
     try:
         assert h.handle("network_capture_start", {})["ok"] is True
+        # Two fetches: the POST proves the hook records the REQUEST body (which the
+        # CDP response log, and therefore `visus requests`, can never show); the GET
+        # proves it records the RESPONSE body. The fixture server
+        # (tests/conftest.py::_FixtureHandler) only implements do_GET, so the POST
+        # answers 501 — irrelevant here, the request side is what is under test.
         h.handle(
             "eval",
             {
-                "expression": "() => { window.__t = false;"
+                "expression": "() => { window.__t = 0;"
                 " fetch('/forms.html', {method: 'POST', body: 'q=visus'})"
-                " .then(r => r.text()).then(() => { window.__t = true; }); return true; }"
+                " .then(r => r.text()).then(() => { window.__t += 1; });"
+                " fetch('/forms.html').then(r => r.text())"
+                " .then(() => { window.__t += 1; }); return true; }"
             },
         )
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            if h.handle("eval", {"expression": "() => window.__t === true"})["result"]["result"]:
+            if h.handle("eval", {"expression": "() => window.__t === 2"})["result"]["result"]:
                 break
             time.sleep(0.1)
 
         out_file = tmp_path / "capture.json"
         exported = h.handle("network_capture_export", {"path": str(out_file)})
         assert exported["ok"] is True, exported
-        assert exported["result"]["entries"] >= 1
+        assert exported["result"]["entries"] >= 2
     finally:
         h.close()
 
@@ -6951,7 +7249,15 @@ def test_network_capture_export_against_a_real_page(base_url: str, tmp_path: Pat
     posted = [e for e in doc["entries"] if e["method"] == "POST"]
     assert posted, doc["entries"]
     assert posted[0]["reqBody"] == "q=visus"
-    assert "Fields" in (posted[0]["respBody"] or "")
+    got = [
+        e
+        for e in doc["entries"]
+        if e["method"] == "GET" and e["url"].endswith("/forms.html")
+    ]
+    assert got, doc["entries"]
+    # forms.html's <label for="user">Username</label> — the response body really
+    # came back through the hook, not just the request line.
+    assert "Username" in (got[0]["respBody"] or "")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -7569,7 +7875,9 @@ and update the `screenshot` `_HELP` line to:
   screenshot [path] [--hires]  save a screenshot (default screenshot.png)
 ```
 
-Note this branch also carries PLAN 3's B9 fix: the REPL now resolves the path against the **client's** cwd, exactly as `main.py:440-442` already does.
+Note this branch preserves PLAN 3's B9 fix (carried forward by Task 1): the REPL
+resolves the path against the **client's** cwd, exactly as `main.py:440-442` does. The
+pre-plan `args = {"path": rest[0]} if rest else {}` form must not reappear.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -8039,26 +8347,49 @@ Expected: `missing from REPL help: []`
 
 - [ ] **Step 4: Drive the finished CLI by hand once**
 
-Run these in order from the repo root and confirm each printed line:
+A `data:` URL is an **opaque origin** — Chrome throws on `localStorage` and refuses
+cookies there — so drive against the fixture directory over HTTP. In one terminal:
 
 ```bash
-uv run visus session start --headless "data:text/html,<title>one</title><button id=go>Go</button><input id=q>"
+uv run python -m http.server 8765 --directory tests/fixtures
+```
+
+Then, in another terminal from the repo root, run these in order and confirm each
+printed line:
+
+```bash
+uv run visus session start --headless http://127.0.0.1:8765/fields.html
 uv run visus list-fields --no-highlight --boxes
 uv run visus generate-locator 0
-uv run visus highlight 0
+uv run visus highlight -s "#btn"
 uv run visus resize 900 600
 uv run visus storage set token abc
 uv run visus storage get token
-uv run visus eval "(el) => el.id" -s "#go"
+uv run visus eval "(el) => el.id" -s "#btn"
 uv run visus screenshot -o shot.png --hires
 uv run visus tracing-start -o run.zip
-uv run visus click --role button --name Go --button right
+uv run visus click --role button --name "Click me"
+uv run visus click -s "#btn" --button right
 uv run visus tracing-stop --report report.html
 uv run visus report run.zip -o report2.html
 uv run visus session stop
 ```
 
-Expected, in order: a `session started` line; a field table with a `BOX x,y,w,h` column; `page.locator("#go")`; `highlighted`; `viewport is now 900x600`; `localStorage['token'] = 'abc'`; `abc`; `go`; `saved …/shot.png`; `tracing run <id> → …/run.zip`; `clicked with the right button`; a `tracing run <id> stopped: 1 action(s), 0 failure(s)` block naming both files; `saved …/report2.html`; `session stopped`.
+Expected, in order: a `session started` line; a field table with a `BOX x,y,w,h` column;
+`page.locator("#topinput")` (index 0 of `fields.html`); `highlighted`; `viewport is now
+900x600`; `localStorage['token'] = 'abc'`; `abc`; `btn`; `saved …/shot.png`; `tracing run
+<id> → …/run.zip`; `clicked`; `clicked with the right button`; a `tracing run <id>
+stopped: 1 action(s), 0 failure(s)` block naming both files; `saved …/report2.html`;
+`session stopped`.
+
+**Why `1 action(s)` and not 2:** the left click goes through `Locator.click` →
+`run_action` → `_steps.run_step`, which is the only path the `Recorder` observes. The
+`--button right` path deliberately bypasses actionability and drives `Page.mouse`
+directly (Task 9), so it is not a recorded step. That is expected, not a defect —
+`visus mousemove/mousedown/mouseup/mousewheel` are invisible to tracing for the same
+reason.
+
+Stop the fixture server when finished.
 
 Then confirm the artefacts:
 

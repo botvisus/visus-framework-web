@@ -18,7 +18,7 @@
 - Commits: small, TDD (failing test → minimal impl → green → commit), semantic messages `label(scope): description`. Labels: `fix`, `feat`, `chore`, `docs`, `test`, `devops`.
 - **Never** add `Co-Authored-By` lines to commits.
 - Single-test runs use `--no-cov` (the 90% gate only makes sense on a full run).
-- Every new CLI command gets its REPL twin (`console.py` dispatch + `_HELP`) and a `README.md` command-table row in the same task.
+- Every new CLI command gets its REPL twin (`console.py` dispatch + `_HELP`), a `README.md` command-table row, **and a row in `src/visus/web/skills/visus-web/references/cli-commands.md`**, all in the same task. That third place is not optional: PLAN 1 Task 7 ships `tests/test_skill_docs.py::test_every_cli_command_is_documented`, which walks `app.registered_commands` / `registered_groups` and fails unless the literal string `` `visus <name>` `` appears in that file — so a missing row fails `uv run pytest -q` at the commit gate of the task that added the command.
 
 ## Prerequisites
 
@@ -51,21 +51,35 @@ Four plan files must land before this one.
 
 **PLAN 4 — `2026-08-06-tier2c-agent-driving-loop.md`** owns `cli/output.py`, the global flags and the daemon envelope. Consumed here:
 
-- `output.set_mode(*, as_json=False, raw=False)`, `output.mode() -> Mode`, `output.emit(value, *, table=None)`, `output.emit_error(message, *, code=1) -> NoReturn`, `output.emit_envelope(env, *, table=None)`, `output.set_output_dir(path)`, `output.resolve_out(path)`, `output.snapshot_sink()`.
+- `output.set_mode(*, as_json=False, raw=False)`, `output.mode() -> Mode`, `output.emit(value, *, table=None)`, `output.emit_error(message, *, code=1) -> NoReturn`, `output.emit_envelope(env, *, table=None)`, `output.set_output_dir(path: str | None)`, `output.resolve_out(path: str) -> str`, `output.set_snapshot_sink(enabled: bool)`, `output.snapshot_sink() -> bool`.
 - `session_client.send_envelope(op, args=None, *, start_dir=None) -> dict[str, Any]` — Task 1 adds `name=` to it and to `send()`.
 - `main._send(op, args=None) -> Any` and `main._send_env(op, args=None) -> dict[str, Any]`.
-- `session_server._MUTATING_OPS: frozenset[str]` — Tasks 6/8/11/12 add their ops to the existing frozenset.
+- `session_server._MUTATING_OPS: frozenset[str]` — Tasks 6 (`route`, `unroute`), 8 (`run_code`) and 11 (`drop`) add their ops to the existing frozenset; Task 12 adds none, because targetless `upload` reuses the `"upload"` entry that is already there. **Each of those three tasks must add the same string to the expected frozenset in `tests/test_cli_session.py::test_mutating_ops_cover_every_state_changing_op`** — PLAN 4 Task 4 wrote that test as an exact `==` inventory, so appending to the module constant alone turns the suite red at your own commit gate.
 - `session_server._post_state() -> dict[str, Any]`.
 - `console.render_value(result) -> str` (produced by PLAN 3, rendered by PLAN 4).
+- `output.emit(value, *, table=None)` decides the `--raw` shape itself: under RAW it keeps the `table` when `value` is a list/dict (the table is the value's rendering) and prints the bare `str(value)` when `value` is a scalar (the table is decoration). `output.emit_envelope` always drops it and prints `env["result"]` alone. PLAN 4 Task 1 states the split and pins it with tests. **No call site in this plan adds an `if output.mode() is output.Mode.RAW` branch** — pass the structured value and its rendering and the right thing happens (`visus --raw unroute "*"` prints `2`, `visus --raw route-list` prints the table).
 
 **PLAN 5 — `2026-08-06-tier2b-cli-surface-parity.md`** owns the raw launch passthrough. Its Task 7 produces exactly these, which Task 13 builds the higher-level profile UX **on top of** rather than duplicating:
 
 - `SessionHandler(..., user_data_dir: str | None = None, remote_url: str | None = None, slow_mo: int = 0)` and the `launch(...)` call inside `_ensure()` that forwards all three.
-- `session_client.start_daemon(engine, headless, url, *, user_data_dir=None, remote_url=None, slow_mo=0, cwd=None, timeout=20.0, idle_timeout=None)`.
-- env vars `VISUS_WEB_USER_DATA_DIR`, `VISUS_WEB_REMOTE_URL`, `VISUS_WEB_SLOW_MO`.
-- `main.session_start(url, engine, headless, user_data_dir, remote_url, slow_mo, idle_timeout)` — Task 13 **extends** this signature; it never re-declares `--user-data-dir`'s behaviour.
+- `session_client.start_daemon(engine, headless, url, *, user_data_dir=None, remote_url=None, slow_mo=0, cwd=None, timeout=20.0, idle_timeout=None)` — the `idle_timeout=` keyword is **PLAN 3 Task 14's**, not PLAN 5's; the signature above is the post-PLAN-3-and-5 union this plan then adds `name=` / `allow_run_code=` / `debugger_address=` / `device=` to.
+- env vars `VISUS_WEB_USER_DATA_DIR`, `VISUS_WEB_REMOTE_URL`, `VISUS_WEB_SLOW_MO` (and PLAN 3 Task 14's `VISUS_WEB_IDLE_TIMEOUT`).
+- `main.session_start(url, engine, headless, user_data_dir, remote_url, slow_mo, idle_timeout)` — again, `idle_timeout` is PLAN 3 Task 14's parameter. Task 13 **extends** this signature; it never re-declares `--user-data-dir`'s behaviour.
 
-PLAN 5 also produces `session_server._op_type` / `_op_key_down` / `_op_key_up` and `console.dispatch`'s table-driven target parsing; this plan's REPL additions slot into that same dispatch.
+PLAN 5 also produces `session_server._op_type` / `_op_key_down` / `_op_key_up` (its Task 8), and — load-bearing for Tasks 6/8/11/12 — its **Task 1** ("REPL target parsing + the seven missing REPL commands") **rewrites `console.dispatch`'s body**: it deletes the inner `_idx(token)` helper and replaces every `_idx(rest[...])` call with one shared parser
+
+```python
+console._target(tokens: list[str]) -> tuple[dict[str, Any], list[str]]
+console._drag_target(tokens: list[str]) -> dict[str, Any]
+```
+
+adds `import json` + `from pathlib import Path` to `console.py`'s imports, adds REPL branches for `upload` / `drag` / `add-cookies` / `clear-cookies` / `read-text` / `solve-captcha` / `find-image`, and replaces the whole `_HELP` block with a target-syntax preamble plus one line per verb. **`_idx` therefore does not exist by the time this plan runs**, and an `upload` REPL branch already does. This plan's REPL additions are written against that post-PLAN-5 shape: Tasks 6/8/11 *add* branches built on `_target`, and Task 12 *replaces* PLAN 5's `upload` branch and its `_HELP` line rather than adding a second one.
+
+By the time this plan runs, `dispatch` and `_HELP` have been through **three** hands:
+PLAN 4 Task 16 (the `_act` envelope path, `find`, `export-script`, `highlight-all`),
+then PLAN 5 Task 1 (`_target`, seven new verbs, the rewritten `_HELP`), then PLAN 5
+Task 10 (the single-element `highlight` verb, which sits *beside* PLAN 4's
+`highlight-all`). Add branches; never replace a verb you did not create.
 
 ### Ordering inside this plan (hard constraint)
 
@@ -122,7 +136,8 @@ PLAN 5 also produces `session_server._op_type` / `_op_key_down` / `_op_key_up` a
 | `src/visus/web/api/browser.py` | `Browser.detach()`. |
 | `pyproject.toml` | `websocket-client` dependency + its mypy override. |
 | `README.md` | Session/Actions/DevTools command-table rows, the env-var table, and a config-file section. |
-| `tests/test_cli_session.py` | Session-file paths become `.visus/sessions/default.json`. |
+| `src/visus/web/skills/visus-web/references/cli-commands.md` (PLAN 1's file) | One row per command this plan adds — required by PLAN 1 Task 7's `test_every_cli_command_is_documented` gate. |
+| `tests/test_cli_session.py` | Session-file paths become `.visus/sessions/default.json`; the `_MUTATING_OPS` expectation in `test_mutating_ops_cover_every_state_changing_op` gains `route`, `unroute`, `run_code` and `drop`. |
 | `tests/test_e2e_cli_session.py` | Same, at `:48`. |
 | `tests/test_backend_protocols.py` | `_FakePage` gains the route methods; `_FakeBrowser` gains `detach`. |
 
@@ -132,7 +147,7 @@ PLAN 5 also produces `session_server._op_type` / `_op_key_down` / `_op_key_up` a
 
 `session_client.start_daemon` refuses a second session outright (`:143-147`, "a session is already running (pid ..., port ...)"), and discovery walks UP the tree (`:58-66`) so a `start` inside a subfolder of a project that already has a daemon binds to the parent's without saying so. One name per project directory is the whole model. This task replaces it with a namespace.
 
-`-s` is **already** `--selector` in 29 places (`main.py:307`, `:320`, `:341`, …), so the flag is `--session` / `-S` (capital S) and the env var is `VISUS_WEB_SESSION`, per CONVENTIONS.
+`-s` is **already** bound to `--selector` on 21 commands (`grep -c '"--selector", "-s"' src/visus/web/cli/main.py` → 21, same as `grep -c '"-s"'`; `main.py:307`, `:320`, `:341`, …) — so the flag is `--session` / `-S` (capital S) and the env var is `VISUS_WEB_SESSION`, per CONVENTIONS. (Earlier drafts of the conventions file and the source analysis said "29"; 21 is the verified count and the number every plan now carries. The conclusion is unchanged either way — `-s` is taken.)
 
 The upward walk is kept — it is what lets a command in `repo/src/` reach the session started in `repo/` — but two things change so it can never be silent: the "already running" error now prints the **resolved file path** it found, and `visus session list` (Task 2) shows where every session lives.
 
@@ -369,7 +384,7 @@ def test_cli_root_accepts_the_session_flag(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_cli_session_flag_is_capital_s_only() -> None:
-    """`-s` must stay `--selector`: 29 commands already bind it."""
+    """`-s` must stay `--selector`: 21 commands already bind it."""
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
     assert "-S" in r.output and "--session" in r.output
@@ -759,10 +774,25 @@ In `src/visus/web/cli/main.py`, add the parameter to the `@app.callback()` that 
 ```python
     from visus.web.cli import session_client
 
-    session_client.set_session_name(session)
+    try:
+        session_client.set_session_name(session)
+    except session_client.SessionError as exc:
+        output.emit_error(f"error: {exc}")
 ```
 
-placed immediately before the existing `output.set_mode(...)` calls, so a bad name fails before anything is printed.
+placed immediately **after** the three existing `output.set_*` calls and **before**
+the `check_installed_skills()` guard. Two rules force that position, and they are
+not negotiable:
+
+- PLAN 1's extension contract (its Task 4, rule 3) and PLAN 4's Prerequisites both
+  pin `output.set_mode(...)` as the **first** statement of `_root`'s body. An
+  invalid name leaves through `output.emit_error`, which formats itself according
+  to the mode — so setting the mode first is what makes
+  `visus --json -S "../evil" title` write `{"ok": false, "error": …}` to stderr
+  instead of a plain line into a JSON pipeline.
+- The `try`/`except` is what turns `validate_session_name`'s `SessionError` into a
+  clean `exit 1` on stderr instead of a traceback. `_root` has no other error
+  funnel: `main._send`'s is inside `_send`, and `_root` never calls it.
 
 - [ ] **Step 6: Repair the tests that hard-code the old path**
 
@@ -779,7 +809,7 @@ def _write_session(dir_: Path, info: dict[str, Any], name: str = "default") -> P
     return sf
 ```
 
-- `test_find_session_cleans_corrupt_file` (`:821-827`): replace the two body lines that build the path with
+- `test_find_session_cleans_corrupt_file` (`:821-827`): replace the three body lines that build the path (`:822-824`) with
 
 ```python
     visus = tmp_path / ".visus" / "sessions"
@@ -832,7 +862,7 @@ and PLAN 3's `test_start_recovers_after_the_daemon_is_hard_killed` lock path:
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_sessions_named.py -v --no-cov`
-Expected: PASS (16 passed)
+Expected: PASS (25 passed — 13 test functions, two of which are parametrised 8× and 6×)
 
 Run: `uv run pytest tests/test_cli_session.py -q --no-cov`
 Expected: PASS (no failures)
@@ -872,7 +902,7 @@ The registry entry deliberately carries **no token** — the shared secret stays
 - Test: `tests/test_cli_sessions_named.py`
 
 **Interfaces:**
-- Consumes: `session_server.session_file` / `sessions_dir` (Task 1); `session_client._probe_pid`, `_socket_open` (PLAN 3); `output.emit` (PLAN 4)
+- Consumes: `session_server.session_file` / `sessions_dir` (Task 1); `session_client._probe_pid` (PLAN 3 Task 17); `session_client._socket_open` (pre-existing, `session_client.py:49-55` — PLAN 3 does not change it); `output.emit` (PLAN 4)
 - Produces:
   ```python
   session_server.visus_home() -> Path
@@ -1315,7 +1345,7 @@ def session_list() -> None:
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_sessions_named.py -k "registry or list_sessions or session_list" -v --no-cov`
-Expected: PASS (7 passed)
+Expected: PASS (8 passed)
 
 - [ ] **Step 7: Update the README**
 
@@ -1358,7 +1388,7 @@ This task also sweeps the pre-namespace `.visus/session.json` left by a daemon s
 - Test: `tests/test_cli_sessions_named.py`
 
 **Interfaces:**
-- Consumes: `session_client.list_sessions` (Task 2); `_send_raw`, `_cleanup`, `_terminate`, `_probe_pid`, `_read_json` (PLAN 3 + Task 2); `session_server.registry_file`, `session_server._read_lock_pid` (Task 2 + PLAN 3); `output.emit` (PLAN 4)
+- Consumes: `session_client.list_sessions` and `_read_json` (both Task 2 of this plan); `_send_raw` and `_cleanup` (pre-existing, `session_client.py:99` / `:92`; PLAN 3 Task 4 extends `_cleanup` to remove the lock too); `_terminate` (PLAN 3 Task 5) and `_probe_pid` (PLAN 3 Task 17); `session_server.registry_file` (Task 2) and `session_server._read_lock_pid` (PLAN 3 Task 3); `output.emit` (PLAN 4)
 - Produces:
   ```python
   session_client.profile_dir(cwd: str | Path | None = None, name: str | None = None) -> Path
@@ -1577,9 +1607,19 @@ def test_delete_data_with_nothing_to_delete(
 
 
 def test_cli_fleet_commands(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(session_client, "close_all", lambda: "closed 2 session(s)")
-    monkeypatch.setattr(session_client, "kill_all", lambda: "killed pid 1")
-    monkeypatch.setattr(session_client, "delete_data", lambda name=None: f"deleted {name}")
+    """All three commands call their client function with NO arguments.
+
+    `delete_data` resolves the session name itself (via `session_name()`), so the
+    fake must too — asserting `deleted auth` proves the root callback's `-S auth`
+    reached `set_session_name` before the subcommand ran.
+    """
+    monkeypatch.setattr(session_client, "close_all", lambda **kw: "closed 2 session(s)")
+    monkeypatch.setattr(session_client, "kill_all", lambda **kw: "killed pid 1")
+    monkeypatch.setattr(
+        session_client,
+        "delete_data",
+        lambda **kw: f"deleted {session_client.session_name(kw.get('name'))}",
+    )
 
     assert "closed 2" in runner.invoke(app, ["session", "close-all"]).output
     assert "killed pid 1" in runner.invoke(app, ["session", "kill-all"]).output
@@ -1788,7 +1828,7 @@ def session_delete_data() -> None:
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_sessions_named.py -v --no-cov`
-Expected: PASS (35 passed)
+Expected: PASS (45 passed — 25 from Task 1, 8 from Task 2, 12 from this task)
 
 - [ ] **Step 6: Update the README**
 
@@ -2040,17 +2080,25 @@ class RouteRule:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> RouteRule:
-        """Rebuild a rule from :meth:`to_dict` (or from a partial CLI payload)."""
-        status = data.get("status")
-        headers = data.get("headers")
+        """Rebuild a rule from :meth:`to_dict` (or from a partial CLI payload).
+
+        Every field is narrowed with ``isinstance`` rather than cast: this is fed
+        straight from a JSON socket payload, so a wrong-typed value must become a
+        clean default instead of a ``TypeError`` inside the daemon.
+        """
+        raw_status = data.get("status")
+        raw_body = data.get("body")
+        raw_type = data.get("content_type")
+        raw_headers = data.get("headers")
+        headers: dict[str, str] = {}
+        if isinstance(raw_headers, dict):
+            headers = {str(k): str(v) for k, v in raw_headers.items()}
         return cls(
             pattern=str(data.get("pattern", "")),
-            status=None if status is None else int(status),  # type: ignore[arg-type]
-            body=None if data.get("body") is None else str(data.get("body")),
-            content_type=(
-                None if data.get("content_type") is None else str(data.get("content_type"))
-            ),
-            headers={str(k): str(v) for k, v in dict(headers or {}).items()},  # type: ignore[arg-type]
+            status=int(raw_status) if isinstance(raw_status, (int, str)) else None,
+            body=None if raw_body is None else str(raw_body),
+            content_type=None if raw_type is None else str(raw_type),
+            headers=headers,
             abort=bool(data.get("abort", False)),
         )
 
@@ -2064,7 +2112,8 @@ class RouteRule:
         Reuses the network capture's redaction list so `visus route-list` cannot
         become the one command that prints an ``Authorization`` header back out.
         """
-        return replace(self, headers={str(k): str(v) for k, v in scrub_headers(self.headers).items()})
+        scrubbed = scrub_headers(self.headers)
+        return replace(self, headers={str(k): str(v) for k, v in scrubbed.items()})
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -2088,7 +2137,7 @@ git commit -m "feat(api): add RouteRule with Playwright-style URL glob matching"
 
 ### Task 5: The CDP `Fetch` interceptor and `page.route()`
 
-`execute_cdp_cmd` (which `NetworkCapture` uses at `network.py:189-204`) is a *command* channel — chromedriver's `send_command_and_get_result` returns one result and delivers no events, and its performance log only carries `Network.*` / `Page.*`. `Fetch.requestPaused` therefore needs a DevTools connection of its own. Chrome has allowed multiple DevTools clients per target since M63, so a second client can enable `Fetch` and answer pauses without disturbing the one chromedriver holds.
+`execute_cdp_cmd` (which `NetworkCapture` uses at `network.py:189-203`) is a *command* channel — chromedriver's `send_command_and_get_result` returns one result and delivers no events, and its performance log only carries `Network.*` / `Page.*`. `Fetch.requestPaused` therefore needs a DevTools connection of its own. Chrome has allowed multiple DevTools clients per target since M63, so a second client can enable `Fetch` and answer pauses without disturbing the one chromedriver holds.
 
 The whole websocket lives in `backends/selenium/cdp_fetch.py`; `api/route.py` and `Page` never see it. **Chrome and Edge only** — Firefox exposes no CDP endpoint, and the error says so and names the alternative rather than misbehaving quietly.
 
@@ -2097,14 +2146,14 @@ The whole websocket lives in `backends/selenium/cdp_fetch.py`; `api/route.py` an
 - Modify: `src/visus/web/backends/base.py:97-100` (network-controls block of `PageDelegate`)
 - Modify: `src/visus/web/backends/selenium/driver_delegate.py:1-34` (imports), `:81-107` (`__init__`), `:195-203` (`close`), `:934-955` (network-controls block)
 - Modify: `src/visus/web/api/page.py:353-365` (network-controls block)
-- Modify: `src/visus/web/async_api/__init__.py:645-654` (network-controls block)
+- Modify: `src/visus/web/async_api/__init__.py:644-653` (network-controls block)
 - Modify: `pyproject.toml:18` (dependencies), `:96-102` (mypy overrides)
 - Modify: `tests/test_backend_protocols.py:121-123`
 - Create: `tests/fixtures/route_fetch.html`
 - Test: `tests/test_route.py`
 
 **Interfaces:**
-- Consumes: `RouteRule`, `cdp_url_pattern` (Task 4); `errors.VisusWebError` (`errors.py:5-6`)
+- Consumes: `RouteRule`, `cdp_url_pattern` (Task 4); `errors.VisusWebError` (`errors.py:6-7`)
 - Produces:
   ```python
   # backends/selenium/cdp_fetch.py
@@ -2423,7 +2472,10 @@ class FetchInterceptor:
         """Connect and enable ``Fetch``, then start the pump thread."""
         if self._thread is not None:
             return
-        import websocket  # imported here so the module loads without the extra present
+        # Imported inside start() rather than at module scope: `websocket-client`
+        # is a hard dependency, but nothing else in visus touches it, and every
+        # `visus` invocation imports driver_delegate — which imports this module.
+        import websocket
 
         try:
             self._ws = websocket.create_connection(self._ws_url, timeout=self._timeout)
@@ -3202,12 +3254,12 @@ In `src/visus/web/cli/console.py`, add these branches immediately after the `eva
 
 ```python
         if cmd == "route":
-            args = {"pattern": rest[0]}
+            route_args: dict[str, Any] = {"pattern": rest[0]}
             if len(rest) > 1:
-                args["status"] = int(rest[1])
+                route_args["status"] = int(rest[1])
             if len(rest) > 2:
-                args["body"] = " ".join(rest[2:])
-            r = send("route", args)
+                route_args["body"] = " ".join(rest[2:])
+            r = send("route", route_args)
             rule = r.get("route", {})
             verb = "aborting" if rule.get("abort") else f"mocking with {rule.get('status') or 200}"
             return f"routed {rule.get('pattern', rest[0])} — {verb}"
@@ -3236,7 +3288,7 @@ and add these `_HELP` lines immediately after the `eval expr` line (`:44`):
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_route.py -v --no-cov`
-Expected: PASS (15 passed)
+Expected: PASS (14 passed)
 
 - [ ] **Step 7: Update the README**
 
@@ -3278,7 +3330,7 @@ git commit -m "feat(cli): add route, unroute and route-list for network mocking"
 Executing arbitrary Python inside the user's live browser session is a genuine capability change, so the gate lands **before** the capability and the default-OFF path is what gets tested first. A session started without `--allow-run-code` refuses with a message naming the flag; nothing else about it changes.
 
 **Files:**
-- Modify: `src/visus/web/cli/session_server.py:84-101` (`__init__`), `:571-589` (`_op_status`), `:697-710` (session payload), `:738-773` (`main`)
+- Modify: `src/visus/web/cli/session_server.py:84-101` (`__init__`), `:571-589` (`_op_status`), `:697-707` (session payload), `:738-773` (`main`)
 - Modify: `src/visus/web/cli/session_client.py` — `start_daemon`'s env block
 - Modify: `src/visus/web/cli/main.py` — `session start --allow-run-code`
 - Modify: `README.md` (Session table row, env-var table)
@@ -3897,7 +3949,7 @@ git commit -m "feat(cli): add run-code to execute Python against the live sessio
 - Test: `tests/test_cli_attach.py`
 
 **Interfaces:**
-- Consumes: `errors.UnsupportedEngineError` (`errors.py:9-10`); `Engine.CHROME` / `Engine.EDGE` (`engine.py:9-12`)
+- Consumes: `errors.UnsupportedEngineError` (`errors.py:10-11`); `Engine.CHROME` / `Engine.EDGE` (`engine.py:9-12`)
 - Produces:
   ```python
   visus.web.launch(engine=Engine.CHROME, *, headless=False, slow_mo=0,
@@ -3907,7 +3959,8 @@ git commit -m "feat(cli): add run-code to execute Python against the live sessio
   BrowserDelegate.detach() -> None
   SeleniumBrowserDelegate.detach() -> None
   chrome.build_options(*, headless, download_dir, user_data_dir,
-                       debugger_address: str | None = None) -> Options   # same for edge/firefox/edge_ie
+                       debugger_address: str | None = None) -> Options
+  # edge.build_options / firefox.build_options / edge_ie.build_options: same signature
   ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -4361,7 +4414,7 @@ In `tests/test_browsers_chrome.py`, `tests/test_browsers_edge.py`, `tests/test_b
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_attach.py -v --no-cov`
-Expected: PASS (11 passed)
+Expected: PASS (10 passed — 9 test functions, one parametrised 2×)
 
 Run: `uv run pytest tests/test_browsers_chrome.py tests/test_browsers_edge.py tests/test_browsers_firefox.py tests/test_browsers_edge_ie.py tests/test_backend_protocols.py tests/test_selenium_backend_protocol.py -q --no-cov`
 Expected: PASS
@@ -4811,7 +4864,7 @@ def session_detach() -> None:
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_attach.py -v --no-cov`
-Expected: PASS (24 passed)
+Expected: PASS (23 passed — 10 from Task 9, 13 from this task)
 
 Run: `uv run pytest tests/test_cli_session.py tests/test_cli_sessions_named.py -q --no-cov`
 Expected: PASS — `serve()`'s teardown is unchanged for every non-detached session.
@@ -4935,8 +4988,10 @@ runner = CliRunner()
 def test_drop_delivers_a_file_to_a_zone_with_no_file_input(
     base_url: str, tmp_path: Path
 ) -> None:
+    # write_bytes, not write_text: on Windows text mode turns each "\n" into
+    # "\r\n", which would make the File 10 bytes and break the size assertion.
     payload = tmp_path / "report.csv"
-    payload.write_text("a,b\n1,2\n", encoding="utf-8")
+    payload.write_bytes(b"a,b\n1,2\n")
 
     h = session_server.SessionHandler(
         engine="chrome", headless=True, url=f"{base_url}/dropzone.html"
@@ -5172,19 +5227,28 @@ def drop(
 
 - [ ] **Step 6: Write the REPL twin**
 
-In `src/visus/web/cli/console.py`, add this branch immediately after the `clear-input` branch (`:137-138`):
+In `src/visus/web/cli/console.py`, add this branch immediately after the `clear-input` branch (today `:137-138`; PLAN 5 Task 3 rewrites its body to use `_target`, so anchor on the `if cmd == "clear-input":` line, not the number):
 
 ```python
         if cmd == "drop":
-            r = send("drop", {**_idx(rest[0]), "data": " ".join(rest[1:])})
+            tgt, tail = _target(rest)
+            r = send("drop", {**tgt, "data": " ".join(tail)})
             dropped = r.get("dropped", {})
             return f"dropped {dropped.get('files', 0)} file(s), types {dropped.get('types', [])}"
 ```
 
-and this `_HELP` line after the `clear-input N` line (`:30`):
+`_target` is PLAN 5 Task 3's shared parser (`_idx` no longer exists). It returns
+`({"index": 2}, ["hello", "there"])` for `drop 2 hello there`, which is exactly the
+payload `test_repl_drop_twin` asserts, and it also makes `drop #zone some text` work.
+No local variable named `args` is introduced: PLAN 5's `wait` branch already declares
+`args: dict[str, Any]`, and a second annotation of the same name in the same function
+is a mypy error.
+
+and this `_HELP` line immediately after the `clear-input` line (PLAN 5 spells it
+`clear-input TARGET   clear the target's value`; before PLAN 5 it is `:30`):
 
 ```
-  drop N text...       drop a text payload onto field N (files: use `visus drop --path`)
+  drop TARGET text...  drop a text payload onto the target (files: use `visus drop --path`)
 ```
 
 - [ ] **Step 7: Run tests to verify they pass**
@@ -5232,7 +5296,7 @@ Rather than intercepting the OS chooser dialog, `visus upload <paths…>` with n
 - Test: `tests/test_cli_drop_upload.py`
 
 **Interfaces:**
-- Consumes: `SessionHandler._has_target(args)` (`session_server.py:198-203`); `Page.locator(selector, *, deep=False)` (`api/page.py:194`); `Locator.count()` / `first()` (`api/locator.py:195`, `:158`); `errors.ElementNotFoundError` / `errors.StrictModeViolation` (`errors.py:27-31`)
+- Consumes: `SessionHandler._has_target(args)` (`session_server.py:198-203`); `Page.locator(selector, *, deep=False)` (`api/page.py:194`); `Locator.count()` / `first()` (`api/locator.py:195`, `:158`); `errors.StrictModeViolation` / `errors.ElementNotFoundError` (`errors.py:26-27`, `:30-31`)
 - Produces: `SessionHandler._only_file_input() -> Locator`; `visus upload <paths…>` with no target; REPL `upload`
 
 - [ ] **Step 1: Write the fixture page**
@@ -5488,27 +5552,35 @@ def upload(
 
 - [ ] **Step 6: Write the REPL twin**
 
-In `src/visus/web/cli/console.py`, add this branch immediately after the `drop` branch (Task 11):
+`console.py` **already has an `upload` branch** — PLAN 5 Task 3 added it, and it reads
+`tgt, tail = _target(rest)` first, so a bare `upload ./a.png` parses `./a.png` as a
+*selector* and then reports "missing file path(s)". Target-free upload therefore needs
+that branch **replaced**, not a second one added. In `src/visus/web/cli/console.py`,
+replace PLAN 5's `if cmd == "upload":` branch with:
 
 ```python
         if cmd == "upload":
-            from pathlib import Path as _Path
-
-            head, *files = rest
-            if head.isdigit():
-                args = {"index": int(head)}
-            else:
-                args = {}
-                files = [head, *files]
+            files = list(rest)
+            upload_args: dict[str, Any] = {}
+            if files and files[0].isdigit():
+                upload_args["index"] = int(files[0])
+                files = files[1:]
+            if not files:
+                return "missing file path(s) for `upload` (try `help`)"
             # Resolve against the CLIENT's cwd, not the daemon's (see main.upload).
-            args["paths"] = [str(_Path(p).resolve()) for p in files]
-            return str(send("upload", args))
+            upload_args["paths"] = [str(Path(p).resolve()) for p in files]
+            return str(send("upload", upload_args))
 ```
 
-and this `_HELP` line after the `drop N text...` line:
+`Path` is already imported at module scope (PLAN 5 Task 3 added
+`from pathlib import Path`). The local is named `upload_args`, not `args`, because
+PLAN 5's `wait` branch annotates `args: dict[str, Any]` and a second annotation of the
+same name in one function is a mypy error.
+
+and **replace** PLAN 5's `_HELP` line `upload TARGET p...   set file(s) on a file input (paths resolved locally)` with:
 
 ```
-  upload [N] paths...  set file(s) on a file input (omit N to find the only one)
+  upload [TARGET] p... set file(s) on a file input (omit TARGET to find the only one)
 ```
 
 - [ ] **Step 7: Run tests to verify they pass**
@@ -5557,7 +5629,7 @@ PLAN 5 Task 7 already threads the raw `--user-data-dir` / `--remote-url` / `--sl
 
 **Files:**
 - Create: `src/visus/web/api/devices.py`
-- Modify: `src/visus/web/cli/session_server.py:84-119` (`__init__` / `_ensure`), `:571-589` (`_op_status`), `:697-710` (session payload), `:738-773` (`main`)
+- Modify: `src/visus/web/cli/session_server.py:84-119` (`__init__` / `_ensure`), `:571-589` (`_op_status`), `:697-707` (session payload), `:738-773` (`main`)
 - Modify: `src/visus/web/cli/session_client.py` — `start_daemon`'s env block
 - Modify: `src/visus/web/cli/main.py` — `session start`, new `devices`
 - Modify: `README.md` (Session table, Tooling table, env-var table)
@@ -6081,7 +6153,7 @@ This task adds the same idea, scoped to what this CLI actually has: `.visus/cli.
 - Test: `tests/test_cli_config.py`
 
 **Interfaces:**
-- Consumes: `session_client.set_session_name` (Task 1); `session_client.profile_dir` (Task 3); `output.set_output_dir`, `output.set_mode`, `output.emit_error` (PLAN 4); `skill_check.check_installed_skills` (PLAN 1)
+- Consumes: `session_client.set_session_name` / `session_client.SessionError` (Task 1); `session_client.profile_dir` (Task 3); `output.set_output_dir`, `output.set_mode`, `output.set_snapshot_sink`, `output.emit_error` (PLAN 4); `main._SKILL_INSTALL_COMMANDS` and `skill_check.check_installed_skills` (PLAN 1 Task 4)
 - Produces:
   ```python
   class ConfigError(RuntimeError): ...
@@ -6095,6 +6167,7 @@ This task adds the same idea, scoped to what this CLI actually has: `.visus/cli.
       allow_run_code: bool | None; output_dir: str | None
   def find_config(start_dir: str | Path | None = None) -> Path | None: ...
   def load_config(path: Path) -> CliConfig: ...
+  def resolve(explicit: str | None, start_dir: str | Path | None = None) -> CliConfig: ...
   def set_active(cfg: CliConfig) -> None: ...
   def active() -> CliConfig: ...
   def is_default(ctx: typer.Context, name: str) -> bool: ...
@@ -6514,6 +6587,13 @@ and replace the callback body's opening lines with:
 ```python
     from visus.web.cli import config as cliconfig
     from visus.web.cli import output, session_client
+    from visus.web.cli.skill_check import check_installed_skills
+
+    # set_mode FIRST — PLAN 1 Task 4's extension contract, rule 3. Everything below
+    # can fail, and every failure leaves through output.emit_error, which formats
+    # itself according to the mode.
+    output.set_mode(as_json=as_json, raw=raw)
+    output.set_snapshot_sink(snapshot_sink)
 
     try:
         cfg = cliconfig.resolve(config)
@@ -6521,13 +6601,25 @@ and replace the callback body's opening lines with:
         output.emit_error(str(exc))
     cliconfig.set_active(cfg)
 
-    session_client.set_session_name(session or cfg.session)
-    output.set_mode(as_json=as_json, raw=raw)
+    # An explicit flag always wins over the config file (`is_default` is not needed
+    # here: `--session`/`--output-dir` default to None, so `or`/`is not None` is the
+    # same test).
     output.set_output_dir(output_dir if output_dir is not None else cfg.output_dir)
-    output.set_snapshot_sink(snapshot_sink)
-    if ctx.invoked_subcommand not in ("install", "install-skills"):
+    try:
+        session_client.set_session_name(session or cfg.session)
+    except session_client.SessionError as exc:
+        output.emit_error(f"error: {exc}")
+
+    # PLAN 1 Task 4's rule 4: use the constant, never re-inline the literal tuple —
+    # it may grow and must never shrink.
+    if ctx.invoked_subcommand not in _SKILL_INSTALL_COMMANDS:
         check_installed_skills()
 ```
+
+Two things this body must not "simplify": `output.set_mode` stays the first
+statement (PLAN 1 Task 4 rule 3, restated in PLAN 4's Prerequisites), and the skill
+guard stays `_SKILL_INSTALL_COMMANDS` (PLAN 1 Task 4 rule 4) rather than the
+inlined `("install", "install-skills")`.
 
 In `session_start`, add `ctx: typer.Context,` as the **first** parameter and this merge immediately after the imports at the top of its body, before the `--persistent` / `--profile` resolution added in Task 13:
 
@@ -6560,7 +6652,7 @@ with `from visus.web.cli import config as cliconfig` added to `session_start`'s 
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_config.py -v --no-cov`
-Expected: PASS (18 passed)
+Expected: PASS (17 passed)
 
 Run: `uv run pytest tests/test_cli_emulation.py tests/test_cli_sessions_named.py -q --no-cov`
 Expected: PASS — with no config file present, `active()` is empty and every merge is a no-op.
@@ -6653,7 +6745,11 @@ Run: `uv run mypy` → Expected: `Success: no issues found`
 
 - [ ] **Step 5: Verify the CLI/REPL/README triangle is complete**
 
-Run: `uv run python -c "from visus.web.cli.main import app; print(sorted(c.name for c in app.registered_commands))"`
+Run: `uv run python -c "from visus.web.cli.main import app; print(sorted((c.name or c.callback.__name__.replace('_','-')) for c in app.registered_commands))"`
+
+(`CommandInfo.name` is `None` for a bare `@app.command()`, so a plain `sorted(c.name ...)`
+raises `TypeError: '<' not supported between instances of 'NoneType' and 'str'`; Typer
+derives the name from the callback and turns `_` into `-`, which is what the fallback does.)
 
 Confirm every command this plan added appears: `devices`, `drop`, `route`, `route-list`, `run-code`, `unroute`. Then confirm each has a REPL twin and a README row by adding this test to `tests/test_cli_route.py` (it is a real regression test, not a one-off check — the CLI/REPL/README triangle is exactly what let the drift in `A6` accumulate):
 

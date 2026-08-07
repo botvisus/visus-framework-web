@@ -23,21 +23,79 @@
 
 **None.** This plan is self-contained and must land FIRST among the Tier 2 plans — it is the foundation the agent-driving loop (PLAN 4), the CLI surface parity work (PLAN 5) and the new engineering (PLAN 6) all build on.
 
-Symbols this plan **produces** that other plans consume:
+Landing order across all seven plans (acyclic, and every plan's Prerequisites agrees):
+`PLAN 1` and `PLAN 3` (this one) have no prerequisites; `PLAN 2` needs PLAN 1 for its
+Tasks 3 and 5; `PLAN 4` needs 1 + 3; `PLAN 5` needs 3 + 4 (and 1 transitively);
+`PLAN 6` and `PLAN 7` each need 1 + 3 + 4 + 5. PLAN 6 additionally unblocks PLAN 7's
+Task 18 but is not its prerequisite. No plan produces anything this one consumes.
 
-| Symbol | Consumer |
+Symbols this plan **produces** that other plans consume. Every consumer below was
+verified by grepping the named plan file. **Consumers are named by task heading and
+symbol, never by line number** — a sibling plan is a living document and its line
+numbers rot on the next edit.
+
+| Symbol (produced by) | Consumer (verified anchor in the sibling plan) |
 |---|---|
-| `session_server.StaleFieldIndexError` | PLAN 4 (renders it), PLAN 5 |
-| `SessionHandler._fields_url: str \| None` | PLAN 4 |
-| `SessionHandler._invalidate_fields() -> None` | PLAN 4, PLAN 5, PLAN 6 (every new navigating op must call it) |
-| `SessionHandler.fields_stale() -> bool` | PLAN 4 — `_post_state()`'s `"fields_stale"` key MUST call this, not re-derive staleness |
-| `SessionHandler.bind_stop(stop: threading.Event) -> None` | PLAN 6 (named sessions re-implement `serve()`) |
-| `_op_get_text` / `_op_get_attribute` returning `{"value": str \| None, "present": bool}` | PLAN 4 (renders `--json` / `--raw`) |
-| `session_client.socket_timeout_for(args) -> float` | PLAN 6 |
-| `session_client.kill(*, start_dir=None) -> str` | PLAN 6 (`session kill-all` iterates over it) |
-| `console.render_value(result) -> str` | PLAN 4 |
+| `session_server.StaleFieldIndexError` (Task 1) | PLAN 4 (`tier2c-agent-driving-loop.md`) — its `## Prerequisites`, "PLAN 3" block ("surfaced to the agent by the `- Fields: stale` line"), rendered by PLAN 4 Task 4 / Task 5. PLAN 5 (`tier2b-cli-surface-parity.md`) re-declares it in its `## Prerequisites` "From PLAN 3" code block. PLAN 7 (`tier3-differentiation.md`) Task 1 **moves** it to `visus.web.ops.targeting` and re-exports it from `session_server`, so this name stays valid. |
+| `SessionHandler._fields_url: str \| None` (Task 1) | PLAN 4 — its `## Prerequisites` "PLAN 3" block, and PLAN 4 Task 9 (`Addressable snapshot …`) whose **Interfaces** block reads "Consumes: … `SessionHandler._fields` / `_fields_url` (PLAN 3)". PLAN 5 Task 11 (`--boxes` on `list-fields` and `snapshot`) must not drop the `_op_list_fields` stamp. |
+| `SessionHandler.fields_stale() -> bool` (Task 1) | PLAN 4 Task 4 — its `_post_state()` calls it (see the note below the table) |
+| `SessionHandler._invalidate_fields() -> None` (Task 1) | PLAN 6 (`tier2d-new-engineering.md`) — its `## Prerequisites` "PLAN 3" table row, consumed by PLAN 6 Task 8 (`_op_run_code`), Task 10 (`_op_detach`) and Task 11 (`visus drop`) — every new op that can move the page calls it |
+| `SessionHandler._lock: threading.RLock` + the `with self._lock:` wrapper around `handle()` (Task 8) | PLAN 4 — its `## Prerequisites` "PLAN 3" block ("keep the `with self._lock:` wrapper") and PLAN 4 Task 4, whose merged `handle()` preserves it; PLAN 5 — its `## Prerequisites` "Where this plan relies on each" table, consumed by PLAN 5 Task 17 (one process-global `Recorder`) and Task 18 (one `NetworkCapture`) |
+| `SessionHandler.bind_stop(stop: threading.Event) -> None` and `SessionHandler._stop` (Task 7) | PLAN 6 — its `## Prerequisites` "PLAN 3" table row, consumed by PLAN 6 Task 10 (`_op_detach` sets the stop event exactly as `_op_tab_close` does) |
+| `_op_get_text` / `_op_get_attribute` returning `{"value": str \| None, "present": bool}` (Task 12) | PLAN 5 — its `## Prerequisites` "From PLAN 3" block, consumed by PLAN 5 Task 1 (REPL `text`/`attr`), Task 14 (`storage_get` copies this exact shape) and Task 15 (`cookie_get` copies it); PLAN 4 Task 3 re-routes the renderer through `output.emit(result, table=_render_value(result))` |
+| `console.render_value(result) -> str` (Task 12) | PLAN 4 Task 3 (re-routed through `output.emit`, not reshaped); PLAN 6 — its `## Prerequisites` "PLAN 4" block |
+| The `tab-close` / `screenshot` REPL branches in `console.dispatch` (Tasks 7 and 13) | PLAN 5 — its `## Prerequisites` "Where this plan relies on each" table names PLAN 5 Task 1 and Task 20 as the two rewrites that must preserve the client-cwd resolution (B9); PLAN 4 Task 16 (the REPL twin) preserves it too |
+| `session_client.socket_timeout_for(args) -> float` and `DEFAULT_SOCKET_TIMEOUT` (Task 11) | PLAN 6 — its `## Prerequisites` "PLAN 3" table row; PLAN 6 Task 1 threads `name=` through `send()` without disturbing it |
+| `session_client.kill(*, start_dir=None) -> str` (Task 5) | PLAN 6 — its `## Prerequisites` "PLAN 3" table row; PLAN 6 Task 1 adds `name=`, PLAN 6 Task 3's `kill_all` reuses its parts |
+
+**The one divergence that used to exist here is resolved.** PLAN 4 Task 4's
+`_post_state()` now calls `self.fields_stale()` — its body reads
+`stale = bool(self._fields) and self.fields_stale()` — instead of re-deriving
+`self._fields_url is not None and self._fields_url != url` inline. Keep it that
+way: the inline expression is **not** equivalent (it treats an unreadable page as
+fresh) and it would be a second place that has to be kept in step with
+`_resolve_field`. `fields_stale()` is produced here precisely so there is one
+definition. Note its contract, which PLAN 4 relies on: it returns `True` when
+there is no cache at all, which is why the footer guard is
+`bool(self._fields) and self.fields_stale()`.
 
 Symbols this plan **consumes**: none from other plans.
+
+## Issue coverage
+
+Every issue this plan owns, and the task that closes it. Issue IDs are from the
+source analysis (`synthesis.md`, sections B and "outros achados"). That analysis
+document is **not** in this checkout — every issue is restated in full in the
+table below and again in its task, so nothing has to be opened to implement this
+plan; the IDs exist only so the seven plans can cross-reference each other.
+
+| Issue | Task |
+|---|---|
+| B1 — cached field indexes never invalidated on navigation | Tasks 1 (URL stamp) and 2 (explicit clears) |
+| B2 — orphaned lock wedges `session start`, two paths | Tasks 3 (reclaim), 4 (cleanup removes the lock), 5 (`session kill`), 6 (log tail in the timeout) |
+| B3 — no mutex over the WebDriver with a thread per connection | Task 8 |
+| B4 — closing the last tab lies and silently loses the login | Task 7 |
+| B5 — `status`/`tabs` are not read-only | Task 10 |
+| B6 — 60 s socket timeout ignores the op's `--timeout`; transport errors traceback | Task 11 |
+| B7 — null and empty string indistinguishable on stdout | Task 12 |
+| B8 — `serve()` tears the driver down without joining in-flight threads | Task 9 |
+| B9 — REPL `screenshot` resolves the path against the daemon's cwd | Task 13 |
+| #29 — no idle timeout / TTL / reaping | Task 14 |
+| #30 — thread list never pruned; `daemon.log` never rotated | Tasks 9 (prune) and 15 (rotation) |
+| #41 — token in a default-permission file, compared with `!=` | Task 16 |
+| #43 — `session status` costs two liveness probes | Task 17 |
+
+**Deliberately deferred, not dropped:**
+
+- The `{"value", "present"}` payload is the daemon-side half of B7 only. The
+  global `--json`/`--raw` machinery that finally renders it belongs to **PLAN 4**
+  (`output.emit` / `output.emit_envelope`); Task 12 ships an interim text-mode
+  renderer (`console.render_value`) that PLAN 4 re-routes, not reshapes.
+- Post-action page state, the `### Code` echo and snapshot file sinks (issues
+  C1/C2/C4) are **PLAN 4**. This plan only guarantees the invariants they read:
+  `fields_stale()`, `_fields_url`, and the serialised `handle()`.
+- Named sessions, `session kill-all`, `attach`/`detach` (issue D8) are **PLAN 6**;
+  Task 5 ships the single-session `kill` those build on.
 
 ---
 
@@ -59,7 +117,7 @@ Symbols this plan **consumes**: none from other plans.
 
 ### Task 1: Field-cache staleness contract (`StaleFieldIndexError` + URL stamp)
 
-The critical bug: `_resolve_field` (`session_server.py:185-196`) only bounds-checks `self._fields`, then re-resolves the stored selector against whatever page is loaded now. The selector generator (`backends/selenium/js/bundle.js:520-584`) falls through to generic selectors like `button.btn.primary`, `input[type="email"]` and bare tags, each of which matches *something* on a different page — so `visus click 3` returns `"clicked"` while having clicked the wrong element, silently.
+The critical bug: `_resolve_field` (`session_server.py:185-196`) only bounds-checks `self._fields`, then re-resolves the stored selector against whatever page is loaded now. The selector generator `bestLocator` (`backends/selenium/js/bundle.js:527-585`) falls through to generic selectors — the minimal-CSS tier at `:559-566` emits `tag` + classes (`button.btn.primary`), the smart tier at `:568-580` emits `tag` + a couple of attributes (`input[type="email"]`) and, with no attributes at all, a bare tag. Each of those matches *something* on a different page — so `visus click 3` returns `"clicked"` while having clicked the wrong element, silently.
 
 This task adds the URL stamp that catches **JS-driven** navigation (link clicks, form submits, SPA routing). Task 2 adds the belt-and-braces clear for the explicit navigation ops.
 
@@ -222,9 +280,9 @@ class StaleFieldIndexError(RuntimeError):
 
     Index targeting re-resolves a stored selector against whatever page is loaded
     now. Generated selectors intentionally fall back to generic forms
-    (``button[type="submit"]``, ``input[type="email"]``, ``.btn.primary``, a bare
-    tag), each of which matches *something* on a different page — so without this
-    guard a stale index clicks the wrong element and reports success.
+    (``button.btn.primary``, ``input[type="email"]``, a bare tag), each of which
+    matches *something* on a different page — so without this guard a stale index
+    clicks the wrong element and reports success.
     """
 ```
 
@@ -385,7 +443,9 @@ def test_tab_ops_also_drop_the_page_stamp() -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_cli_session.py -k "navigation_ops_invalidate or tab_ops_also_drop" -v --no-cov`
-Expected: FAIL — `AssertionError: goto left the field cache in place`, and `AssertionError: clear the cache with self._invalidate_fields(), never 'self._fields = []'`
+Expected: 2 FAILED.
+- `test_navigation_ops_invalidate_the_field_cache` → `AssertionError: goto left the field cache in place`
+- `test_tab_ops_also_drop_the_page_stamp` → `AssertionError: clear the cache via self._invalidate_fields(); the only literal \`self._fields = []\` belongs inside _invalidate_fields itself` — with Task 1 applied the source still holds four such literals (inside `_invalidate_fields`, plus `:410`, `:443`, `:563`), so `src.count(...)` is `4`, not `1`.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -465,7 +525,7 @@ git commit -m "fix(cli): drop cached field indexes on goto/back/forward/reload"
 `_claim_lock` (`:654-671`) writes `os.getpid()` at `:668` and **nothing in the repo ever reads it back**. The unlink happens only in `serve()`'s `finally` (`:733`), which never runs on `kill -9` or a reboot. The next `visus session start` spawns a daemon that hits `SessionLockedError`, logs into `.visus/daemon.log` and exits silently; the user waits 20 s and gets "daemon did not come up within 20s".
 
 **Files:**
-- Modify: `src/visus/web/cli/session_server.py:15-34` (imports), `:654-671` (`_claim_lock`)
+- Modify: `src/visus/web/cli/session_server.py:27-34` (the `visus.web` import group), `:654-671` (`_claim_lock`)
 - Test: `tests/test_cli_session.py`, `tests/test_e2e_cli_session.py`
 
 **Interfaces:**
@@ -573,7 +633,10 @@ def test_start_recovers_after_the_daemon_is_hard_killed(tmp_path: Path) -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_cli_session.py -k claim_lock -v --no-cov`
-Expected: FAIL — `test_claim_lock_reclaims_a_lock_whose_owner_is_dead` raises `SessionLockedError: another daemon already holds ...`
+Expected: 2 FAILED, 1 passed.
+- `test_claim_lock_reclaims_a_lock_whose_owner_is_dead` → `visus.web.cli.session_server.SessionLockedError: another daemon already holds <tmp_path>\.visus\session.json.lock` (the current `_claim_lock` raises on any pre-existing lock).
+- `test_claim_lock_reclaims_an_unreadable_lock` → the same `SessionLockedError`.
+- `test_claim_lock_refuses_while_the_owner_is_alive` already passes, but on the current message — it will keep passing after the fix because `match="already holds"` is a substring of the new `(owner pid <N>)` message.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -754,7 +817,7 @@ There is no escape hatch today: if a lock or session file survives in a state ne
 
 **Files:**
 - Modify: `src/visus/web/cli/session_client.py:8-17` (imports), append `_find_lock_file`, `_terminate`, `kill`
-- Modify: `src/visus/web/cli/main.py:255-261` (next to `session_stop`)
+- Modify: `src/visus/web/cli/main.py:255-260` (`session_stop` — the new command goes immediately after it)
 - Test: `tests/test_cli_session.py`
 
 **Interfaces:**
@@ -898,7 +961,7 @@ def kill(*, start_dir: str | Path | None = None) -> str:
     return f"removed {', '.join(removed)}"
 ```
 
-In `src/visus/web/cli/main.py`, add the command immediately after `session_stop` (`:255-261`):
+In `src/visus/web/cli/main.py`, add the command immediately after `session_stop` (`:255-260`, i.e. before `@session_app.command("status")` at `:263`):
 
 ```python
 @session_app.command("kill")
@@ -1079,8 +1142,10 @@ def test_closing_the_last_tab_really_stops_the_daemon(tmp_path: Path) -> None:
         h.close()
 
 
-def test_bind_stop_is_optional() -> None:
-    """An unbound handler (unit tests, embedders) reports session_stopped=False."""
+def test_bind_stop_is_optional_and_binds() -> None:
+    """A handler starts unbound (unit tests, embedders) and bind_stop attaches
+    the server's event — an unbound handler must never raise, it just reports
+    session_stopped=False when the last tab closes."""
     import threading as _threading
 
     h = session_server.SessionHandler(engine="chrome", headless=True)
@@ -1088,6 +1153,7 @@ def test_bind_stop_is_optional() -> None:
     ev = _threading.Event()
     h.bind_stop(ev)
     assert h._stop is ev
+    assert not ev.is_set(), "bind_stop must only wire the event, never set it"
 
 
 def test_cli_tab_close_last_tab_message(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2143,7 +2209,7 @@ def test_dispatch_screenshot_resolves_the_path_against_the_client_cwd() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_cli_session.py::test_dispatch_screenshot_resolves_the_path_against_the_client_cwd -v --no-cov`
-Expected: FAIL — `AssertionError: assert {'path': 'shots/out.png'} == {'path': 'C:\\...\\shots\\out.png'}`
+Expected: FAIL — `AssertionError: assert {'path': 'shots/out.png'} == {'path': '<cwd>/shots/out.png'}` where `<cwd>` is the absolute cwd pytest ran in (`str(Path("shots/out.png").resolve())`). The relative string is what the REPL sends today.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2184,7 +2250,13 @@ git commit -m "fix(cli): resolve the REPL screenshot path against the client cwd
 - Test: `tests/test_cli_session.py`
 
 **Interfaces:**
-- Produces: `SessionHandler.last_op_at() -> float`, `serve(..., idle_timeout: float | None = None)`, `start_daemon(..., idle_timeout: float | None = None)`, env `VISUS_WEB_IDLE_TIMEOUT`, CLI flag `visus session start --idle-timeout`
+- Produces:
+  - `SessionHandler.last_op_at() -> float`
+  - `serve(handler: SessionHandler, *, token: str, cwd: str | Path | None = None, host: str = "127.0.0.1", idle_timeout: float | None = None) -> None`
+  - `start_daemon(engine: str = "chrome", headless: bool = False, url: str | None = None, *, cwd: str | Path | None = None, timeout: float = 20.0, idle_timeout: float | None = None) -> dict[str, Any]`
+  - `session_server._idle_timeout_from_env() -> float | None`
+  - env `VISUS_WEB_IDLE_TIMEOUT` (seconds; `0`/unset/garbage = never)
+  - CLI flag `visus session start --idle-timeout FLOAT`
 - Consumes: nothing
 
 - [ ] **Step 1: Write the failing tests**
@@ -2442,7 +2514,7 @@ git commit -m "feat(cli): add an opt-in idle timeout that reaps an abandoned ses
 `_log` (`session_server.py:756-758`) appends to `.visus/daemon.log` with no size cap, forever.
 
 **Files:**
-- Modify: `src/visus/web/cli/session_server.py:15-34` (imports), `:752-758` (log setup in `main`)
+- Modify: `src/visus/web/cli/session_server.py:17-25` (stdlib imports), `:752-758` (log setup in `main`)
 - Test: `tests/test_cli_session.py`
 
 **Interfaces:**
@@ -2495,15 +2567,23 @@ Expected: FAIL — `AttributeError: module 'visus.web.cli.session_server' has no
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/visus/web/cli/session_server.py`, add to the stdlib import block (ruff `I` order: `json`, `logging`, `os`, `secrets`, `socket`, `sys`, `threading`, `time`) plus the handler import after it:
+In `src/visus/web/cli/session_server.py`, replace the whole stdlib import block (`:17-25`) with this — `logging` slots in after `json`, and `from logging.handlers import ...` goes in the `from` group that already holds `pathlib` and `typing`, which is exactly where ruff's `I` rule wants both:
 
 ```python
+import json
 import logging
-...
+import os
+import secrets
+import socket
+import sys
+import threading
+import time
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, cast
 ```
 
-Add above `def _idle_timeout_from_env()`:
+Add above `def _idle_timeout_from_env()` (added in Task 14, immediately above `def main(`):
 
 ```python
 LOG_MAX_BYTES = 1_048_576
@@ -2571,10 +2651,10 @@ git commit -m "chore(cli): rotate the daemon log instead of appending forever"
 
 ### Task 16: Harden the session token — constant-time compare, owner-only file
 
-The token is written by `write_text` at `:709` with default permissions, and compared with `!=` at `:637-639`. The surface it guards includes `eval`, arbitrary-path writes (`:289`) and file exfiltration via `_op_upload` (`:365-368`).
+The token (`secrets.token_hex(16)`, generated at `:750`) is written by `tmp.write_text(payload, ...)` at `:709` with default permissions, and compared with a plain `!=` at `:637`. The surface it guards includes `eval` (`:486-489`), arbitrary-path screenshot writes (`:289`) and file exfiltration via `_op_upload` (`:365-368`).
 
 **Files:**
-- Modify: `src/visus/web/cli/session_server.py:634-639` (token check), `:695-710` (session-file write)
+- Modify: `src/visus/web/cli/session_server.py:637-639` (token check in `_handle_conn`), `:695-710` (session-file write in `serve`)
 - Test: `tests/test_cli_session.py`
 
 **Interfaces:**
@@ -2632,6 +2712,19 @@ def test_token_check_is_type_safe_and_rejects_same_length_tokens(
     finally:
         _shutdown_thread(t, port, token)
 
+    # The behaviour above is IDENTICAL before and after the fix — `!=` also
+    # rejects every bad token. What changes is HOW: a plain `!=` on str leaks the
+    # length of the shared prefix through timing. That is unobservable from a
+    # socket, so pin it at the source, the same way Task 2 pins the single
+    # `self._fields = []` literal.
+    src = Path(session_server.__file__).read_text(encoding="utf-8")
+    assert "secrets.compare_digest(" in src, (
+        "compare the session token with secrets.compare_digest, not `!=`"
+    )
+    assert 'req.get("token") != token' not in src, (
+        "the timing-variable `!=` token comparison is still in the source"
+    )
+
 
 def test_session_file_is_written_privately(tmp_path: Path) -> None:
     import os as _os
@@ -2652,7 +2745,10 @@ def test_session_file_is_written_privately(tmp_path: Path) -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_cli_session.py -k "write_private or token_check_is_type_safe or written_privately" -v --no-cov`
-Expected: FAIL — `AttributeError: module 'visus.web.cli.session_server' has no attribute '_write_private'`, and for the token test `AssertionError: (123, {'ok': False, 'error': "TypeError: ..."})`
+Expected: 3 FAILED on Linux/macOS, 2 FAILED + 1 passed on Windows.
+- `test_write_private_creates_exclusively_and_owner_only` → `AttributeError: module 'visus.web.cli.session_server' has no attribute '_write_private'`
+- `test_session_file_is_written_privately` → same `AttributeError` is NOT raised here (it only calls `serve`), so it fails on the POSIX branch with `AssertionError: assert 420 == 384` (`0o644 != 0o600`). On Windows `hasattr(os, "getuid")` is False, so this one **passes** before the fix — that is expected and fine; the mode assertion is the CI (Linux) signal.
+- `test_token_check_is_type_safe_and_rejects_same_length_tokens` → `AssertionError: compare the session token with secrets.compare_digest, not `!=`` (the socket-level behaviour is unchanged by this fix, so the source-contract assertion is the one that goes red).
 
 - [ ] **Step 3: Write the implementation**
 
@@ -2689,7 +2785,7 @@ def _write_private(path: Path, text: str) -> None:
         os.close(fd)
 ```
 
-In `serve()`, replace the two lines that write the temp file (`:708-710`) with:
+In `serve()`, replace the three lines that write the session file (`:708-710` — `tmp = sf.with_name(...)`, `tmp.write_text(payload, encoding="utf-8")`, `os.replace(tmp, sf)`) with:
 
 ```python
     tmp = sf.with_name(f"{sf.name}.{os.getpid()}.tmp")
@@ -2957,27 +3053,46 @@ Expected: all tests pass and `Required test coverage of 90% reached.` — no `FA
 
 - [ ] **Step 2: Drive the fixed daemon by hand once**
 
-Run these in order from the repo root and confirm each printed line:
+Run these in order from the repo root and confirm each printed line. Start with
+**no URL argument** — `SessionHandler._ensure()` re-`goto`s the start URL on the
+first op, so an unreachable start URL would fail the first command for the wrong
+reason.
 
 ```bash
-uv run visus session start --headless "http://127.0.0.1:8000/does-not-matter"
+uv run visus session start --headless --idle-timeout 300
 ```
 Expected: `session started (pid <N>, port <N>, engine chrome)`
 
 ```bash
-uv run visus goto "data:text/html,<title>one</title><button class='btn primary' style='width:120px;height:32px' onclick=\"document.body.dataset.clicked='A'\"></button>"
+uv run visus goto 'data:text/html,<title>one</title><button class="btn primary" style="width:120px;height:32px"></button>'
 uv run visus list-fields --no-highlight
-uv run visus goto "data:text/html,<title>two</title><input id=x>"
+```
+Expected: `navigated to data:text/html,...`, then a table whose single row has
+`CSS` = `button.btn.primary` at index `0` — the generic fallback selector that
+made B1 dangerous.
+
+```bash
+uv run visus goto 'data:text/html,<title>two</title><input id=x>'
 uv run visus click 0
 ```
-Expected: the last command prints `error: IndexError: field index 0 out of range (have 0; run list_fields first)` and exits 1 — **not** `clicked`.
+Expected: the last command prints
+`error: IndexError: field index 0 out of range (have 0; run list_fields first)`
+and exits 1 — **not** `clicked`. (Task 2's explicit clear wins the race with
+Task 1's stamp here, which is the intended message.)
+
+```bash
+uv run visus get-attribute data-missing --selector '#x'
+uv run visus get-attribute id --selector '#x'
+```
+Expected: `(null)` then `x` — the B7 distinction, visible in the shell.
 
 ```bash
 uv run visus session status
 uv run visus session stop
 uv run visus session kill
 ```
-Expected: a status block, then `session stopped`, then `no session state to remove`.
+Expected: a status block containing `fields_cached : 0`, then `session stopped`,
+then `no session state to remove`.
 
 - [ ] **Step 3: Commit any residual fixes**
 

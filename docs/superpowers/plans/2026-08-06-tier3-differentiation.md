@@ -6,9 +6,11 @@
 
 **Architecture:** A new package `src/visus/web/ops/` sits *below* both frontends: it imports `visus.web.api` and nothing optional, so the CLI can use it without the `[mcp]` extra and the MCP server can use it without the `[cli]` extra — which is exactly the constraint that produced the copy-pasted `make_locator` at `session_server.py:49-71` / `mcp/session.py:142-160`. It holds the shared targeting resolver, the tool⇄op registry, and `RemoteDispatcher`, whose `handle(op, args)` has the same signature and the same envelope as `SessionHandler.handle` but crosses a process boundary. On top of that seam the MCP server stops being a second, invisible browser and becomes a frontend over the very session the shell is driving. Vision targeting lands as two ordinary daemon ops (`click_image`, `click_ocr_text`) so it reaches the CLI, the REPL and MCP through the same three-part mirror every other command uses.
 
-**Scoping decision — deliberate, not an omission.** The ten Tier 3 items in `synthesis.md:447-469` are not equally ready. Items 1–4 (unify the dispatcher, index targeting on MCP, observability as the product, native vision targeting) are concrete against code that exists today, so **Tasks 1–12** implement them under full TDD. Items 5–10 (`annotate`, ARIA-snapshot assertions, the test-generation flow, `edge_ie`/Grid, video, the fleet dashboard) each carry one unresolved question that no amount of plan prose can answer — can a bounding box be turned into a set of elements at all? can Selenium's synchronous CDP bridge receive screencast frames? what does a `visus` heal loop look like when there is no `--debug=cli` to attach to? Specifying six months of implementation line by line on top of an unanswered question is how plans rot. So **Tasks 13–18 are design tasks**: each writes a design document to `docs/design/` *and* lands a real, tested spike that answers that task's one open question. Every one has explicit acceptance criteria and a real failing-test-first cycle for the spike. Item 9 (video) is explicitly LOW priority and is sequenced after items 1–3, as the brief requires. Item 10 (the fleet dashboard) is blocked on PLAN 6's named sessions — before those exist it is a view over a set of size one — so its task ships the renderer and the design, not a product. **Task 19** is the full-suite gate pass.
+**Scoping decision — deliberate, not an omission.** The brief's **nine** Tier 3 items — restated here in full because the source analysis (`synthesis.md`) is an external comparison study and is **not** in this checkout: (1) unify the CLI daemon and the MCP server onto one op vocabulary, (2) bring index targeting to MCP, (3) observability as the differentiator on both surfaces, (4) native vision targeting, (5) `visus annotate` (human in the loop), (6) ARIA-snapshot assertions plus `visus snapshot <target>`, (7) test generation as a first-class flow, (8) `edge_ie` + Selenium Grid as the enterprise wedge, (9) video via CDP `Page.startScreencast` (explicitly LOW priority, "do it after items 1–3") — are not equally ready. Items 1–4 (unify the dispatcher, index targeting on MCP, observability as the product, native vision targeting) are concrete against code that exists today, so **Tasks 1–12** implement them under full TDD. Items 5–9 (`annotate`, ARIA-snapshot assertions, the test-generation flow, `edge_ie`/Grid, video) each carry one unresolved question that no amount of plan prose can answer — can a bounding box be turned into a set of elements at all? can Selenium's synchronous CDP bridge receive screencast frames? what does a `visus` heal loop look like when there is no `--debug=cli` to attach to? Specifying six months of implementation line by line on top of an unanswered question is how plans rot. So **Tasks 13–17 are design tasks**: each writes a design document to `docs/design/` *and* lands a real, tested spike that answers that task's one open question. Every one has explicit acceptance criteria and a real failing-test-first cycle for the spike. Item 9 (video) is explicitly LOW priority and is sequenced after items 1–3, as the brief requires.
 
-**Ordering note.** Item 1's payoff tasks (Tasks 5–7, the MCP dispatch seam and `browser_attach_session`) are interleaved with item 2's (Tasks 4–5) even though item 1 comes first in the brief. Both rewrite the same 21 MCP tool signatures, and doing them in separate passes would rewrite every one of those bodies twice; Task 5 therefore adds `index` and the `_run` seam in a single edit, Task 6 converts the other 22 tools, and Task 7 flips attach on. Items 3–10 follow the brief's order exactly.
+**Task 18 is not a Tier 3 item.** The multi-session dashboard is the *other half* of inventory gap #11, which reads "no `show`/dashboard and no `--annotate` (human-in-the-loop) — no such command in `main.py`"; the brief's item 5 deliberately promoted only the `annotate` half of that gap, on the stated grounds that it "is `playwright-cli`'s `show --annotate` without needing a multi-session dashboard, and is worth more than the dashboard". (Both quotes are restated rather than cited: the source analysis lives outside this repo.) It is carried here so the gap is not silently dropped, and it is blocked on PLAN 6's named sessions — before those exist it is a view over a set of size one — so its task ships the renderer and the design, not a product. **Task 19** is the full-suite gate pass.
+
+**Ordering note.** Item 1's payoff tasks (Tasks 5–7, the MCP dispatch seam and `browser_attach_session`) are interleaved with item 2's (Tasks 4–5) even though item 1 comes first in the brief. Both rewrite the same 21 MCP tool signatures, and doing them in separate passes would rewrite every one of those bodies twice; Task 5 therefore adds `index` and the `_run` seam in a single edit, Task 6 converts the other 22 tools, and Task 7 flips attach on. Items 3–9 follow the brief's order exactly.
 
 **Tech Stack:** Python 3.10+, Typer, Rich, Selenium 4.38, pytest + pytest-xdist, hatchling, mypy --strict, ruff
 
@@ -22,13 +24,25 @@
 - Commits: small, TDD (failing test → minimal impl → green → commit), semantic messages `label(scope): description`. Labels: `fix`, `feat`, `chore`, `docs`, `test`, `devops`.
 - **Never** add `Co-Authored-By` lines to commits.
 - Single-test runs use `--no-cov` (the repo pins `--cov-fail-under=90` in `addopts`, `pyproject.toml:74`; the gate only makes sense on a full run).
-- Every new CLI command gets its REPL twin (`console.py:119-210` dispatch + `:19-53` help) **and** a `README.md:286-377` table row.
+- Every new CLI command gets its REPL twin (`console.py:96-215` — the `dispatch` branch chain — plus the `_HELP` string at `:19-53`) **and** a `README.md:286-376` table row.
 
 ## Prerequisites
 
+**Citation convention — read this before hunting for a file.** Every path in this
+plan that does **not** start with `playwright-cli/` is relative to this repository
+root. Paths that start with `playwright-cli/` are in the **separate, sibling
+checkout** of the reference tool at
+`C:/Users/matheus.pereira/Documents/Visus/playwright-cli` — they are prior art to
+read, never files to edit, and they are **not** in your checkout of this project.
+Watch for two basenames that exist on both sides and mean different things:
+`SKILL.md` (this repo's is `skills/using-visus-web/SKILL.md`, moved by PLAN 1 to
+`src/visus/web/skills/visus-web/SKILL.md`) and `references/test-generation.md`
+(the external one is prior art; the one this plan's Task 15 *creates* is
+`src/visus/web/skills/visus-web/references/test-generation.md`).
+
 **Four plan files must land before this one.** This plan consumes their symbols and never redefines them.
 
-**PLAN 1 — `2026-08-06-tier1-skill-distribution.md`.** Owns `cli/skills.py`, `cli/skill_check.py`, `cli/_entry.py` and the project's first `@app.callback()` in `main.py`. Consumed here only indirectly: Tasks 11–13 add CLI options to commands that live under that callback.
+**PLAN 1 — `2026-08-06-tier1-skill-distribution.md`.** Owns `cli/skills.py`, `cli/skill_check.py`, `cli/_entry.py`, the project's first `@app.callback()` in `main.py` (its Task 4) and the packaged skill tree `src/visus/web/skills/visus-web/` with `references/cli-commands.md` + `references/mcp-tools.md`. Consumed here indirectly: Tasks 11, 12 and 16 add CLI **options** to commands that live under that callback (no new command names, so PLAN 1's `test_every_cli_command_is_documented` drift test stays green), and Tasks 7, 8 and 12 add rows to `references/mcp-tools.md`.
 
 **PLAN 3 — `2026-08-06-tier2a-daemon-correctness.md`.** Consumed symbols:
 
@@ -61,26 +75,32 @@ def send_envelope(op: str, args: dict[str, Any] | None = None, *,
                   start_dir: str | Path | None = None) -> dict[str, Any]: ...
 
 # src/visus/web/cli/session_server.py
-_MUTATING_OPS: frozenset[str]                    # Tasks 12 and 13 append to it
+_MUTATING_OPS: frozenset[str]                    # Task 11 appends "click_image",
+                                                 # Task 12 appends "click_ocr_text";
+                                                 # each also extends the exact-`==`
+                                                 # expectation in test_cli_session.py
 def _post_state(self) -> dict[str, Any]: ...     # {"url","title","fields_stale"}
 
 # src/visus/web/cli/main.py
 def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]: ...
-def _target_args(index, selector, role, name, text) -> dict[str, Any]: ...
+def _target_args(index, selector, role, name, text, *,
+                 exact: bool = False, frame: str | None = None) -> dict[str, Any]: ...
 
-# src/visus/web/api/page.py
+# src/visus/web/api/page.py                      # PLAN 4 Task 8
 def snapshot(self, selector: str | None = None, *, depth: int | None = None) -> list[dict]: ...
 
-# src/visus/web/mcp/server.py
-def _acted(message: str) -> str: ...             # Task 6 widens this to _acted(env, message)
+# tests/fixtures/snapshot_tree.html              # PLAN 4 Task 8 — Task 14 consumes it
+
+# src/visus/web/mcp/server.py                    # PLAN 4 Task 17
+def _acted(message: str) -> str: ...             # Task 5 widens this to _acted(env, message)
 ```
 
-PLAN 4 also owns the daemon envelope `{"ok", "result", "page", "code", "snapshot"}` and the scoped `visus snapshot <target>`. **This plan does not redefine either.** Task 6 replaces PLAN 4's `_acted(message)` with `_acted(env, message)`; PLAN 4's two tests for it (`tests/test_e2e_mcp.py::test_click_result_reports_the_resulting_page` and `::test_fill_result_reports_the_page`) call the *tools*, not the helper, so they stay green.
+PLAN 4 also owns the daemon envelope `{"ok", "result", "page", "code", "snapshot"}` and the scoped `visus snapshot <target>`. **This plan does not redefine either.** Task 5 replaces PLAN 4 Task 17's one-argument `_acted` (which that plan adds directly below `_any_match_visible` in `mcp/server.py`) with `_acted(env, message)`, and Task 7 gives it its final body; PLAN 4's two tests for it (`tests/test_e2e_mcp.py::test_click_result_reports_the_resulting_page` and `::test_fill_result_reports_the_page`) call the *tools*, not the helper, so they stay green.
 
-**PLAN 5 — `2026-08-06-tier2b-cli-surface-parity.md`.** Consumed symbols (declared in its Prerequisites at `:136-152` and its File Structure at `:165-171`):
+**PLAN 5 — `2026-08-06-tier2b-cli-surface-parity.md`.** Consumed symbols (declared in that plan's "Symbols **this plan produces** that later plans may rely on" code block, immediately above its `## File Structure` heading, and in the `## File Structure` table itself):
 
 ```python
-# src/visus/web/cli/session_server.py — new ops (PLAN 5 Tasks 3, 4, 5, 6)
+# src/visus/web/cli/session_server.py — new ops (PLAN 5 Tasks 3, 4 and 5)
 def _op_console_messages(args) -> {"messages": [{"level","text"}]}
 def _op_network_requests(args) -> {"requests": [{"index","url","method","status","resource_type"}]}
 def _op_network_request(args)  -> {"index","url","method","status","resource_type","body"}
@@ -96,15 +116,24 @@ def stop_recording(zip_path: str | None = None,
 Field.box: dict[str, float] | None = None        # {"x","y","width","height"}, viewport CSS px
 
 # CLI commands PLAN 5 owns and this plan builds on top of, never redefines:
-#   visus tracing-start / visus tracing-stop / visus report <zip>
-#   visus requests [--filter] / visus request <N>   (NetworkCapture wiring, its Task 18)
+#   visus tracing-start / visus tracing-stop / visus report <zip>    (its Task 17,
+#     which also makes VISUS_WEB_TRACING honest — that half of brief item 3 is PLAN 5's)
+#   visus requests [--filter] / visus request <N>   (its Task 4; NetworkCapture
+#     wiring in its Task 18)
 #   visus session start --remote-url / --user-data-dir / --slow-mo   (its Task 7)
-#   visus logs / state-save / state-load / tab-activate / tab-follow
+#   visus logs (its Task 3) / state-save / state-load (its Task 6)
+#   visus tab-activate / tab-follow (its Task 5)
+#   --button on visus click / dblclick (its Task 9)
+
+# src/visus/web/mcp/server.py — PLAN 5 Task 12
+#   browser_evaluate gains (selector, role, name, text, exact, frame) and _op_eval
+#   gains a target. Task 6 of THIS plan must preserve both — see its browser_evaluate
+#   block, which is written out in full for exactly that reason.
 ```
 
 PLAN 5's `_op_console_messages`, `_op_network_requests`, `_op_tab_activate` and `_op_tab_follow` are what close the four MCP-only holes of D3 — Task 2's drift test **fails** until PLAN 5 has landed, which is the point: it is the regression test for that gap.
 
-**PLAN 6 — `2026-08-06-tier2d-new-engineering.md`.** Not a prerequisite. Task 19 (the fleet dashboard) is explicitly blocked on its named sessions and ships only a renderer plus a design document.
+**PLAN 6 — `2026-08-06-tier2d-new-engineering.md`.** Not a prerequisite. **Task 18** (the fleet dashboard) is explicitly blocked on its named sessions and ships only a renderer plus a design document. The symbols that unblock it, all produced by PLAN 6 Tasks 1–3: `--session` / `-S` and `VISUS_WEB_SESSION` on the root callback, `.visus/sessions/<name>.json`, `visus session list` / `close-all` / `kill-all` / `delete-data`, the memoised `session_client._pid_alive` plus the uncached `session_client._probe_pid`, and `session_client._terminate`.
 
 Symbols **this plan produces** that later work may rely on:
 
@@ -139,8 +168,8 @@ Symbols **this plan produces** that later work may rely on:
 | `src/visus/web/ops/targeting.py` | The ONE locator resolver: `make_locator`, `any_match_visible`, `resolve_field`, `StaleFieldIndexError`. |
 | `src/visus/web/ops/registry.py` | The tool⇄op inventory both frontends are checked against. |
 | `src/visus/web/ops/remote.py` | `RemoteDispatcher` — the daemon's op vocabulary as an in-process object. |
-| `src/visus/web/observability/video.py` | Task 18 spike: frame capture for the video extra. |
-| `src/visus/web/cli/fleet.py` | Task 19 spike: the fleet renderer. |
+| `src/visus/web/observability/video.py` | Task 17 spike: frame capture for the video extra. |
+| `src/visus/web/cli/fleet.py` | Task 18 spike: the fleet renderer. |
 | `tests/test_ops_targeting.py` | Unit tests for the shared resolver (+ the identity assertions). |
 | `tests/test_ops_registry.py` | The tool⇄op drift test and the index-coverage test. |
 | `tests/test_ops_remote.py` | `RemoteDispatcher` unit + real cross-process test. |
@@ -150,30 +179,31 @@ Symbols **this plan produces** that later work may rely on:
 | `tests/test_cli_vision_targeting.py` | `click --image` / `click --ocr-text` (CLI + REPL + daemon). |
 | `tests/test_report_copy.py` | The report's self-healing copy (fast, no browser). |
 | `tests/test_cli_fleet.py` | The fleet renderer (Task 18 spike). |
-| `tests/fixtures/imagetarget.html` | A canvas-drawn button with no accessibility tree (Tasks 12–13). |
-| `docs/design/annotate.md` … `docs/design/session-dashboard.md` | Six design documents (Tasks 14–19). |
+| `tests/fixtures/imagetarget.html` | A canvas-drawn button with no accessibility tree (Tasks 11–12). |
+| `docs/design/annotate.md`, `aria-snapshot-assertions.md`, `test-generation.md`, `grid-and-edge-ie.md`, `video-screencast.md`, `session-dashboard.md` | Six design documents (Tasks 13–18, one each, in that order). |
 
 **Modified**
 
 | Path | What changes |
 |---|---|
 | `src/visus/web/cli/session_server.py` | Re-exports the shared resolver; `_resolve_field` delegates; `_op_click_image` / `_op_click_ocr_text`; `_MUTATING_OPS` gains two names. |
-| `src/visus/web/mcp/session.py` | Re-exports `make_locator`; gains the field cache, `cache_fields`, `field_locator`, `target`; headless default reconciled. |
+| `src/visus/web/mcp/session.py` | Re-exports `make_locator`; gains the field cache plus `cache_fields` / `field_locator` / `target` / `invalidate_fields`. The headless default at `:35` is deliberately **unchanged** — see Task 7. |
 | `src/visus/web/mcp/server.py` | `index=` on every targeting tool; `_run` / `_target_payload` / `_remote`; attach + detach + tracing + vision tools. |
 | `src/visus/web/cli/main.py` | `--image` / `--ocr-text` / `--confidence` on `visus click`. |
 | `src/visus/web/cli/console.py` | REPL twins `click-image` / `click-text` + help lines. |
 | `src/visus/web/vision/ocr.py`, `vision/__init__.py` | `TextBox`, `read_text_boxes`, `find_text`. |
 | `src/visus/web/observability/report.py` | The KPI band and per-step badge name self-healing out loud. |
-| `src/visus/web/api/page.py` | `fields_in_box` (Task 14 spike). |
-| `src/visus/web/api/assertions.py` | `to_match_aria_snapshot` (Task 15 spike). |
-| `src/visus/web/cli/codegen.py` | `generate_test` (Task 16 spike). |
+| `src/visus/web/api/page.py` | `fields_in_box` (Task 13 spike). |
+| `src/visus/web/api/assertions.py` | `to_match_aria_snapshot` (Task 14 spike). |
+| `src/visus/web/cli/codegen.py` | `generate_test` (Task 15 spike). |
 | `tests/test_mcp_server.py` | `_EXPECTED_TOOLS` grows from 45 to 52. |
 | `tests/test_e2e_observability.py` | The copy lock at `:110` follows the rename; the video spike's tests. |
 | `tests/test_cli_session.py` | `_MUTATING_OPS` expectation gains the two vision ops. |
 | `tests/test_cli.py` | `doctor` failure assertions read stderr; the Grid/IE-mode tests. |
-| `tests/test_vision.py`, `tests/test_codegen.py`, `tests/test_e2e_expect.py`, `tests/test_e2e_fields.py` | The spike tests for Tasks 10, 13, 14 and 15. |
-| `README.md` | Command-table rows for the new CLI surface. |
-| `pyproject.toml` | The `[video]` extra (Task 18). |
+| `tests/test_vision.py` (Task 10), `tests/test_e2e_fields.py` (Task 13), `tests/test_e2e_expect.py` (Task 14), `tests/test_codegen.py` (Task 15) | The spike tests. |
+| `README.md` | Command-table rows for the new CLI surface; the MCP tool count `45` → `52` at `:114`, `:194`, `:219`, `:929`. |
+| `src/visus/web/skills/visus-web/references/mcp-tools.md` and `SKILL.md` (both PLAN 1's) | Rows for the seven new tools; the "the two never share a session" claim becomes conditional on `browser_attach_session`; the tool count `45` → `52`. |
+| `pyproject.toml` | The `[video]` extra (Task 17). |
 
 ---
 
@@ -380,7 +410,7 @@ their own docstrings:
 * ``_any_match_visible`` — ``session_server.py:37-46`` / ``mcp/server.py:22-32``
 * ``_resolve_field``     — CLI-only, and its absence is exactly why MCP had to
   instruct the model in prose to rebuild an iframe chain by hand
-  (``mcp/server.py:91-100``).
+  (``mcp/server.py:96-99``).
 
 They live here now. Both frontends import the same objects, so a fix to
 targeting can no longer land on one surface and miss the other.
@@ -404,9 +434,9 @@ class StaleFieldIndexError(RuntimeError):
 
     Index targeting re-resolves a stored selector against whatever page is loaded
     now. Generated selectors intentionally fall back to generic forms
-    (``button[type="submit"]``, ``input[type="email"]``, ``.btn.primary``, a bare
-    tag), each of which matches *something* on a different page — so without this
-    guard a stale index clicks the wrong element and reports success.
+    (``button.btn.primary``, ``input[type="email"]``, a bare tag), each of which
+    matches *something* on a different page — so without this guard a stale index
+    clicks the wrong element and reports success.
     """
 
 
@@ -522,7 +552,7 @@ from visus.web.ops.targeting import make_locator
 __all__ = ["Session", "make_locator"]
 ```
 
-`Locator` and `cast` become unused in that module — remove them from `:6` and `:11` if ruff flags them.
+`make_locator` was the module's only user of `Any`, `cast` and `Locator`, so after the delete all three are unused: drop `from typing import Any, cast` (`:6`) and `from visus.web.api.locator import Locator` (`:11`) entirely. Task 4 re-adds `Any` and `Locator` when it introduces the field cache — that is expected, not churn to avoid, because the two tasks are separately reviewable.
 
 In `src/visus/web/mcp/server.py`, delete `_any_match_visible` (`:22-32`) and add to the import block (after `from visus.web.mcp.session import Session, make_locator`, `:16`):
 
@@ -578,7 +608,7 @@ This task adds the inventory and the test the brief asks for. It **fails until P
   SESSIONLESS_TOOLS: frozenset[str]       # no browser at all
   LOCAL_ONLY_TOOLS: frozenset[str]        # this process only, no daemon twin
   ```
-- Consumes: `SessionHandler` (for the `_op_*` existence check), `mcp.server.mcp._tool_manager.list_tools()` (the same accessor `tests/test_mcp_server.py:19` already uses).
+- Consumes: `SessionHandler` (for the `_op_*` existence check), `mcp.server.mcp._tool_manager.list_tools()` (the same accessor `tests/test_mcp_server.py:12-19` — `_get_tool_names` — already uses).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -594,7 +624,7 @@ from visus.web.ops import registry
 
 
 def _registered_tool_names() -> set[str]:
-    """Registered FastMCP tool names (same accessor as tests/test_mcp_server.py:19)."""
+    """Registered FastMCP tool names (same accessor as test_mcp_server._get_tool_names)."""
     from visus.web.mcp import server
 
     return {t.name for t in server.mcp._tool_manager.list_tools()}
@@ -1027,7 +1057,7 @@ git commit -m "feat(ops): reach the session daemon in-process via RemoteDispatch
 This task gives the MCP session the same cache the daemon has, using the resolver Task 1 extracted. Task 5 then exposes it as an `index` parameter.
 
 **Files:**
-- Modify: `src/visus/web/mcp/session.py:16-41` (`__init__`, `_ensure`), `:78-86` (`new_page`), `:100-115` (`select`, `activate`), `:117-128` (`close_tab`), `:130-139` (`close`)
+- Modify: `src/visus/web/mcp/session.py:1-13` (imports), `:19-30` (`__init__`), after `:66-71` (`set_follow`), `:78-86` (`new_page`), `:100-105` (`select`), `:107-115` (`activate`), `:117-128` (`close_tab`), `:130-139` (`close`)
 - Test: `tests/test_mcp_index.py`
 
 **Interfaces:**
@@ -1142,14 +1172,26 @@ Expected: FAIL — `AttributeError: 'Session' object has no attribute 'target'`
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/visus/web/mcp/session.py`, add to the import block (below `from visus.web.ops.targeting import make_locator`, added in Task 1):
+In `src/visus/web/mcp/session.py`, the import block (`:1-13`, as Task 1 left it) becomes exactly this — `Any` and `Locator` come back, and `resolve_field` joins `make_locator` on one line so ruff's `I` rule is satisfied:
 
 ```python
+"""Session singleton + locator helper for the visus-web MCP server."""
+
+from __future__ import annotations
+
+import os
 from typing import Any
 
+from visus.web import Engine, launch
+from visus.web.api.browser import Browser
+from visus.web.api.context import Context
 from visus.web.api.fields import Field
 from visus.web.api.locator import Locator
-from visus.web.ops.targeting import resolve_field
+from visus.web.api.page import Page
+from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
+from visus.web.ops.targeting import make_locator, resolve_field
+
+__all__ = ["Session", "make_locator"]
 ```
 
 In `Session.__init__` (`:19-30`), after `self._active_handle: str | None = None`, add:
@@ -1624,13 +1666,74 @@ Apply the same shape to the remaining 17 tools, changing only the op, the extra 
 | `browser_set_input_files` (`:396-411`) | `upload` | `args["paths"] = paths` | `_session.target(args).set_input_files(paths)` | `_acted(env, f"set {len(paths)} file(s)")` |
 | `browser_get_attribute` (`:163-178`) | `get_attribute` | `args["attr_name"] = attr_name` | `{"value": loc.get_attribute(attr_name), "present": loc.count() > 0}` with `loc = _session.target(args).first()` | `env["result"]["value"]` |
 | `browser_count` (`:181-195`) | `count` | — | `_session.target(args).count()` | `env["result"]` |
-| `browser_wait_for` (`:419-443`) | `wait` | `args["state"] = state`; `args["timeout"] = timeout` | the existing `time.monotonic()` poll loop over `_any_match_visible`, with `loc = _session.target(args)` replacing the `make_locator(...)` call at `:432-434` | `env["result"]` |
-| `browser_expect_text` (`:446-466`) | `expect_text` | `args["expected_text"] = expected_text`; `args["timeout"] = timeout` | the existing try/except around `expect(loc.first()).to_have_text(...)` returning `"PASSED"` / `f"FAILED: {exc}"`, with `loc = _session.target(args)` replacing the `make_locator(...)` call at `:459-461` | `env["result"]` |
+| `browser_wait_for` (`:419-443`) | `wait` | `args["state"] = state`; `args["timeout"] = timeout` | written out below | `env["result"]` |
+| `browser_expect_text` (`:446-466`) | `expect_text` | `args["expected_text"] = expected_text`; `args["timeout"] = timeout` | written out below | `env["result"]` |
 | `browser_read_text` (`:660-677`) | `read_text` | — | `_session.target(args).ocr_text()` | `env["result"]` |
 | `browser_solve_captcha` (`:680-694`) | `solve_captcha` | — | `_session.page().solve_captcha(_session.target(args))` | `env["result"]` |
-| `browser_find_image` (`:697-735`) | `find_image` | `args["template_path"] = template_path`; `args["confidence"] = confidence` | the existing numpy body, but resolving through `_session.target(args)` when `index`/`selector`/`role`/`text` is set and `_session.page().screenshot()` otherwise | `env["result"]` |
+| `browser_find_image` (`:697-735`) | `find_image` | `args["template_path"] = template_path`; `args["confidence"] = confidence` | written out below | `env["result"]` |
 
-`browser_drag`'s local lambda, written out because it has two target forms:
+The four locals that are more than one expression, written out in full so no
+implementer has to reconstruct them from the old body.
+
+`browser_wait_for` — the poll loop moves verbatim, only the locator source changes
+(`make_locator(...)` at `:432-434` becomes `_session.target(args)`):
+
+```python
+    def _local() -> str:
+        loc = _session.target(args)
+        ms = 5000 if timeout is None else timeout
+        want_visible = state != "hidden"
+        deadline = time.monotonic() + ms / 1000.0
+        while True:
+            if _any_match_visible(loc) == want_visible:
+                return f"element is {state}"
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"wait_for: no element became {state} within {ms}ms")
+            time.sleep(0.1)
+```
+
+`browser_expect_text` — same shape, the `make_locator(...)` at `:459-461` replaced:
+
+```python
+    def _local() -> str:
+        loc = _session.target(args)
+        try:
+            expect(loc.first()).to_have_text(expected_text, timeout=timeout)
+            return "PASSED"
+        except AssertionError as exc:
+            return f"FAILED: {exc}"
+```
+
+`browser_find_image` — the numpy body of `:713-735`, with the target check widened
+from `selector/role/text` to include `index`, mirroring `_op_find_image`
+(`session_server.py:510-515`):
+
+```python
+    def _local() -> dict[str, Any]:
+        import io
+
+        import numpy as np
+        from PIL import Image as PILImage
+
+        from visus.web.vision import find_image
+
+        page = _session.page()
+        if any(
+            args.get(key) is not None
+            for key in ("index", "selector", "role", "target_text")
+        ):
+            screenshot_bytes = _session.target(args).screenshot()
+        else:
+            screenshot_bytes = page.screenshot()
+        source_img = np.array(PILImage.open(io.BytesIO(screenshot_bytes)).convert("RGB"))
+        template_img = np.array(PILImage.open(template_path).convert("RGB"))
+        match = find_image(source_img, template_img, confidence=confidence)
+        if match is None:
+            return {"found": False}
+        return {"found": True, "x": match.x, "y": match.y, "confidence": match.confidence}
+```
+
+`browser_drag`'s local, written out because it has two target forms:
 
 ```python
     def _local() -> None:
@@ -1657,7 +1760,7 @@ def _acted(env: dict[str, Any], message: str) -> str:
         return message
 ```
 
-This replaces PLAN 4 Task 17's one-argument `_acted` at `mcp/server.py:34-45`. Its two tests (`tests/test_e2e_mcp.py::test_click_result_reports_the_resulting_page`, `::test_fill_result_reports_the_page`) call the tools, not the helper, so they stay green.
+This replaces PLAN 4 Task 17's one-argument `_acted` — the helper that plan adds directly below `_any_match_visible`, which Task 1 of this plan has since deleted, so search for the `def _acted(` line rather than a line number. Its two tests (`tests/test_e2e_mcp.py::test_click_result_reports_the_resulting_page`, `::test_fill_result_reports_the_page`) call the tools, not the helper, so they stay green.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -1692,11 +1795,12 @@ git commit -m "feat(mcp): index targeting on every action tool, through one disp
 Task 5 converted the tools that resolve an element. This task converts the rest — navigation, page inspection, tabs, dialogs, network/console, cookies and `evaluate` — and then locks totality down: a test asserts that **every** tool in `TOOL_OPS` dispatches through `_run` with its declared op. After this task there is no such thing as a half-attached MCP server.
 
 **Files:**
-- Modify: `src/visus/web/mcp/server.py:40-143` (navigation + inspect), `:474-538` (tabs), `:546-561` (dialogs), `:569-599` (network/console), `:607-624` (cookies), `:646-652` (`browser_evaluate`), `:743-747` (`browser_close`)
+- Modify: `src/visus/web/mcp/server.py:40-69` (navigation), `:77-143` (inspect), `:474-538` (tabs), `:546-561` (dialogs), `:569-599` (network/console), `:607-624` (cookies), `:646-652` (`browser_evaluate`), `:743-747` (`browser_close`)
+- Modify: `src/visus/web/ops/registry.py` (`INDEXABLE_TOOLS` gains `browser_evaluate`)
 - Test: `tests/test_mcp_attach.py`
 
 **Interfaces:**
-- Consumes: `_run` / `_target_payload` (Task 5), `registry.TOOL_OPS` (Task 2).
+- Consumes: `_run` / `_target_payload` (Task 5), `registry.TOOL_OPS` / `INDEXABLE_TOOLS` (Tasks 2, 5), PLAN 5 Task 12's element-scoped `browser_evaluate` / `_op_eval`.
 - Produces: no new symbols — the structural invariant "every daemon-backed tool calls `_run`".
 
 - [ ] **Step 1: Write the failing test**
@@ -1854,19 +1958,106 @@ Tabs (`:474-538`):
 | `browser_tab_close` (`:517-522`) | `tab_close` | `{"index": index}` | `_session.close_tab(index)`, `return {"closed": index, "remaining": len(_session._pages)}` | `f"closed tab {env['result']['closed']} ({env['result']['remaining']} remaining)"` |
 | `browser_set_tab_follow` (`:525-538`) | `tab_follow` | `{"enabled": enabled}` | `{"follow": _session.set_follow(enabled)}` | `f"tab-follow {'enabled (auto)' if env['result']['follow'] else 'disabled (manual)'}"` |
 
-`browser_tab_list`'s return type becomes the daemon's richer row — `{index, handle, title, url, active}` — and its docstring gains a sentence naming `active`.
+`browser_tab_list`'s return type becomes the daemon's richer row — `{index, handle, title, url, active}` — and its docstring gains a sentence naming `active`. Its local, written out because it is the only tab local with a loop, and because the `active` column is new here (`_op_tabs` at `session_server.py:523-545` already emits it, so this is the MCP side catching up):
+
+```python
+    def _local() -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        for i, p in enumerate(_session.pages()):
+            try:
+                title, url = p.title(), p.url
+            except Exception:  # noqa: BLE001 — one dead tab must not hide the live ones
+                title, url = "", ""
+            rows.append(
+                {
+                    "index": i,
+                    "handle": p.handle,
+                    "title": title,
+                    "url": url,
+                    "active": i == _session._current_idx,
+                }
+            )
+        return {"tabs": rows, "active": _session._current_idx}
+```
 
 Dialogs, network/console, cookies and JS:
 
 | Tool (lines) | op | payload | local | returns |
 |---|---|---|---|---|
-| `browser_handle_dialog` (`:546-561`) | `dialog` | `{"accept": accept, "prompt_text": prompt_text}` | the existing `handle_next_dialog` body | `_acted(env, env["result"])` |
+| `browser_handle_dialog` (`:546-561`) | `dialog` | `{"accept": accept, "prompt_text": prompt_text}` | written out below | `_acted(env, env["result"])` |
 | `browser_network_requests` (`:569-584`) | `network_requests` | `{"url_filter": url_filter}` | the existing comprehension, wrapped as `{"requests": out}` | `env["result"]["requests"]` |
 | `browser_console_messages` (`:587-599`) | `console_messages` | `{"level": level}` | the existing comprehension, wrapped as `{"messages": out}` | `env["result"]["messages"]` |
 | `browser_get_cookies` (`:607-610`) | `cookies` | `{}` | `{"cookies": _session.context().cookies()}` | `env["result"]["cookies"]` |
 | `browser_add_cookies` (`:613-617`) | `add_cookies` | `{"cookies": cookies}` | `_session.context().add_cookies(cookies)`, `return f"added {len(cookies)} cookie(s)"` | `_acted(env, env["result"])` |
 | `browser_clear_cookies` (`:620-624`) | `clear_cookies` | `{}` | `_session.context().clear_cookies()`, `return "cookies cleared"` | `_acted(env, env["result"])` |
-| `browser_evaluate` (`:646-652`) | `eval` | `{"expression": expression, "arg": arg}` | `{"result": _session.page().evaluate(expression, arg)}` | `env["result"]["result"]` |
+| `browser_evaluate` (`:646-652`) | `eval` | written out below | written out below | `env["result"]["result"]` |
+
+`browser_handle_dialog`'s local — the body of `:554-561` moved verbatim into a
+callable, so the attached path never touches this process's page:
+
+```python
+    def _local() -> str:
+        page = _session.page()
+        msg, typ = page._delegate.handle_next_dialog(
+            accept=accept, prompt_text=prompt_text, timeout_ms=5000
+        )
+        action = "accepted" if accept else "dismissed"
+        return f"{action} {typ!r} dialog: {msg!r}"
+```
+
+`browser_evaluate` is written out in full because it is the **one** tool in this
+task that PLAN 5 has already widened: its Task 12 gave both `_op_eval` and this
+tool a target, so the page-only form written above would be a silent regression.
+The target parameters are preserved and `index` is added, which is what the
+daemon's `_has_target` already understands:
+
+```python
+@mcp.tool()
+def browser_evaluate(
+    expression: str,
+    arg: object = None,
+    index: int | None = None,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+) -> object:
+    """Evaluate a JavaScript function in the browser and return the result.
+
+    With no target the function runs on the page and is called as
+    '(expression)(arg)', e.g. '() => document.title'.
+
+    With a target (index / selector / role+name / text) it runs on that ELEMENT
+    and is called as '(expression)(element, arg)', e.g. '(el) => el.value' — this
+    is how you read id/class/dataset or any property list_fields does not return.
+    """
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["expression"] = expression
+    args["arg"] = arg
+
+    def _local() -> dict[str, Any]:
+        if all(
+            args.get(key) is None
+            for key in ("index", "selector", "role", "target_text")
+        ):
+            return {"result": _session.page().evaluate(expression, arg)}
+        return {"result": _session.target(args).first().evaluate(expression, arg)}
+
+    result: dict[str, Any] = _run("eval", args, _local)["result"]
+    return result["result"]
+```
+
+and in `src/visus/web/ops/registry.py`, add it to `INDEXABLE_TOOLS`:
+
+```python
+        # PLAN 5 Task 12 made `eval` element-scopable on both surfaces; `index` is
+        # the one target form it could not express until now.
+        "browser_evaluate",
+```
 
 Finally `browser_close` (`:743-747`) — declared `LOCAL_ONLY` in Task 2, and this is why:
 
@@ -1893,10 +2084,13 @@ def browser_close() -> str:
 Run: `uv run pytest tests/test_mcp_attach.py -v --no-cov`
 Expected: PASS (4 passed)
 
-- [ ] **Step 5: Run every MCP suite**
+- [ ] **Step 5: Run every MCP suite plus the registry**
 
-Run: `uv run pytest tests/test_mcp_server.py tests/test_mcp_list_fields.py tests/test_mcp_index.py tests/test_e2e_mcp.py -q --no-cov`
-Expected: PASS — the inventory is still 45.
+Run: `uv run pytest tests/test_mcp_server.py tests/test_mcp_list_fields.py tests/test_mcp_index.py tests/test_ops_registry.py tests/test_e2e_mcp.py -q --no-cov`
+Expected: PASS — the inventory is still 45, and `test_every_indexable_tool_accepts_an_index_parameter` now covers `browser_evaluate` too (22 indexable tools).
+
+Run: `uv run pytest tests/test_cli_page_ops.py -k eval -q --no-cov`
+Expected: PASS — PLAN 5 Task 12's element-scoped `browser_evaluate` still resolves an element, and the no-target form still hits the page.
 
 - [ ] **Step 6: Run the gates**
 
@@ -1906,7 +2100,7 @@ Run: `uv run mypy` → Expected: `Success: no issues found`
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/visus/web/mcp/server.py tests/test_mcp_attach.py
+git add src/visus/web/mcp/server.py src/visus/web/ops/registry.py tests/test_mcp_attach.py
 git commit -m "refactor(mcp): route every daemon-backed tool through one dispatch seam"
 ```
 
@@ -2138,7 +2332,7 @@ Expected: PASS (2 passed)
 Run: `uv run pytest tests/test_mcp_server.py tests/test_ops_registry.py -q --no-cov`
 Expected: PASS — 47 tools registered, 47 accounted for.
 
-- [ ] **Step 6: Document it**
+- [ ] **Step 6: Document it — and retract the claim it falsifies**
 
 In `README.md`, in the MCP tool tables (`:192-256`), add a row to the lifecycle group:
 
@@ -2146,14 +2340,36 @@ In `README.md`, in the MCP tool tables (`:192-256`), add a row to the lifecycle 
 | `browser_attach_session` / `browser_detach_session` | Drive the `visus session` browser from MCP instead of a second, separate one. |
 ```
 
+The README and the packaged skill both state, today, that the MCP server's browser
+and the CLI daemon's browser **never** share a session (inventory gap #18 is that
+nothing said so; PLAN 1's skill rewrite fixes that by saying it out loud — in
+**PLAN 1 Task 6**, the `## Which interface` table of the rewritten `SKILL.md`, and
+in **PLAN 1 Task 9**, `references/mcp-tools.md`). After this task that
+sentence is false unless it is qualified. In
+`src/visus/web/skills/visus-web/references/mcp-tools.md` and in the SKILL.md table
+PLAN 1 wrote, replace every "the two never share a session" / "its browser is a
+*separate* process" clause with:
+
+```markdown
+Its browser is a *separate* process from the CLI daemon by default. Call
+`browser_attach_session` to drive the daemon's browser instead — then the model
+and the human share one page, one session and one field-index vocabulary.
+`browser_detach_session` goes back to the server's own browser.
+```
+
 - [ ] **Step 7: Run the gates and commit**
 
 Run: `uv run ruff check src tests` then `uv run mypy`
 Expected: clean
 
+Run: `uv run pytest tests/test_skill_docs.py -q --no-cov`
+Expected: PASS — PLAN 1's drift test only covers CLI command names, and this task adds none.
+
 ```bash
 git add src/visus/web/mcp/server.py src/visus/web/ops/registry.py \
-        tests/test_mcp_server.py tests/test_mcp_attach.py README.md
+        tests/test_mcp_server.py tests/test_mcp_attach.py README.md \
+        src/visus/web/skills/visus-web/SKILL.md \
+        src/visus/web/skills/visus-web/references/mcp-tools.md
 git commit -m "feat(mcp): attach to the visus session daemon instead of a second browser"
 ```
 
@@ -2172,7 +2388,7 @@ PLAN 5 Task 17 puts it behind `visus tracing-start` / `visus tracing-stop` / `vi
 - Test: `tests/test_mcp_tracing.py`
 
 **Interfaces:**
-- Consumes: `tracing.start_recording(**opts) -> Recorder` and `tracing.stop_recording(zip_path=None, report=None) -> dict[str, str]` (PLAN 5 Task 17, declared at `2026-08-06-tier2b-cli-surface-parity.md:136-139`); `tracing.render_report(zip_path, output) -> str` (`tracing.py:132-139`); `Recorder.run_id` (`recorder.py:71`).
+- Consumes: `tracing.start_recording(**opts) -> Recorder` and `tracing.stop_recording(zip_path=None, report=None) -> dict[str, str]` (**PLAN 5 Task 17**, declared in that plan's "Symbols this plan produces" block); `tracing.render_report(zip_path, output) -> str` (`tracing.py:132-139`); `Recorder.run_id` (`recorder.py:71`).
 - Produces: MCP tools `browser_tracing_start`, `browser_tracing_stop`, `browser_tracing_report`.
 
 - [ ] **Step 1: Write the failing test**
@@ -2386,7 +2602,8 @@ Expected: PASS — 50 tools registered, 50 accounted for.
 
 - [ ] **Step 6: Document it**
 
-In `README.md`, in the MCP tool tables (`:192-256`), add:
+In `README.md`, in the MCP tool tables (`:192-256`), and in
+`src/visus/web/skills/visus-web/references/mcp-tools.md` (PLAN 1's file), add:
 
 ```markdown
 | `browser_tracing_start` / `browser_tracing_stop` / `browser_tracing_report` | Record a run and write a single-file HTML report (screenshots embedded, no viewer needed). |
@@ -2399,7 +2616,8 @@ Expected: clean
 
 ```bash
 git add src/visus/web/mcp/server.py src/visus/web/ops/registry.py \
-        tests/test_mcp_server.py tests/test_mcp_tracing.py README.md
+        tests/test_mcp_server.py tests/test_mcp_tracing.py README.md \
+        src/visus/web/skills/visus-web/references/mcp-tools.md
 git commit -m "feat(mcp): expose tracing and the single-file HTML report"
 ```
 
@@ -2407,7 +2625,7 @@ git commit -m "feat(mcp): expose tracing and the single-file HTML report"
 
 ### Task 9: The report says "self-healing" out loud
 
-`backtrack_steps` is already a first-class concept: `recorder.py:106`/`:143` record it per action, `report.py:403-411` aggregates it into the KPI band, and `report.py:572-580` renders a per-step badge. That is a genuine differentiator — a self-healing retry is *visible* rather than hidden inside a flaky-looking pass — and the report currently spends it on the word "Backtrack", which means nothing to the person the report is being sent to.
+`backtrack_steps` is already a first-class concept: `recorder.py:106`/`:143` record it per action, `report.py:404`/`:410` aggregate it into the `_kpis` dict, and `report.py:572-580` renders a per-step badge. That is a genuine differentiator — a self-healing retry is *visible* rather than hidden inside a flaky-looking pass — and the report currently spends it on the word "Backtrack", which means nothing to the person the report is being sent to.
 
 This task is copy, not mechanism: the data, the JSON keys and the CSS classes are untouched.
 
@@ -2480,7 +2698,10 @@ def test_the_kpi_band_names_self_healing_retries(tmp_path: Path) -> None:
 
 def test_a_recovered_step_says_it_healed(tmp_path: Path) -> None:
     html = _render(tmp_path, [_event(backtrack_steps=2, success=True)])
-    assert "badge-backtrack" in html  # the CSS class is untouched
+    # `class="…"` and not the bare word: `.badge-backtrack` is also a RULE in the
+    # embedded stylesheet (report.py:135), so a bare substring test would pass on
+    # an empty report and prove nothing.
+    assert 'class="badge-backtrack"' in html
     assert "self-healed" in html
     assert "replayed 2 previous step(s)" in html
 
@@ -2491,12 +2712,13 @@ def test_a_failed_step_says_it_tried(tmp_path: Path) -> None:
         [_event(backtrack_steps=2, success=False, error="VisusWebError: no such element")],
     )
     assert "self-healing failed" in html
-    assert "badge-failure" in html
+    assert "replayed 2 previous step(s)" in html
+    assert 'class="badge-failure"' in html
 
 
 def test_a_clean_step_shows_no_healing_copy(tmp_path: Path) -> None:
     html = _render(tmp_path, [_event(backtrack_steps=0)])
-    assert "badge-backtrack" not in html
+    assert 'class="badge-backtrack"' not in html
     assert "self-healed" not in html
     # The KPI card is always present; it just reads zero.
     assert "Self-healing retries" in html
@@ -2546,7 +2768,9 @@ Replace the backtrack rows in `_render_task` (`:572-580`):
         # is not the same as a step that passed first time, and a reader who
         # cannot see the difference will trust a fragile flow.
         verb = "self-healed" if success else "self-healing failed"
-        rows.append(("healing", f"{verb} after having replayed {backtrack_steps} previous step(s)"))
+        rows.append(
+            ("healing", f"{verb} after having replayed {backtrack_steps} previous step(s)")
+        )
         backtrack_badge = (
             f'<span class="badge-backtrack" title="re-ran {backtrack_steps} previous '
             f'step(s) and retried">&#8635; self-healed &times;{backtrack_steps}</span>'
@@ -2777,7 +3001,7 @@ def read_text(image: ImageInput) -> str:
     return " ".join(box.text for box in read_text_boxes(image))
 ```
 
-Leave `_preprocess` and `solve_captcha` (`:34-46`) exactly as they are.
+Leave `_preprocess` (`:35-38`) and `solve_captcha` (`:41-46`) exactly as they are — they are the reason `numpy`, `numpy.typing`, `PIL.Image` and `Any` stay in the new header.
 
 In `src/visus/web/vision/__init__.py`, replace the whole file with:
 
@@ -2981,9 +3205,55 @@ def test_click_image_not_found_is_an_actionable_error(base_url: str, tmp_path: P
         h.close()
 
 
-def test_device_pixel_ratio_falls_back_to_one_when_unreadable() -> None:
+class _RatioPage:
+    """Stand-in for the live page: `_device_pixel_ratio` only calls `evaluate`.
+
+    A double is right here because the real behaviour — reading a browser's
+    devicePixelRatio and clicking at the scaled point — is covered by the two
+    browser tests above; what is NOT reachable through a real browser is the
+    HiDPI and the garbage-answer branch, and those are what break the click maths.
+    """
+
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def evaluate(self, expression: str, arg: Any = None) -> Any:
+        return self._value
+
+
+def test_device_pixel_ratio_falls_back_to_one_when_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead page, a non-numeric answer or a zero must all degrade to 1:1.
+
+    `_device_pixel_ratio` calls `self.page()`, which would LAUNCH a browser — so
+    the page is replaced rather than left to the lazy `_ensure`.
+    """
     h = session_server.SessionHandler(engine="chrome", headless=True)
-    assert h._device_pixel_ratio() == 1.0  # no browser at all
+
+    def _no_page() -> Any:
+        raise RuntimeError("session page is not available")
+
+    monkeypatch.setattr(h, "page", _no_page)
+    assert h._device_pixel_ratio() == 1.0
+
+    monkeypatch.setattr(h, "page", lambda: _RatioPage("not-a-number"))
+    assert h._device_pixel_ratio() == 1.0
+
+    monkeypatch.setattr(h, "page", lambda: _RatioPage(None))
+    assert h._device_pixel_ratio() == 1.0
+
+    monkeypatch.setattr(h, "page", lambda: _RatioPage(0))
+    assert h._device_pixel_ratio() == 1.0
+
+
+def test_device_pixel_ratio_passes_a_hidpi_answer_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On a 2x display a match at screenshot (400,200) must be clicked at (200,100)."""
+    h = session_server.SessionHandler(engine="chrome", headless=True)
+    monkeypatch.setattr(h, "page", lambda: _RatioPage(2.0))
+    assert h._device_pixel_ratio() == 2.0
 
 
 def test_click_image_is_a_mutating_op() -> None:
@@ -3160,14 +3430,14 @@ and this `_HELP` line immediately after the `click N` line (`:21`):
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli_vision_targeting.py -m "not browser" -v --no-cov`
-Expected: PASS (5 passed)
+Expected: PASS (6 passed)
 
 Run: `uv run pytest tests/test_cli_vision_targeting.py -m browser -v --no-cov`
 Expected: PASS (2 passed)
 
 - [ ] **Step 8: Update the README**
 
-In `README.md`, in the **Actions** table (`:311-323`), replace the `visus click` row with:
+In `README.md`, in the **Actions** table (`:314-327`), replace the `visus click` row (`:318`) with:
 
 ```markdown
 | `visus click [idx] [target]` / `visus click --image <png> [-c 0.8]` | Click a field, or the centre of a template image (canvas apps, embedded PDFs, widgets with no accessibility tree). |
@@ -3549,6 +3819,8 @@ Expected: PASS (10 passed)
 Run: `uv run pytest tests/test_cli_vision_targeting.py -m browser -v --no-cov`
 Expected: PASS (4 passed)
 
+(The non-browser count is 6 from Task 11 plus the 4 added here.)
+
 - [ ] **Step 7: Run the MCP, registry and attach suites**
 
 Run: `uv run pytest tests/test_mcp_server.py tests/test_ops_registry.py tests/test_mcp_attach.py -q --no-cov`
@@ -3562,28 +3834,44 @@ In `README.md`, in the **Actions** table, add below the `visus click` row:
 | `visus click --ocr-text "<text>"` | Click text that is only rendered pixels — canvas labels, embedded PDFs, chart legends. |
 ```
 
-and in the MCP tool tables (`:192-256`), under Vision:
+and in the MCP tool tables (`:192-256`), and in
+`src/visus/web/skills/visus-web/references/mcp-tools.md`, under Vision:
 
 ```markdown
 | `browser_click_image` / `browser_click_ocr_text` | Press a template image or rendered text — targets with no accessibility tree at all. |
 ```
+
+This is the last task that adds a tool, so the inventory is final: **52**.
+`README.md` states the count in four places — `:114` ("exposes **45 tools**"),
+`:194` ("exposing **45 tools**"), `:219` ("**Tool groups (45 tools):**") and
+`:929` (the project-layout tree, `# the visus-web-mcp server (45 tools)`).
+Change all four to `52`, and do the same in PLAN 1's packaged skill, which repeats
+the number in three places: **PLAN 1 Task 6** writes it twice in `SKILL.md` (the
+`## Which interface` table row for "An MCP client without shell access", and the
+`## MCP server` section's "exposes **45 tools**" sentence), and **PLAN 1 Task 9**
+writes it once in `references/mcp-tools.md`. Grep for `45 tools` under
+`src/visus/web/skills/` to find all three.
 
 - [ ] **Step 9: Run the gates and commit**
 
 Run: `uv run ruff check src tests` then `uv run mypy`
 Expected: clean
 
+Run: `grep -rn "45 tools" README.md src/visus/web/skills/`
+Expected: no output — every stale count is gone.
+
 ```bash
 git add src/visus/web/cli/session_server.py src/visus/web/cli/main.py \
         src/visus/web/cli/console.py src/visus/web/mcp/server.py \
         src/visus/web/ops/registry.py tests/test_mcp_server.py \
-        tests/test_cli_session.py tests/test_cli_vision_targeting.py README.md
+        tests/test_cli_session.py tests/test_cli_vision_targeting.py README.md \
+        src/visus/web/skills/visus-web/references/mcp-tools.md
 git commit -m "feat(vision): click rendered text by OCR, on the CLI, the REPL and MCP"
 ```
 
 ---
 
-## Design tasks (items 5–10)
+## Design tasks (brief items 5–9, plus the dashboard half of gap #11)
 
 The six tasks below each produce a design document under `docs/design/` **and** a spike that answers that design's one open question with real code and a real test. They are design tasks because each carries a question no amount of plan prose can settle. They are not placeholders: every one ships a production symbol, a failing-test-first cycle, and acceptance criteria the design must meet before implementation starts.
 
@@ -3591,7 +3879,7 @@ The six tasks below each produce a design document under `docs/design/` **and** 
 
 ### Task 13: Design — `visus annotate`, human in the loop (item 5)
 
-`playwright-cli` answers "which one did you mean?" with `show --annotate` and a multi-session dashboard behind it (`skills/playwright-cli/SKILL.md:401-408`). visus can answer it with far less machinery: the daemon already owns a live headed page and already injects drawing code into it — `bundle.js:800-820` renders the numbered field overlay through `window.__visus.highlightFields`, positions boxes absolutely at `z-index:2147483646`, and repositions them on scroll (`:825-845`). An annotation canvas is the same channel with the arrow reversed.
+`playwright-cli` answers "which one did you mean?" with `show --annotate` and a multi-session dashboard behind it (`playwright-cli/skills/playwright-cli/SKILL.md:401-408`, in the sibling checkout — not this repo). visus can answer it with far less machinery: the daemon already owns a live headed page and already injects drawing code into it — `bundle.js:800-820` renders the numbered field overlay through `window.__visus.highlightFields` (`:840-852`), positions boxes absolutely at `z-index:2147483646` (`:805`), and repositions them on scroll and resize (`scheduleReposition` at `:832-838`, the listeners at `:849-851`, the teardown in `clearHighlights` at `:854-866`). An annotation canvas is the same channel with the arrow reversed.
 
 The return payload is `{screenshot_path, boxes, notes, region_snapshot}`. Three of those four are already reachable: `_op_screenshot` (`session_server.py:281-294`), the boxes come back from the injected script, and notes are typed into it. The fourth — a snapshot *scoped to a rectangle* — has no primitive at all. `Page.snapshot` scopes by selector (PLAN 4 Task 8), never by geometry, and `recorder.py:141` proves bounding boxes are already flowing through the observability path.
 
@@ -3608,7 +3896,7 @@ The return payload is `{screenshot_path, boxes, notes, region_snapshot}`. Three 
   # src/visus/web/api/page.py
   def fields_in_box(self, box: dict[str, float], *, contained: bool = False) -> list[Field]: ...
   ```
-- Consumes: `Field.box` (PLAN 5 Task 11, `2026-08-06-tier2b-cli-surface-parity.md:145`), `Page.list_fields` (`api/page.py:229-248`).
+- Consumes: `Field.box: dict[str, float] | None = None` (**PLAN 5 Task 11**, declared in that plan's "Symbols this plan produces" block), `Page.list_fields` (`api/page.py:229-248`).
 
 - [ ] **Step 1: Write the failing spike test**
 
@@ -3716,14 +4004,14 @@ Expected: PASS (3 passed)
 
 Create `docs/design/annotate.md` containing exactly these sections, with the content described:
 
-1. **`## Problem`** — an agent that cannot see the screen has to guess which of nine "Submit"-ish controls the human meant, and the cheapest correction channel is the human pointing at it. Cite `playwright-cli`'s `show --annotate` (`skills/playwright-cli/SKILL.md:401-408`) as the prior art and state the difference: it needs a dashboard process, visus already has a live headed page.
+1. **`## Problem`** — an agent that cannot see the screen has to guess which of nine "Submit"-ish controls the human meant, and the cheapest correction channel is the human pointing at it. Cite `playwright-cli`'s `show --annotate` (`playwright-cli/skills/playwright-cli/SKILL.md:401-408`, sibling checkout) as the prior art and state the difference: it needs a dashboard process, visus already has a live headed page.
 2. **`## Command surface`** — `visus annotate [--timeout 120] [--output annotate.png]`, blocking until the user presses Done or the timeout expires; returns
    ```json
    {"screenshot_path": "...", "boxes": [{"x":0,"y":0,"width":0,"height":0,"note":""}],
     "notes": ["..."], "region_snapshot": [{"index":3,"kind":"button","name":"Submit"}]}
    ```
    plus the REPL twin `annotate` and a `README.md` row. Daemon op: `annotate`. Not in `_MUTATING_OPS` — it observes, it does not act.
-3. **`## Mechanism`** — a new `window.__visus.annotate(opts)` in `bundle.js` beside `highlightFields` (`:800-845`), reusing the same absolute-positioning and scroll-reposition code, plus `readAnnotations()` / `endAnnotate()`. The daemon polls `readAnnotations()` until done. State the reason for polling rather than a callback: the daemon speaks JSON-lines request/response and has no push channel.
+3. **`## Mechanism`** — a new `window.__visus.annotate(opts)` in `bundle.js` beside `highlightFields` (`:840-852`), exported from the `window.__visus` object literal (`:868-884`), reusing the same absolute-positioning and scroll-reposition code (`:800-820`, `:832-838`), plus `readAnnotations()` / `endAnnotate()`. The daemon polls `readAnnotations()` until done. State the reason for polling rather than a callback: the daemon speaks JSON-lines request/response and has no push channel.
 4. **`## Region snapshot`** — `Page.fields_in_box` (this task's spike), called with `contained=False` for each drawn rectangle. Record the spike's finding: intersect mode is the useful default for a hand-drawn box, `contained=True` for a machine-drawn one.
 5. **`## Risks`** — must list, each with a mitigation: (a) a headless session has nothing to draw on — `annotate` must fail fast with `session start` without `--headless` in the message; (b) the overlay injects nodes into `body` exactly like `list-fields` does (synthesis item 25), so a screenshot taken while annotating is polluted — take the screenshot *before* injecting; (c) `page.mouse` drags synthesised by tests are the only way to test this without a human, so the acceptance test must drive `page.mouse.move/down/up`; (d) a navigation during annotation destroys the overlay — detect via the URL and return what was collected.
 6. **`## Acceptance criteria`** — verbatim:
@@ -3748,9 +4036,9 @@ git commit -m "feat(api): select fields by geometry, the missing primitive for a
 
 ### Task 14: Design — ARIA-snapshot assertions (item 6, D13)
 
-`api/assertions.py:82-145` lists 21 `LocatorAssertions` matchers and none of them is `to_match_aria_snapshot`; `PageAssertions` has exactly two, `to_have_url` (`:199`) and `to_have_title` (`:210`). Meanwhile the `Recorder` already captures an ARIA snapshot on every failure (`recorder.py:123-129`) and the report already renders it (`report.py:652-666`) — the data exists and cannot be asserted on.
+`api/assertions.py:81-145` lists 21 `LocatorAssertions` matchers and none of them is `to_match_aria_snapshot`; `PageAssertions` has exactly two, `to_have_url` (`:199`) and `to_have_title` (`:210`). Meanwhile the `Recorder` already captures an ARIA snapshot on every failure (`recorder.py:123-129`) and the report already renders it (`report.py:652-666`) — the data exists and cannot be asserted on.
 
-That gap breaks the loop `playwright-cli` prescribes: `references/test-generation.md:110-116` says to capture the expected snapshot with `--raw snapshot` (whole page, or scoped to a ref) and assert it with `toMatchAriaSnapshot` (`:90`, `:126-137`). visus can capture it (PLAN 4's scoped `visus snapshot <target>`) and cannot assert it.
+That gap breaks the loop `playwright-cli` prescribes: `playwright-cli/skills/playwright-cli/references/test-generation.md:110-116` (the sibling checkout — **not** this repo) says to capture the expected snapshot with `--raw snapshot` (whole page, or scoped to a ref) and assert it with `toMatchAriaSnapshot` (`:90`, `:126-137`). visus can capture it (PLAN 4's scoped `visus snapshot <target>`) and cannot assert it.
 
 **The one open question this task answers:** what does a visus ARIA-snapshot assertion *compare*? Playwright's matcher takes a YAML tree; `page.snapshot()` returns a flat `[{role, name, depth}]` list (PLAN 4 Task 8). The spike settles the comparison semantics before any YAML parser is written.
 
@@ -3783,7 +4071,9 @@ def test_page_matches_a_partial_aria_snapshot(browser, base_url: str) -> None:  
     """Partial by design: assert the rows that matter, ignore the rest.
 
     Mirrors playwright-cli's rule that "snapshot to be matched does not have to
-    contain all the information" (references/test-generation.md:96).
+    contain all the information"
+    (playwright-cli/skills/playwright-cli/references/test-generation.md:96 —
+    sibling checkout, not this repo).
     """
     import re
 
@@ -3852,7 +4142,7 @@ Expected: FAIL — `AttributeError: 'PageAssertions' object has no attribute 'to
 
 - [ ] **Step 3: Write the spike implementation**
 
-In `src/visus/web/api/assertions.py`, add `Sequence` to the `collections.abc` import (`:5`) if it is not already there, then add this method to `PageAssertions`, immediately after `to_have_title` (`:210-219`):
+In `src/visus/web/api/assertions.py`, no import changes are needed — `re` is already imported at `:4` and `Sequence` at `:5` (`from collections.abc import Callable, Sequence`). Add this method to `PageAssertions`, immediately after `to_have_title` (`:210-219`):
 
 ```python
     def to_match_aria_snapshot(
@@ -3909,13 +4199,16 @@ Expected: PASS (4 passed)
 Create `docs/design/aria-snapshot-assertions.md` with exactly these sections:
 
 1. **`## Problem`** — D13, with the four line references above, and the sentence that matters: the capture side already exists twice (Recorder, report) and the assert side does not exist at all, so a failure is *observable* and not *preventable*.
-2. **`## Semantics chosen`** — record the spike's decision and why: subsequence over a flat `[{role, name, depth}]` list, not tree equality. Reasons, all three: (a) `page.snapshot()` is flat (`bundle.js:415-423` plus PLAN 4 Task 8's `depth`), so tree equality would require inventing a nesting model the bundle does not emit; (b) partial matching is what the workflow needs (`test-generation.md:96`); (c) order carries real signal (a reordered nav is a regression) while completeness does not.
-3. **`## Locator scope`** — state plainly that the spike implements the page-level matcher only, and why: `LocatorAssertions._poll` (`:69-80`) routes through the delegate's `expect_poll` matcher engine, so a locator-level matcher means a new matcher name in that engine, on both the sync and async paths. The design's recommendation: add `"aria_snapshot"` to `expect_poll` and have `LocatorAssertions.to_match_aria_snapshot` delegate, with `PageAssertions`' `selector=` form as the interim answer for a region.
-4. **`## Capture-to-assertion loop`** — the exact commands, mirroring `test-generation.md:110-116`:
+2. **`## Semantics chosen`** — record the spike's decision and why: subsequence over a flat `[{role, name, depth}]` list, not tree equality. Reasons, all three: (a) `page.snapshot()` is flat (`bundle.js:415-423` plus PLAN 4 Task 8's `depth`), so tree equality would require inventing a nesting model the bundle does not emit; (b) partial matching is what the workflow needs (`playwright-cli/skills/playwright-cli/references/test-generation.md:96`, sibling checkout); (c) order carries real signal (a reordered nav is a regression) while completeness does not.
+3. **`## Locator scope`** — state plainly that the spike implements the page-level matcher only, and why: `LocatorAssertions._poll` (`:68-79`) routes through the delegate's `expect_poll` matcher engine, so a locator-level matcher means a new matcher name in that engine, on both the sync and async paths. The design's recommendation: add `"aria_snapshot"` to `expect_poll` and have `LocatorAssertions.to_match_aria_snapshot` delegate, with `PageAssertions`' `selector=` form as the interim answer for a region.
+4. **`## Capture-to-assertion loop`** — the exact commands, mirroring `playwright-cli/skills/playwright-cli/references/test-generation.md:110-116` (sibling checkout):
    ```bash
-   visus --raw snapshot --json > expected.json          # whole page
-   visus --raw snapshot "#main" --json > region.json    # one region
+   visus --json snapshot > expected.json          # whole page
+   visus --json snapshot "#main" > region.json    # one region
    ```
+   (`--json` only — PLAN 4 Task 1's `set_mode` makes `--json` win when both flags
+   are given, so `--raw --json` would be a confusing no-op on `--raw`. `--json` is
+   the machine-readable form; `--raw` is the shell-capture form.)
    and the generated assertion `expect(page).to_match_aria_snapshot(json.load(open("region.json")), selector="#main")`.
 5. **`## CLI surface`** — `visus expect-snapshot <file.json> [TARGET] [--timeout]` returning `PASSED` / `FAILED: <detail>` like `visus expect-text` (`session_server.py:385-395`), its daemon op `expect_snapshot`, the REPL twin, and the README row.
 6. **`## Acceptance criteria`** — verbatim:
@@ -3944,7 +4237,7 @@ git commit -m "feat(api): assert a partial ARIA snapshot on the page"
 
 `codegen.py:75-86` emits `from visus.web import launch` followed by `with launch(headless=False)` — no test function, no fixtures, no assertions — while `pytest_plugin.py:72-88` has been shipping a ready `visus_page` fixture (with on-failure screenshots) to every installed user via the `pytest11` entry point the whole time. The generator and the test harness have never been introduced to each other.
 
-`playwright-cli` builds a 433-line workflow on top of its generator: a `specs/<feature>.plan.md` with `- expect:` bullets (`references/test-generation.md:243-270`), one test per file (`:280`), and a heal loop that reconciles the spec with reality and escalates to `test.fixme` rather than silently skipping (`:366`, `:420-424`). Its whole mechanism is `npx playwright test --debug=cli` → `playwright-cli attach tw-XXXX` → `resume` (`references/playwright-tests.md:15-31`).
+`playwright-cli` builds a 433-line workflow on top of its generator: a `specs/<feature>.plan.md` with `- expect:` bullets (`playwright-cli/skills/playwright-cli/references/test-generation.md:243-270`), one test per file (`:280`), and a heal loop that reconciles the spec with reality and escalates to `test.fixme` rather than silently skipping (`:366`, `:420-424`). Its whole mechanism is `npx playwright test --debug=cli` → `playwright-cli attach tw-XXXX` → `resume` (`playwright-cli/skills/playwright-cli/references/playwright-tests.md:15-31`). **Both files are in the sibling `playwright-cli` checkout, not in this repo** — read them as prior art; do not go looking for them under `src/`.
 
 **The one open question this task answers:** does the recorded event stream carry enough to emit a real pytest test — imports, fixture parameter, comments, assertions — or does the generator need more from the browser first?
 
@@ -4101,7 +4394,7 @@ Expected: PASS (all, including the pre-existing `generate_script` tests)
 Create `docs/design/test-generation.md` with exactly these sections:
 
 1. **`## Problem`** — D14 and D15 with their line references, plus the sentence that frames the opportunity: combined with the single-file HTML report (Task 8), visus gets something `playwright-cli` does not have — test generation **with a report of the heal run**, attachable to the PR that fixes the test.
-2. **`## Plan → generate → heal`** — the three phases, mapped one-to-one onto `references/test-generation.md`, with the visus command for each:
+2. **`## Plan → generate → heal`** — the three phases, mapped one-to-one onto `playwright-cli/skills/playwright-cli/references/test-generation.md` (sibling checkout), with the visus command for each:
 
    | Phase | playwright-cli | visus |
    |---|---|---|
@@ -4111,7 +4404,7 @@ Create `docs/design/test-generation.md` with exactly these sections:
    | Emit test | copy TypeScript into a `.spec.ts` | `visus codegen --as-test -o tests/test_login.py` |
    | Diagnose | `snapshot` + `console` + `requests` | `visus snapshot` + `visus logs` + `visus requests` |
    | Report | (none) | `visus tracing-stop --report heal.html` |
-3. **`## Spec file format`** — reproduce the `specs/<feature>.plan.md` structure from `references/test-generation.md:238-278` verbatim (Application Overview, numbered groups, `**Seed:**`, `**File:**`, `**Steps:**` with `- expect:` bullets), and the four rules that matter: one test per file (`:280`/`:344`), kebab-case scenario names matching the file name, scenarios independent from the seed state, and `- expect:` bullets becoming the `expectations` argument of `generate_test`.
+3. **`## Spec file format`** — reproduce the `specs/<feature>.plan.md` structure from `playwright-cli/skills/playwright-cli/references/test-generation.md:238-278` (sibling checkout) verbatim (Application Overview, numbered groups, `**Seed:**`, `**File:**`, `**Steps:**` with `- expect:` bullets), and the four rules that matter: one test per file (`:280`/`:344`), kebab-case scenario names matching the file name, scenarios independent from the seed state, and `- expect:` bullets becoming the `expectations` argument of `generate_test`.
 4. **`## Seed`** — the visus equivalent of `tests/seed.spec.ts`: a `conftest.py` fixture that wraps `visus_page` with the app's navigation and login, so generated tests start from a known state. Give the exact seven-line fixture.
 5. **`## `visus attach <test-id>` — the honest finding`** — state plainly that visus has **no** `--debug=cli` equivalent: `pytest_plugin.py:51-61` calls `launch()` and never registers with the daemon, so there is nothing to attach to. The design's proposal, in this order: (a) a `visus_paused_page` fixture that writes `.visus/sessions/<test-id>.json` describing its live driver and blocks on a file/socket signal; (b) `visus attach <test-id>` pointing the CLI client at it; (c) `visus resume` releasing the block. Record the risk that reaching another process's WebDriver session requires reconnecting to the driver's HTTP endpoint by session id, which is engine-level work under `backends/selenium/` and must not leak a `selenium.*` type past that boundary (the hidden-engine rule).
 6. **`## Heal loop`** — the diagnostic triad, the "fix one at a time, rerun after each" rule (`:422`), the spec-reconciliation decision tree (`:411-418`: purely technical → leave the spec; user-visible change → update the spec; unclear → **stop and ask**, quoting the scenario id, the stale spec lines and the observed behaviour), and the escalation. State explicitly that the visus equivalent of `test.fixme` is `@pytest.mark.xfail(strict=True, reason="<link to the user's decision>")` in the **generated user test suite**, and that this does not relax this repository's own no-`xfail` rule — different codebase, different contract.
@@ -4120,7 +4413,7 @@ Create `docs/design/test-generation.md` with exactly these sections:
    - The generated file imports `expect` and takes `visus_page`, and contains no `launch(`.
    - Running the generated test against the recorded app passes.
    - `visus tracing-start` before a heal run and `visus tracing-stop --report heal.html` after produce a report whose timeline contains the failing step and its ARIA snapshot.
-   - A skill reference `references/test-generation.md` ships inside the packaged skill (PLAN 1's layout) and names the six commands in the table above.
+   - A **new** skill reference `src/visus/web/skills/visus-web/references/test-generation.md` ships inside the packaged skill (PLAN 1's layout) and names the six commands in the table above. Note the basename collision: this is a file this plan creates in **this** repo, not the `playwright-cli` reference of the same name.
 8. **`## Not in scope`** — generating async tests; generating page objects; multi-scenario parallel generation.
 
 - [ ] **Step 6: Run the gates and commit**
@@ -4137,9 +4430,9 @@ git commit -m "feat(codegen): emit a pytest test over the visus_page fixture"
 
 ### Task 16: Design — `edge_ie` and Selenium Grid as the enterprise wedge (item 8)
 
-`Engine.EDGE_IE` (`engine.py:12`) drives Edge's Trident engine through IEDriverServer with `attach_to_edge_chrome` (`backends/browsers/edge_ie.py`), pins the driver to 4.0.0 because 4.8+ hangs forever on modern Edge, aligns the Windows registry itself where it can (`_ie_preflight.py:35-47`), and turns a hang into an actionable message with a 45-second watchdog (`edge_ie.py:70-101`). That is territory Playwright does not go: its browsers are chromium/firefox/webkit/chrome/msedge and there is no IE mode among them.
+`Engine.EDGE_IE` (`engine.py:12`) drives Edge's Trident engine through IEDriverServer with `attach_to_edge_chrome` (`backends/browsers/edge_ie.py:28`), pins the driver to 4.0.0 because 4.8+ hangs forever on modern Edge (`edge_ie.py:19-22`), aligns the Windows registry itself where it can (`_ie_preflight.ensure()`, `_ie_preflight.py:32-44`), and turns a hang into an actionable message with a 45-second watchdog (`edge_ie.py:18` for the timeout, `:67-102` for the watchdog and the message). That is territory Playwright does not go: its browsers are chromium/firefox/webkit/chrome/msedge and there is no IE mode among them.
 
-`remote_url` (`__init__.py:65`, *"e.g. `http://grid:4444/wd/hub`, instead of spawning a local browser"*) has existed just as long and is unreachable from the CLI until PLAN 5 Task 7. Neither the README's command tables nor the skill mentions `edge_ie` once.
+`remote_url` (the `launch()` parameter at `__init__.py:65`, documented at `:76-77` as *"opens the session on a Selenium Grid / Remote WebDriver (e.g. `http://grid:4444/wd/hub`) instead of spawning a local browser"*) has existed just as long and is unreachable from the CLI until PLAN 5 Task 7. Neither the README's command tables nor the skill mentions `edge_ie` once.
 
 **The one open question this task answers:** what does a Grid or IE-mode failure look like to the person hitting it? Today an unreachable Grid surfaces as a raw Selenium connection error through `main.py`'s `_send` funnel, and an IE-mode failure takes 45 seconds to say anything at all. A wedge nobody can debug is not a wedge.
 
@@ -4150,7 +4443,7 @@ git commit -m "feat(codegen): emit a pytest test over the visus_page fixture"
 
 **Interfaces:**
 - Produces: `visus doctor --engine <e> [--remote-url <url>]`
-- Consumes: `launch(engine, headless=..., remote_url=...)` (`__init__.py:59-90`), `_ie_preflight.ie_mode_enabled()` / `admin_hint()` (`_ie_preflight.py:50-68`), `output.emit` / `output.emit_error` (PLAN 4).
+- Consumes: `launch(engine, headless=..., remote_url=...)` (`__init__.py:59-90`), `_ie_preflight.ie_mode_enabled()` (`_ie_preflight.py:47-56`) / `_ie_preflight.admin_hint()` (`:59-67`), `Engine.from_str` raising `UnsupportedEngineError` (`engine.py:15-23`), `output.emit` / `output.emit_error` (PLAN 4).
 
 - [ ] **Step 1: Write the failing spike test**
 
@@ -4292,10 +4585,10 @@ Create `docs/design/grid-and-edge-ie.md` with exactly these sections:
 
 1. **`## Why this is the wedge`** — Playwright's engine list has no IE mode, so a Playwright-based competitor cannot bid on an IE-mode application at any price. Combined with the single-file HTML report (Task 8), the offer is "we run your legacy app on your Grid and hand you an auditable artifact per run".
 2. **`## Command surface`** — `visus session start --engine edge_ie --remote-url <grid>` (the flag itself is PLAN 5 Task 7; this design covers the *combination*), `visus doctor --remote-url` (this task's spike), and `visus install --engine edge_ie` pre-fetching the pinned IEDriverServer.
-3. **`## The IE-mode contract`** — extracted from the code so it stops living only in comments: IE mode is always headed and ignores `download_dir` / `user_data_dir` (`edge_ie.py:28-36`); IEDriverServer is pinned to 4.0.0 because 4.8+ hangs at "Finding window handle for IE Mode on Edge" (`edge_ie.py:21-24`); `VISUS_WEB_IE_DRIVER` overrides the path for air-gapped machines, `VISUS_WEB_IE_DRIVER_VERSION` overrides the pin, `VISUS_WEB_EDGE_BINARY` the Edge path, `VISUS_WEB_IE_TIMEOUT` the watchdog; the preflight equalises IE zone `2500` under HKCU without admin and needs elevation only for the Edge policy (`_ie_preflight.py:71-88`, `:104-131`).
+3. **`## The IE-mode contract`** — extracted from the code so it stops living only in comments: IE mode is always headed and ignores `headless` / `download_dir` / `user_data_dir` (`build_options`, `edge_ie.py:25-33`, whose `:26` comment says exactly that); IEDriverServer is pinned to 4.0.0 because 4.8+ hangs at "Finding window handle for IE Mode on Edge" (`edge_ie.py:19-22`, resolved in `build_service` at `:36-39`); `VISUS_WEB_IE_DRIVER` overrides the path for air-gapped machines (`:38`), `VISUS_WEB_IE_DRIVER_VERSION` overrides the pin (`:22`), `VISUS_WEB_EDGE_BINARY` the Edge path (`:29`), `VISUS_WEB_IE_TIMEOUT` the watchdog (`:18`); the preflight equalises IE zone `2500` across zones 0–4 under HKCU without admin (`_equalize_protected_mode`, `_ie_preflight.py:70-87`) and needs elevation only for the Edge policy (`_try_enable_ie_mode`, `:104-127`).
 4. **`## Grid node preparation`** — a checklist, because `_ie_preflight.ensure()` writes the **local** registry and a Grid node is not local: the node must be Windows, headed (a real interactive session, not a service), have the Edge IE-mode policy enabled, and expose `edge_ie` capabilities. State the consequence in one line: on a Grid, IE-mode preflight is an operator task, not something visus can do for you, and `visus doctor --remote-url --engine edge_ie` must say exactly that.
-5. **`## Test strategy`** — record the constraint that `tests/test_e2e_edge_ie.py:21-22` already documents: IE mode opens a real headed window, is focus/zone sensitive and reliably hangs an xdist worker, so it runs standalone with `-n 0`. Propose (a) keeping that test as the local gate, (b) a `VISUS_WEB_GRID_URL`-driven Grid lane in CI that runs the *chrome* engine against a `selenium/standalone-chrome` service container — a real, always-available Grid, no conditional skipping — and (c) an `edge_ie` lane on a self-hosted Windows runner, out of scope for this repository's CI until such a runner exists.
-6. **`## Documentation gap`** — `edge_ie` appears in no README command table and in no skill file, while `SKILL.md:8` already promises "broad browser/Grid/IE-mode compatibility". The fix is one row in the engines table plus a `references/enterprise.md` page in the packaged skill (PLAN 1's layout).
+5. **`## Test strategy`** — record the constraint that `tests/test_e2e_edge_ie.py:16-22` already documents (the comment at `:16-20`, the guard at `:21-22`): IE mode opens a real headed window, is focus/zone sensitive and reliably hangs an xdist worker, so it runs standalone with `-n 0`. Propose (a) keeping that test as the local gate, (b) a `VISUS_WEB_GRID_URL`-driven Grid lane in CI that runs the *chrome* engine against a `selenium/standalone-chrome` service container — a real, always-available Grid, no conditional skipping — and (c) an `edge_ie` lane on a self-hosted Windows runner, out of scope for this repository's CI until such a runner exists.
+6. **`## Documentation gap`** — `edge_ie` appears in no README command table and in no skill file, while this repo's own skill (`skills/using-visus-web/SKILL.md:8`, which PLAN 1 Task 1 moves to `src/visus/web/skills/visus-web/SKILL.md`) already promises "broad browser/Grid/IE-mode compatibility". The fix is one row in the engines table plus a new `src/visus/web/skills/visus-web/references/enterprise.md` page in the packaged skill (PLAN 1's layout).
 7. **`## Acceptance criteria`** — verbatim:
    - `visus doctor --remote-url <unreachable>` exits 1 with the URL, no traceback and three named causes.
    - `visus doctor --engine edge_ie --headless` fails in under a second.
@@ -4320,7 +4613,7 @@ git commit -m "feat(cli): doctor diagnoses Grid and IE-mode failures actionably"
 
 **Sequencing: this task is explicitly LOW priority and must not be started before Tasks 1–9 are done** (items 1, 2 and 3 — the unified dispatcher, index targeting on MCP, and observability). Video is a nice-to-have on top of a report that already embeds every step's screenshot; the report is the thing that wins deals, and video without it wins nothing.
 
-`playwright-cli` has 143 lines of video recipes (`references/video-recording.md`). visus has zero hits for `video|screencast|webm` anywhere under `src/`.
+`playwright-cli` has 143 lines of video recipes (`playwright-cli/skills/playwright-cli/references/video-recording.md`, in the sibling checkout — not this repo). visus has zero hits for `video|screencast|webm` anywhere under `src/`.
 
 **The one open question this task answers:** can visus receive frames at all? CDP's `Page.startScreencast` delivers frames as `Page.screencastFrame` **events**, and Selenium's synchronous bridge (`driver.execute_cdp_cmd`, used throughout `network.py:189-204`) issues commands and reads their return value — it has no event subscription. If the answer is no, the whole feature has to be built on screenshot polling instead, and that changes the design completely. The spike settles it before anything is designed on top.
 
@@ -4471,7 +4764,7 @@ Create `docs/design/video-screencast.md` with exactly these sections:
 
 1. **`## Priority`** — one paragraph stating that this is the lowest-priority Tier 3 item, that it is sequenced after items 1–3, and why: the report already embeds a screenshot per step, so video adds continuity, not evidence.
 2. **`## The spike's finding`** — record the observed value of `cdp_screencast_available` on this machine's Chrome, and the conclusion: v1 uses screenshot polling. Include the reason in one sentence — the synchronous CDP bridge has no event subscription — and the trigger that would change the decision (a Selenium release exposing a CDP event queue, or moving to a websocket CDP client under `backends/selenium/`).
-3. **`## Command surface`** — `visus video start [--fps 5]`, `visus video chapter "<label>"`, `visus video stop -o run.webm`, mirroring `playwright-cli`'s four verbs, plus daemon ops `video_start` / `video_chapter` / `video_stop`, the REPL twins and the README rows. Chapters and action overlays reuse the `window.__visus` injection channel (`bundle.js:876-889`) exactly like the field overlay does.
+3. **`## Command surface`** — `visus video start [--fps 5]`, `visus video chapter "<label>"`, `visus video stop -o run.webm`, mirroring `playwright-cli`'s four verbs, plus daemon ops `video_start` / `video_chapter` / `video_stop`, the REPL twins and the README rows. Chapters and action overlays reuse the `window.__visus` injection channel — the exported object literal at `bundle.js:868-884` — exactly like the field overlay does.
 4. **`## Assembly`** — `imageio-ffmpeg` behind the `[video]` extra; frames written to `.visus/video/<run>/NNNN.png` as they are captured (never held in memory for a long run); the extra guarded exactly like `[vision]` is today, so a missing extra is a clean error and not an `ImportError` traceback.
 5. **`## Cost`** — the honest number: at 5 fps a full-page screenshot per frame is a WebDriver round-trip each, which is far more expensive than a screencast; state the measured per-frame cost from the spike run and cap the default duration accordingly.
 6. **`## Acceptance criteria`** — verbatim:
@@ -4495,7 +4788,7 @@ git commit -m "feat(observability): frame capture spike behind the video extra"
 
 ---
 
-### Task 18: Design — the multi-session dashboard (item 10) — BLOCKED ON PLAN 6
+### Task 18: Design — the multi-session dashboard (inventory gap #11) — BLOCKED ON PLAN 6
 
 **This feature cannot be built yet, and that is the design's main finding.** `session_client.start_daemon` refuses a second start outright (`session_client.py:143-147`: *"a session is already running (pid …, port …)"*) and discovery walks upward git-style (`:58-66`), so starting in a subfolder of a project that already has a session silently binds to the parent's. Until PLAN 6's named sessions (`--session` / `-S`, `.visus/sessions/<name>.json`) exist, a fleet view is a view over a set of size one.
 
@@ -4664,7 +4957,7 @@ Create `docs/design/session-dashboard.md` with exactly these sections:
 
 1. **`## Blocked`** — the first paragraph, stated plainly: until PLAN 6's named sessions land, `session_client.py:143-147` refuses a second daemon and `:58-66` makes a subdirectory bind to its parent's session, so `visus session list` would show one row for ever. Do not build this before then. Name the unblocking symbols: `--session` / `-S`, `VISUS_WEB_SESSION`, `.visus/sessions/<name>.json`.
 2. **`## What the fleet view is for`** — three concrete jobs: finding the abandoned daemon holding a headed browser somewhere else on disk; picking which session to point the next command at; and, for an agent, choosing a session by the page it is on rather than by remembering a name.
-3. **`## Collection`** — the half PLAN 6 unblocks: glob `.visus/sessions/*.json`, plus a global registry at `~/.visus/sessions/<hash-of-cwd>.json` so daemons in *other* project trees are visible at all (today they are invisible and unkillable from the CLI). Liveness per row from `_pid_alive` and `_socket_open`, both of which already exist. Note the cost `session_client.py`'s Windows `tasklist` probe imposes (synthesis item 43) and require memoisation for a fleet of N.
+3. **`## Collection`** — the half PLAN 6 unblocks: glob `.visus/sessions/*.json`, plus a global registry at `~/.visus/sessions/<hash-of-cwd>.json` so daemons in *other* project trees are visible at all (today they are invisible and unkillable from the CLI). Liveness per row from `_pid_alive` (`session_client.py:24-46`) and `_socket_open` (`:49-55`), both of which already exist. Note the cost the Windows `tasklist` probe imposes — `subprocess.run(["tasklist", …], timeout=5)` at `session_client.py:31-36`, one per row (synthesis item 43) — and state that PLAN 6 already answers it: its Tasks 2–3 memoise `_pid_alive` and expose the uncached `_probe_pid` for the paths that must not cache. The fleet view uses the memoised one.
 4. **`## Rendering`** — this task's spike, with the column set it settled and the two rules the tests lock down: a missing field never raises, and dead rows name `visus session kill`.
 5. **`## Command surface`** — `visus session list [--json]`, `visus session close-all`, `visus session kill-all`, `visus session delete-data`, matching the naming decisions in the conventions contract.
 6. **`## Why this ranks below `annotate``** — one honest paragraph: `annotate` gives an agent a channel it does not have at all; the dashboard gives a human a nicer view of state they can already reach one directory at a time. Ship `annotate` first.
@@ -4720,7 +5013,7 @@ Expected: PASS with `Required test coverage of 90% reached`
 - [ ] **Step 6: Verify the two surfaces really are one**
 
 Run: `uv run pytest tests/test_ops_registry.py tests/test_mcp_attach.py -v --no-cov`
-Expected: PASS — 52 tools registered, 52 accounted for, every `TOOL_OPS` entry dispatching through `_run`, and the three declared exemptions dispatching through nothing.
+Expected: PASS — 52 tools registered, 52 accounted for (45 in `TOOL_OPS`, 2 in `SESSIONLESS_TOOLS`, 5 in `LOCAL_ONLY_TOOLS`), every `TOOL_OPS` entry dispatching through `_run`, and all seven declared exemptions dispatching through nothing.
 
 - [ ] **Step 7: Drive the unified loop by hand once, end to end**
 
@@ -4739,15 +5032,22 @@ visus session stop
 
 Expected: `visus click --ocr-text` prints `clicked text 'More information...' at (x, y) confidence=…`, then a `### Page` block whose `- URL:` is `https://www.iana.org/help/example-domains`; `run.html` opens in a browser with the KPI band reading `Self-healing retries` and every step's screenshot embedded inline.
 
-Then, with that session still running in another shell:
+Then, from the same scratch directory, start a session in **shell A** and leave it
+running:
 
 ```bash
-visus session start --headless https://example.com     # in shell A, leave it running
+# shell A — do not stop this one
+visus session start --headless https://example.com
+```
+
+and in **shell B**, in that same directory:
+
+```bash
 python -c "from visus.web.mcp import server; \
 print(server.browser_attach_session()); print(server.browser_title())"
 ```
 
-Expected: `attached to the visus session (pid …, port …)` followed by the title of the page **shell A** opened — not a second browser's blank page.
+Expected: `attached to the visus session (pid …, port …)` followed by `Example Domain` — the title of the page **shell A** opened, not a second browser's blank page. Finish with `visus session stop` in shell A.
 
 - [ ] **Step 8: Confirm the six design documents exist and are complete**
 

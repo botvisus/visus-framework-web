@@ -24,17 +24,41 @@
 
 **None.** This is PLAN 1 of 7; it lands first and consumes no symbol from any other plan.
 
+**Landing order across all seven plans (acyclic; every plan's Prerequisites agrees
+with this):**
+
+```
+PLAN 1  tier1-skill-distribution   (no prerequisites)
+PLAN 3  tier2a-daemon-correctness  (no prerequisites)
+PLAN 2  tier1-ci-and-release       needs PLAN 1 for its Tasks 3 and 5 only
+PLAN 4  tier2c-agent-driving-loop  needs PLAN 1, PLAN 3
+PLAN 5  tier2b-cli-surface-parity  needs PLAN 3, PLAN 4 (and PLAN 1 transitively)
+PLAN 6  tier2d-new-engineering     needs PLAN 1, PLAN 3, PLAN 4, PLAN 5
+PLAN 7  tier3-differentiation      needs PLAN 1, PLAN 3, PLAN 4, PLAN 5
+                                   (PLAN 6 only unblocks its Task 18)
+```
+
+There is no back-edge into PLAN 1: every later plan consumes from it and none of them
+produces anything it needs. The one obligation that flows the other way is a *gate*,
+not a symbol — Task 7's `test_every_cli_command_is_documented` forces PLANS 5, 6 and 7
+to add a `cli-commands.md` row when they add a command.
+
 What this plan **produces** for its neighbours:
 
-| Symbol | Consumed by |
+| Symbol | Consumed by (verified against the sibling plan files) |
 |---|---|
-| `visus.web.cli.skills.bundled_skill_dir() -> Path` | PLAN 2 (wheel assertion), PLAN 7 (MCP/CLI unification) |
-| `visus.web.cli.skills.SkillTarget` / `installed_skill_targets(cwd)` / `install_skills(cwd, *, flavor, force)` | PLAN 2 |
-| `visus.web.cli.skill_check.frame(lines) -> str` | PLAN 4 (framed warnings), PLAN 6 |
-| `visus.web.cli.skill_check.check_installed_skills(cwd=None) -> None` | — |
-| `visus.web.cli._entry.cli_main()` / `mcp_main()` | PLAN 2 (subprocess entry-point tests) |
-| **`visus.web.cli.main._root` — the `@app.callback()`** | **PLAN 4 — this is where `--json` / `--raw` / `--session` / `--config` attach. The exact contract is spelled out in Task 4's Interfaces block.** |
-| `src/visus/web/skills/visus-web/references/*.md` | PLANS 3–7 add rows/sections here when they add commands |
+| `visus.web.cli._entry.cli_main()` / `mcp_main()` | PLAN 2, Task 3 (`tests/test_installed_entry_points.py` runs the real console scripts) |
+| The repointed `[project.scripts]` (`visus = "visus.web.cli._entry:cli_main"`, `visus-web-mcp = "visus.web.cli._entry:mcp_main"`) | PLAN 2, Task 3 |
+| The literal guard message `The \`visus\` CLI needs the [cli] extra:  pip install "visus-web[cli]"` (two spaces after the colon — PLAN 2 asserts the substring `visus-web[cli]`) | PLAN 2, Task 3 |
+| `src/visus/web/skills/visus-web/SKILL.md` packaged inside the `visus.web` package directory | PLAN 2, Tasks 3 and 5 (wheel-content assertion) |
+| `visus.web.cli.skill_check.check_installed_skills(cwd: Path \| None = None) -> None` | PLAN 4 (Task 2 keeps it in the rewritten callback body), PLAN 6 (Tasks 1 and 14 keep it verbatim) |
+| **`visus.web.cli.main._root` — the `@app.callback()`** | **PLAN 4, Task 2 replaces it wholesale to add `--json` / `--raw` / `--snapshot` / `--output-dir`; PLAN 6, Tasks 1 and 14 add `--session` / `-S` and `--config`. The exact contract is spelled out in Task 4's Interfaces block.** |
+| `src/visus/web/skills/visus-web/references/*.md` | Nobody yet: no sibling plan currently edits `cli-commands.md`, but `tests/test_skill_docs.py::test_every_cli_command_is_documented` (Task 7) **forces** PLANS 5 and 6 to add a row when they add a command — that gate is this plan's contribution to them, not a symbol they import. |
+
+`skills.bundled_skill_dir()`, `SkillTarget`, `installed_skill_targets()` and
+`skill_check.frame()` are consumed **only inside this plan** (Tasks 2, 3, 10) —
+no sibling plan references them. They are public because the install/drift
+commands are user-facing, not because another plan imports them.
 
 ## File Structure
 
@@ -74,12 +98,23 @@ What this plan **produces** for its neighbours:
 | `src/visus/web/cli/main.py:162-168` | `visus mcp` routes through the guarded `_entry.mcp_main` |
 | `src/visus/web/mcp/server.py` | Two skill resources + one prompt (tool count stays 45) |
 | `pyproject.toml:45-47`, `:54-56`, `:14-17` | `[cli]` extra, repointed scripts, richer metadata |
-| `README.md:9`, `:151`, `:367-376`, `:932`, `:944`, `:953`, `:960` | Skill install section, tooling rows, layout, clone URL, license |
+| `README.md:9`, insert after `:158`, `:373` (in the `:367-376` Tooling table), `:928-932`, `:944`, `:952-954`, `:958-963` | Skill install section, tooling rows, layout, clone URL, license |
 | `mkdocs.yml:32-36` | Nav carries the skill |
 | `.gitignore` | Ignore the installed self-skill, keep the contributor skill tracked |
 | `tests/test_cli.py:20-24` | `--help` assertion covers `install-skills` |
 
 **Scoping decision, stated up front so it does not read as an omission:** of the twelve reference files, `cli-targeting.md` and `troubleshooting.md` are written **in full** inside this plan (Task 8) because they encode non-obvious behaviour that cannot be re-derived — that `--name` alone is not a valid target (`main.py:232`), and the literal daemon error strings from `session_client.py:108,122,145,191` and `session_server.py:638`. `cli-commands.md` (Task 7) is a **mechanical port** of `README.md:286-376`, so the plan gives the exact line range plus every edit to apply rather than duplicating 90 lines of tables. The remaining nine files (Task 9) get a precise content outline, their opening content verbatim, and the exact source lines to port from — they are transcription work over material that already exists and is already correct.
+
+**Deliberately NOT in this plan:** the source analysis also proposes a
+`scripts/check_skill_sync.py` wired into a new `.pre-commit-config.yaml`
+(`pre-commit>=3.5.0` is already declared at `pyproject.toml:34`, but no config
+file exists). That is dropped on purpose, not forgotten: `tests/test_skill_docs.py`
+(Tasks 6–9, 11) is the same gate expressed as a test, it runs inside the
+mandatory `uv run pytest -q` gate before every commit, and PLAN 2 runs it in CI.
+A second copy of the same rule in a pre-commit hook would be a second thing to
+keep in sync. If a pre-commit config is wanted later it belongs to PLAN 2, which
+owns CI, and it should shell out to `uv run pytest tests/test_skill_docs.py -q --no-cov`
+rather than re-implement the checks.
 
 ---
 
@@ -89,7 +124,7 @@ What this plan **produces** for its neighbours:
 - Move: `skills/using-visus-web/SKILL.md` → `src/visus/web/skills/visus-web/SKILL.md`
 - Move: `skills/developing-visus-web/SKILL.md` → `.claude/skills/developing-visus-web/SKILL.md`
 - Create: `src/visus/web/cli/skills.py`
-- Modify: `README.md:932`, `README.md:953`
+- Modify: `README.md:928-932` (layout tree), `README.md:952-954` (the "See TESTING.md … skills/ directory" paragraph)
 - Test: `tests/test_cli_skills.py`
 
 **Interfaces:**
@@ -344,8 +379,8 @@ git commit -m "feat(cli): ship the agent skill inside the wheel and resolve it a
 **Files:**
 - Modify: `src/visus/web/cli/skills.py` (add `normalize_skills_argv`)
 - Modify: `src/visus/web/cli/main.py:110-114`
-- Modify: `README.md:151`, `README.md:367-376`
-- Modify: `tests/test_cli.py:20-24`
+- Modify: `README.md` — insert a new section after `:158`; replace `:373` inside the `:367-376` Tooling table
+- Modify: `tests/test_cli.py:20-24` (the `for cmd in (...)` tuple at `:23`)
 - Test: `tests/test_cli_skills.py`
 
 **Interfaces:**
@@ -363,18 +398,35 @@ git commit -m "feat(cli): ship the agent skill inside the wheel and resolve it a
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_cli_skills.py`:
+First **replace the import block at the top of `tests/test_cli_skills.py`** with the
+block below. Ruff's `E402` (module-level import not at top of file) is enabled by
+`select = ["E", …]` and `uv run ruff check src tests` covers `tests/`, so every
+import this file will ever need must live here, not next to the test that uses it:
 
 ```python
+from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
 from visus.web.cli.main import app
-from visus.web.cli.skills import install_skills, normalize_skills_argv
+from visus.web.cli.skills import (
+    SKILL_NAME,
+    SkillTarget,
+    bundled_skill_dir,
+    install_skills,
+    installed_skill_targets,
+    normalize_skills_argv,
+)
 
 runner = CliRunner()
+```
 
+Then append the tests themselves at the end of the file:
 
+```python
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
@@ -541,7 +593,7 @@ def install_skills_cmd(
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_skills.py -v --no-cov`
-Expected: PASS — 16 passed
+Expected: PASS — 15 passed (3 from Task 1 + 6 `normalize_skills_argv` parametrisations + 6 install tests)
 
 - [ ] **Step 6: Extend the existing `--help` assertion**
 
@@ -641,14 +693,36 @@ git commit -m "feat(cli): add visus install --skills and visus install-skills"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_cli_skills.py`:
+Add `import io` and `from visus.web.cli import skill_check` to the **top-of-file
+import block** established in Task 2 (E402 forbids module-level imports after
+code), so it now reads:
 
 ```python
+from __future__ import annotations
+
 import io
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
 
 from visus.web.cli import skill_check
+from visus.web.cli.main import app
+from visus.web.cli.skills import (
+    SKILL_NAME,
+    SkillTarget,
+    bundled_skill_dir,
+    install_skills,
+    installed_skill_targets,
+    normalize_skills_argv,
+)
 
+runner = CliRunner()
+```
 
+Then append to `tests/test_cli_skills.py`:
+
+```python
 def test_read_skill_normalises_crlf(tmp_path: Path) -> None:
     f = tmp_path / "SKILL.md"
     f.write_bytes(b"# title\r\nbody\r\n")
@@ -832,7 +906,7 @@ def check_installed_skills(cwd: Path | None = None) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_skills.py -v --no-cov`
-Expected: PASS — 26 passed
+Expected: PASS — 25 passed (15 from Task 2 + 10 new)
 
 - [ ] **Step 5: Run the gates**
 
@@ -865,21 +939,41 @@ git commit -m "feat(cli): detect agent-skill drift with a CRLF-safe stderr warni
   def _root(ctx: typer.Context) -> None: ...
   ```
 
-**Extension contract — read this before PLAN 4 touches `_root`:**
+**Extension contract — read this before PLAN 4 or PLAN 6 touches `_root`:**
 
-1. `_root` is the **only** place global flags may live. PLAN 4 adds `--json`, `--raw`, `--session` / `-S` (capital S; `-s` is `--selector` in 29 places) and `--config` as **parameters of `_root`**, e.g.
+1. `_root` is the **only** place global flags may live, and two plans extend it in sequence. **PLAN 4** (`tier2c-agent-driving-loop`, Task 2) adds `--json`, `--raw`, `--snapshot` and `--output-dir`. **PLAN 6** (`tier2d-new-engineering`, Task 1 and Task 14) then adds `--session` / `-S` (capital S; `-s` is `--selector` in 21 places — `grep -c '"--selector", "-s"' src/visus/web/cli/main.py`) and `--config`. All of them are **parameters of `_root`**, so the fully-extended signature ends up as (flag spellings, types and defaults are PLAN 4's and PLAN 6's, reproduced here verbatim — this table is the reservation, they are the definition):
    ```python
    @app.callback()
    def _root(
        ctx: typer.Context,
-       as_json: bool = typer.Option(False, "--json", help="Emit the daemon envelope verbatim."),
-       raw: bool = typer.Option(False, "--raw", help="Print only the primary value."),
+       # --- PLAN 4, Task 2 ---
+       as_json: bool = typer.Option(False, "--json", help="Emit exactly one JSON document per command."),
+       raw: bool = typer.Option(
+           False, "--raw", help="Print only the value — no table, no ### Code, no ### Page."
+       ),
+       snapshot_sink: bool = typer.Option(
+           False,
+           "--snapshot",
+           help="After every action, write .visus/snapshots/page-<ts>.yml and link it.",
+       ),
+       output_dir: str = typer.Option(
+           None, "--output-dir", envvar="VISUS_WEB_OUTPUT_DIR",
+           help="Directory for screenshots/snapshots/scripts (default: the current directory).",
+       ),
+       # --- PLAN 6, Tasks 1 and 14 ---
        session: str = typer.Option(
            None, "--session", "-S", envvar="VISUS_WEB_SESSION", help="Named session."
        ),
-       config: str = typer.Option(None, "--config", help="Path to a visus config file."),
+       config: str = typer.Option(
+           None, "--config", envvar="VISUS_WEB_CONFIG",
+           help="Config file (default: the nearest .visus/cli.json).",
+       ),
    ) -> None:
    ```
+   Note the flag is `--snapshot` (a boolean sink switch), **not** `--snapshot-sink` and
+   not a path: the path is `--output-dir`'s job, and `output.set_snapshot_sink(enabled: bool)`
+   is the setter it drives.
+   Task 4 below ships only `ctx`; the rest are the reserved extension points. Do **not** add a second `@app.callback()` — Typer allows only one per app, and the second silently replaces the first.
 2. Being group options, they are **pre-subcommand**: `visus --json get-text 3`, never `visus get-text 3 --json`. PLAN 4 keeps the existing per-command `--json` flags working (`main.py:51`, `:265`, `:288`, `:456`, `:521`, `:771`, `:816`, `:871`) so no user script breaks.
 3. PLAN 4's `output.set_mode(as_json=as_json, raw=raw)` must be the **first** statement in the body, before the skill check — a drift warning must never be emitted before the output mode is decided.
 4. The skill check stays **last** in the body and stays inside the `ctx.invoked_subcommand` guard. `_SKILL_INSTALL_COMMANDS` may grow but must never shrink: warning a user while they are running the very command that fixes the warning is the bug this guard exists to prevent.
@@ -970,7 +1064,8 @@ def _root(ctx: typer.Context) -> None:
     """Global entry point for every `visus` subcommand.
 
     This is the project's only group-level callback and therefore the single hook
-    for global flags (`--json` / `--raw` / `--session` / `--config` attach here).
+    for global flags (PLAN 4's `--json` / `--raw` / `--snapshot` /
+    `--output-dir` and PLAN 6's `--session` / `--config` attach here).
     Note that click's eager `--help` exits before a group callback runs, so this
     body does not execute for `visus --help` or bare `visus`.
     """
@@ -983,12 +1078,12 @@ def _root(ctx: typer.Context) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_skills.py -v --no-cov`
-Expected: PASS — 29 passed
+Expected: PASS — 28 passed (25 from Task 3 + 3 new)
 
 - [ ] **Step 5: Verify no existing CLI test regressed**
 
 Run: `uv run pytest tests/test_cli.py tests/test_cli_session.py -q --no-cov`
-Expected: PASS — the group help text, `no_args_is_help`, and all 53 CliRunner command tests are unchanged.
+Expected: PASS — the group help text, `no_args_is_help`, and all 42 CliRunner command tests in `tests/test_cli_session.py:1152-1642` are unchanged. (Those tests run with the repo root as cwd, where no `.claude/skills/visus-web/` is installed, so `_root`'s drift check stays silent.)
 
 - [ ] **Step 6: Run the gates**
 
@@ -1025,15 +1120,38 @@ git commit -m "feat(cli): add the root callback and run the skill drift check fr
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_cli_skills.py`:
+Add `import subprocess`, `import sys` and `from visus.web.cli._entry import cli_main, mcp_main`
+to the **top-of-file import block** (E402 again), so it reaches its final form:
 
 ```python
+from __future__ import annotations
+
+import io
 import subprocess
 import sys
+from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
+from visus.web.cli import skill_check
 from visus.web.cli._entry import cli_main, mcp_main
+from visus.web.cli.main import app
+from visus.web.cli.skills import (
+    SKILL_NAME,
+    SkillTarget,
+    bundled_skill_dir,
+    install_skills,
+    installed_skill_targets,
+    normalize_skills_argv,
+)
 
+runner = CliRunner()
+```
 
+Then append to `tests/test_cli_skills.py`:
+
+```python
 def test_cli_main_accepts_a_bare_skills_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1129,7 +1247,7 @@ def cli_main() -> None:
     """Entry point for the ``visus`` console script."""
     try:
         import typer  # noqa: F401
-    except ModuleNotFoundError as exc:
+    except ImportError as exc:  # ModuleNotFoundError is a subclass
         sys.stderr.write(_MISSING_CLI)
         raise SystemExit(2) from exc
 
@@ -1143,7 +1261,7 @@ def mcp_main() -> None:
     """Entry point for the ``visus-web-mcp`` console script (and ``visus mcp``)."""
     try:
         import mcp  # noqa: F401
-    except ModuleNotFoundError as exc:
+    except ImportError as exc:  # ModuleNotFoundError is a subclass
         sys.stderr.write(_MISSING_MCP)
         raise SystemExit(2) from exc
 
@@ -1151,6 +1269,15 @@ def mcp_main() -> None:
 
     server.main()
 ```
+
+**Catch `ImportError`, not `ModuleNotFoundError` — this is load-bearing.** A real
+missing extra raises `ModuleNotFoundError`, but the tests above simulate it with
+`monkeypatch.setitem(sys.modules, "typer", None)`, and CPython's
+`importlib._bootstrap._find_and_load` raises a **plain `ImportError`** in that
+case (`"import of typer halted; None in sys.modules"`). Narrowing to
+`ModuleNotFoundError` lets that `ImportError` escape and
+`test_cli_main_reports_a_missing_cli_extra` fails with the raw traceback instead
+of `SystemExit(2)`. `ImportError` covers both paths.
 
 Create `src/visus/web/cli/__main__.py`:
 
@@ -1235,7 +1362,7 @@ uv pip install -e ".[dev,vision,mcp,cli]"
 ```
 
 Run: `uv run pytest tests/test_cli_skills.py -v --no-cov`
-Expected: PASS — 34 passed
+Expected: PASS — 33 passed (28 from Task 4 + 5 new)
 
 - [ ] **Step 7: Verify the console script itself**
 
@@ -1270,7 +1397,7 @@ git commit -m "fix(cli): guard the [cli]/[mcp] extras and support python -m visu
 - Produces: the shipped skill's frontmatter contract — `name: visus-web`, `allowed-tools`, and a `version` that must equal `visus.web.__version__`.
 - The test reads `src/visus/web/skills/visus-web/` **from the repo source tree**, not through `bundled_skill_dir()`. This is a source-tree drift gate: it must fail on an edit even if the developer's checkout is not installed editable.
 
-**What is wrong today** (`skills/using-visus-web/SKILL.md`, now moved): it documents 8 of 54 CLI commands (`:142-151`), never mentions `session`, `list-fields`, `click` or `fill`, has no `allowed-tools`, no version, no cross-references, no decision guide, and claims "~38 tools" (`:155`) where `tests/test_mcp_server.py:27-84` pins 45.
+**What is wrong today** (`skills/using-visus-web/SKILL.md`, now moved): it documents 8 of the 53 CLI commands the repo has today — 54 once Task 2's `install-skills` lands — in one fenced block (`:142-151`: `doctor`, `install`, `screenshot`, `pdf`, `open`, `codegen`, `run`, `mcp`); it never mentions `session`, `list-fields`, `click` or `fill`, has no `allowed-tools` (`:1-4` is `name` + `description` only), no version, no cross-references, no decision guide, and claims "~38 tools" (`:155`) where `tests/test_mcp_server.py:27-84` pins 45.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1634,7 +1761,9 @@ Every command below drives the **live session daemon** unless it is marked
 Targeting: most commands accept a positional **field index** (from the last
 `list-fields`) **or** `--selector` / `-s`, `--role`, `--name`, `--text`.
 `--name` on its own is not a target — see
-[cli-targeting.md](cli-targeting.md). Nearly every read command accepts `--json`.
+[cli-targeting.md](cli-targeting.md). Exactly eight commands accept `--json`:
+`translate`, `session status`, `list-fields`, `tabs`, `snapshot`, `cookies`,
+`eval` and `find-image` — see [cli-json-and-piping.md](cli-json-and-piping.md).
 
 Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 ```
@@ -1896,7 +2025,7 @@ command exits **1**; a usage error exits **2**.
 |---|---|---|
 | `` `error: no live session — run `visus session start` first` `` | No `.visus/session.json` was found walking up from the current directory, or the recorded pid/port failed the liveness probe (the stale file is deleted for you). | `visus session start [URL]`. If you started the session in a *sibling* directory, `cd` into it or into a shared parent — discovery only walks **upward**. |
 | `error: a session is already running (pid 1234, port 51234)` | A live daemon was found at or above the current directory. | Reuse it (just run commands), or `visus session stop` first. There are no named sessions — one daemon per directory tree. |
-| `error: daemon did not come up within 20s (see .visus/daemon.log)` | The daemon process started but never bound its socket: the browser failed to launch, the driver is missing, or a stale `.visus/session.json.lock` blocked it. | Read the tail of `.visus/daemon.log` — the real exception is there. Then `visus doctor` to prove the browser launches. If the log says `daemon aborting: another daemon already holds …`, delete `.visus/session.json.lock` by hand and retry. |
+| `error: daemon did not come up within 20s (see <cwd>/.visus/daemon.log)` — the path is printed absolute | The daemon process started but never bound its socket: the browser failed to launch, the driver is missing, or a stale `.visus/session.json.lock` blocked it. | Read the tail of `.visus/daemon.log` — the real exception is there. Then `visus doctor` to prove the browser launches. If the log says `daemon aborting: another daemon already holds …`, delete `.visus/session.json.lock` by hand and retry. |
 | `error: daemon closed the connection without responding` | The daemon died mid-request (browser crash, machine sleep, OOM). | `visus session stop` (it cleans up), then `visus session start` again. |
 | `error: unauthorized: bad token` | The `.visus/session.json` you are reading belongs to a different daemon than the one listening on that port — usually a half-cleaned crash. | Delete `.visus/` and start a fresh session. |
 | `visus session stop` prints `no session running` but a browser window is still open | The daemon died without cleaning up, or the window belongs to a `visus open` / `visus codegen` one-off browser. | Close the window manually; those two commands run their own browser and are not part of the session. |
@@ -1921,7 +2050,7 @@ command exits **1**; a usage error exits **2**.
 | `visus clear` did not clear the input | `clear` removes the numbered overlay. | Use `visus clear-input <idx>`. |
 | `visus press Enter` fails with a target error | `press` requires a target; `Enter` is being read as the index. | `visus press <idx> Enter`, or `visus press -s "#pwd" --key Enter`. |
 | `visus console` launched a browser | With no session running, the REPL starts a **headed** daemon. | `visus session start --headless` first if you need headless. |
-| `error: unknown op 'xyz'` | The daemon does not implement that op — usually a CLI/daemon version mismatch. | Reinstall: `pip install -U "visus-web[cli]"`, then `visus session stop && visus session start`. |
+| `error: ValueError: unknown op 'xyz'` | The daemon does not implement that op — usually a CLI/daemon version mismatch. `handle()` wraps every exception as `<TypeName>: <message>`, which is why the `ValueError:` prefix is there. | Reinstall: `pip install -U "visus-web[cli]"`, then `visus session stop && visus session start`. |
 
 ## Environment
 
@@ -2175,7 +2304,7 @@ template `visus://skill/references/{name}`, and the prompt
 - [ ] **Step 8: Create `references/vision.md`** (~45 lines)
 
 Covers: the `[vision]` extra; the three CLI commands with their real flags; the library entry points; that OCR/matching run **inside the daemon**, so the extra must be installed where the daemon runs; that `list-fields` highlighting pollutes screenshots and must be cleared first.
-Port from: `main.py:838-894` (the three commands), `README.md` vision section, `session_server.py:492-521` (`_op_find_image`, which proves the extra is needed daemon-side).
+Port from: `main.py:838-894` (the three commands), `README.md` vision section, `session_server.py:491-519` (`_op_read_text` `:492-493`, `_op_solve_captcha` `:495-497`, `_op_find_image` `:499-519` — the `import numpy` / `from PIL import Image` / `from visus.web.vision import find_image` at `:500-504` are what prove the extra is needed daemon-side).
 
 Opening content, verbatim:
 
@@ -2203,7 +2332,7 @@ the highlight markers are real DOM nodes and they show up in the pixels.
 - [ ] **Step 9: Create `references/tracing-reports.md`** (~70 lines)
 
 Covers: `rpa()` as the batteries-included path (records the run, writes a single-file HTML report **even when a step raises**, prints a summary); `tracing.record()` around any block; what the report contains (base64-embedded screenshots, KPI band, per-step correlated logs, ARIA snapshot on failure, `backtrack_steps`); the output layout `./visus-runs/<name>-<timestamp>/`; and the honest caveat that **none of this is reachable from the CLI today** and that `VISUS_WEB_TRACING=1` alone is a no-op outside `tracing.record()`.
-Port from: `README.md:393-410` (the `rpa()` parameter block), `README.md` "Tracing & HTML reports" section, `tracing.py:81-139`, `observability/report.py:355-365`, `api/_steps.py:166`.
+Port from: `README.md:393-410` (the `rpa()` parameter block), `README.md` "Tracing & HTML reports" section, `tracing.py:81-129` (`record()`, including "even when the body raises" at `:87-89`) and `tracing.py:132-139` (the `render_report` convenience wrapper), `observability/report.py:355-365` (`render_report`), `api/_steps.py:118-120` (the `exc.backtrack_steps = attempted` tag) and `observability/recorder.py:188` (the KPI band's `backtrack_steps` sum).
 
 Opening content, verbatim:
 
@@ -2524,7 +2653,7 @@ git commit -m "feat(mcp): serve the agent skill as resources and a quickstart pr
 - Consumes: nothing.
 - Produces: nothing importable. This is the structural fix — the wrong recipe is *why* the shipped skill was allowed to drift to 8-of-54 coverage in the first place.
 
-**What is wrong:** `:63-64` says the whole recipe for a CLI command is "`src/visus/web/cli/main.py`: an `@app.command()` Typer function over the public API". That is true for exactly 5 one-off commands (`main.py:97-159`). The other 45+ go through `_send(op, args)` (`main.py:205-213`) and need a matching `_op_*` in the daemon (`session_server.py:228` does `getattr(self, f"_op_{op}")`), so a contributor who follows the recipe literally ships a command that always fails with `unknown op`. Line `:61` also names a helper `locator(...)` that does not exist — the real one is `make_locator`, and it is keyword-only.
+**What is wrong:** `:63-64` says the whole recipe for a CLI command is "`src/visus/web/cli/main.py`: an `@app.command()` Typer function over the public API". That is true only for the **ten** commands that never talk to the session daemon — `version` (`main.py:20-25`), `translate` (`:43-94`), `doctor` (`:97-108`), `install` (`:110-114`), `screenshot` (`:117-131`), `pdf` (`:133-145`), `open` (`:147-153`), `run` (`:156-159`), `mcp` (`:162-168`), `codegen` (`:170-194`). The other **43** of the 53 commands drive the daemon: 39 route through `_send(op, args)` (`main.py:205-213`) and need a matching `_op_*` handler (`session_server.py:228` does `getattr(self, f"_op_{op}", None)` and raises `unknown op` at `:230` when it is missing); `session start` / `session stop` / `session status` call `session_client` directly (`main.py:248`, `:260`, `:270`); and `console` hands off to `console.run_console` (`main.py:906` → `console.py:218`). A contributor who follows the recipe literally ships a command that always fails with `error: ValueError: unknown op '<name>'`. Line `:61` also names a helper `locator(...)` that does not exist — the real one is `make_locator` (`mcp/session.py:142-160` for MCP, its keyword-identical CLI twin at `session_server.py:49-71`), and it is keyword-only after `page`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2589,9 +2718,9 @@ with:
 
 There are two kinds of command and only the first is a one-file change.
 
-**One-off command** (launches its own browser: `doctor`, `install`, `screenshot`, `pdf`, `open`, `run`, `codegen`, `translate`, `mcp`, `version`) — `src/visus/web/cli/main.py`: an `@app.command()` Typer function over the public API.
+**Daemon-free command** — ten of the 53: `version`, `translate`, `doctor`, `install`, `screenshot`, `pdf`, `open`, `run`, `mcp`, `codegen`. Six of them (`doctor`, `install`, `screenshot`, `pdf`, `open`, `codegen`) launch their own throwaway browser; the other four touch no browser at all. For these, `src/visus/web/cli/main.py` really is the whole change: an `@app.command()` Typer function over the public API.
 
-**Session command** (everything else — it drives the running daemon). Five places must change together, or the command ships broken:
+**Session command** — the other 43. It drives the running daemon. Five places must change together, or the command ships broken:
 
 1. `src/visus/web/cli/session_server.py`: a `_op_<name>(self, args) -> ...` method. `handle()` dispatches with `getattr(self, f"_op_{op}")` (`:228`), so a missing handler fails at runtime with `unknown op '<name>'`. Resolve the target with `self._target(args)` (index **or** `make_locator` params) and read the locator-text target from `args["target_text"]`, never `args["text"]` — `text` is `fill`'s *value*.
 2. `src/visus/web/cli/main.py`: an `@app.command()` that builds its args with `_target_args(index, selector, role, name, text)` (`:222-235`) and sends them through `_send("<name>", args)` (`:205-213`). Never call the daemon directly.
@@ -2730,7 +2859,7 @@ Expected: FAIL — all five tests fail (`.claude/skills/visus-web/` absent from 
 
 - [ ] **Step 3: Update `.gitignore`**
 
-Replace the planning-docs block (currently lines 5-6):
+Replace the planning-docs block (currently `.gitignore:6-7`):
 
 ```
 # ---- Local-only planning docs (specs/plans kept on disk, NOT tracked) ----

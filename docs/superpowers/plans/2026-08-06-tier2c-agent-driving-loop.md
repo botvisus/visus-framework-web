@@ -26,13 +26,19 @@ Two plan files must land before this one.
 **PLAN 1 — `2026-08-06-tier1-skill-distribution.md`.** It creates the project's first `@app.callback()` in `src/visus/web/cli/main.py` (there is none today: `main.py:14-17` builds the `Typer` with only `help` / `no_args_is_help`). Symbols consumed here:
 
 - `visus.web.cli.skill_check.check_installed_skills(cwd: Path | None = None) -> None`
-- the `@app.callback()` function named `_root(ctx: typer.Context) -> None` in `main.py`, which Task 2 replaces wholesale with a version that also parses the global flags.
+- `visus.web.cli.main._SKILL_INSTALL_COMMANDS: tuple[str, ...]` — the guard tuple `("install", "install-skills")`. Task 2 must reference this constant, not re-inline the literal tuple.
+- the `@app.callback()` function named `_root(ctx: typer.Context) -> None` in `main.py`, which Task 2 replaces wholesale with a version that also parses the global flags. PLAN 1's extension contract (`tier1-skill-distribution.md`, Task 4) pins three rules Task 2 honours: `output.set_mode(...)` is the **first** statement in the body, the skill check stays **last** and inside the `ctx.invoked_subcommand` guard, and `--help` never runs the body (so `test_root_callback_exposes_the_global_flags` asserts only that the flags are *declared*, which shows up in the help text without executing `_root`). PLANS 6 and 7 later add `--session` / `-S` and `--config` as further parameters of this same `_root`; Task 2 must not structure it in a way that blocks that.
 
 **PLAN 3 — `2026-08-06-tier2a-daemon-correctness.md`.** It owns the field-cache staleness contract. Symbols consumed here:
 
 - `SessionHandler._fields_url: str | None` (set in `__init__`, stamped by `_op_list_fields`, cleared by the navigation ops) — read by `_post_state()` in Task 4.
 - `StaleFieldIndexError` — surfaced to the agent by the `- Fields: stale` line in Task 4/5.
 - PLAN 3 also wraps the body of `SessionHandler.handle()` in `with self._lock:`. Task 4 rewrites that body; **keep the `with self._lock:` wrapper if it is present and replace only the indented body.**
+- `SessionHandler.fields_stale() -> bool` (PLAN 3 Task 1) — the single definition of "the cached indexes no longer address this page". `_post_state()` in Task 4 **must call it** rather than re-deriving the URL comparison inline. Note its contract: it returns `True` when there is no cache at all, so the footer guard is `bool(self._fields) and self.fields_stale()` — an agent that never ran `list-fields` must not be told its (non-existent) indexes are stale.
+- `SessionHandler._last_op_at` (PLAN 3 Task 14) — assigned as the first statement inside `with self._lock:` in `handle()`. Task 4/6/9 rewrite that body and **must preserve that assignment**.
+- `_op_get_text` / `_op_get_attribute` returning `{"value": str | None, "present": bool}`, plus `console.render_value(result: Any) -> str` and its `main._render_value` wrapper (PLAN 3 Task 12). PLAN 3 states explicitly that PLAN 4 **re-routes** that renderer through `output.emit`, it does not reshape it: Task 3 passes it as the `table=` argument so JSON mode still gets the structured dict.
+- `_op_tab_close`'s result gaining `"session_stopped": bool`, and the honest two-branch message it drives in `main.tab_close` and the REPL (PLAN 3 Task 7). Task 5 and Task 16 rewrite both call sites and **must keep both branches**.
+- The REPL `screenshot` branch resolving its path against the CLIENT cwd, and the `from pathlib import Path` import that enables it (PLAN 3 Task 13, which owns issue **B9**). Task 16 rewrites `dispatch` around it and only *preserves* that fix — it does not introduce it.
 
 ### Ordering inside this plan (hard constraint)
 
@@ -42,6 +48,53 @@ Two plan files must land before this one.
 2. Tasks 4–5: the daemon produces the envelope and the CLI renders `### Page`.
 3. Tasks 6–7: the envelope carries `code`, which makes the script exporter possible.
 4. Tasks 8–17: token economy, targeting ergonomics, REPL parity, MCP parity.
+
+## Issue coverage
+
+Every issue this plan owns (IDs from `synthesis.md`, section C plus the numbered
+medium/low table) and the task that closes it. `synthesis.md` is the external
+source analysis and is **not** in this checkout — every issue is restated in full
+below and again in its task, so nothing has to be opened; the IDs exist only so
+the seven plans can cross-reference each other.
+
+| Issue | Closed by |
+|---|---|
+| C1 — no page state after an element action (CLI) | Tasks 4 + 5 |
+| C1 — the same defect on the MCP surface (`mcp/server.py:217`) | Task 17 |
+| C2 — no global `--raw`/`--json`; `--json` on 8 of 53 commands | Tasks 1 + 2 + 3 |
+| C2 — errors written to **stdout** | Task 1 (`emit_error`) + Task 2 (`_send` routed through it) + Task 3 (every remaining `typer.echo("error: …")`) |
+| C3 — no `find` | Task 10 |
+| C3 — no `--depth`, no scoped snapshot | Task 8 (engine + library) and Task 9 (CLI) |
+| C3 — no `--filename` / snapshot file sink | Task 9 |
+| C3 — `list-fields` emits a rule and two wrapping columns per field | Task 11 |
+| C4 — no generated-code echo per action | Task 6 |
+| C4 — no way to turn a live session into a script | Task 7 |
+| C5 — `snapshot` is not addressable (two disjoint numberings) | Task 9 |
+| C6 — the no-target error does not name the valid forms | Tasks 13 + 14 |
+| C7 — the daemon supports `frame`/`exact` but no CLI flag sets them | Task 13 |
+| Row 25 — `list-fields` mutates the page by default in the CLI but not the MCP | Task 12 |
+| Row 33 — no `--output-dir`; artifacts always land in the client cwd | Tasks 1 + 15 |
+
+**Deliberately deferred, not dropped:**
+
+- **C6's documentation half.** This plan fixes the *runtime* message an agent hits.
+  Teaching the targeting model up front (index vs `--selector`/`--role`+`--name`/`--text`,
+  and that `--name` alone is not a target) belongs in the rewritten skill — **PLAN 1**,
+  which owns `src/visus/web/skills/visus-web/`.
+- **Row 13 — `generate-locator`.** Task 6 makes every action echo its expression and
+  Task 7 exports the whole session, which is the same capability arriving through the
+  loop. The standalone `visus generate-locator [idx] [target] [--raw]` command is
+  **PLAN 5** — `tier2b-cli-surface-parity`, its **Task 16**, which also adds
+  `codegen.locator_expr(...)` beside (never editing) the `_target_expr` this plan's
+  Task 6 touches.
+- **Row 27 — the REPL covers 32 of the 41 ops.** Task 16 brings the REPL to parity with
+  the *output* changes in this plan and adds `find` / `export-script` / `highlight-all`
+  (the whole-page overlay; the single-element `highlight` verb is **PLAN 5** Task 10 —
+  see Task 16 for why the names differ).
+  The missing op coverage (`upload`, `drag`, `add-cookies`, `clear-cookies`, `read-text`,
+  `solve-captcha`, `find-image`) and non-integer targets in the REPL are **PLAN 5**.
+- **B7's daemon half** (`{"value", "present"}`) and **B9** (REPL screenshot cwd) are
+  **PLAN 3**. This plan only re-routes B7's renderer (Task 3) and preserves B9 (Task 16).
 
 ---
 
@@ -98,7 +151,51 @@ Two plan files must land before this one.
   def resolve_out(path: str) -> str: ...
   def set_snapshot_sink(enabled: bool) -> None: ...
   def snapshot_sink() -> bool: ...
+  def _renders_itself(value: Any) -> bool: ...   # private; the RAW table predicate
   ```
+
+**The RAW contract, settled — do not "fix" it back.** An early draft of the
+conventions file annotated `RAW` as "bare value only; no `### Page`, no `### Code`,
+no table", which reads as if it applied to both entry points. It does not, and the
+conventions file now says so: that sentence describes `emit_envelope`. The split is:
+
+- `emit_envelope` in RAW mode prints **only** `env["result"]` — no table, no
+  sections. That is the literal reading, and it is what makes
+  `TOKEN=$(visus --raw get-attribute value 5)` and `visus --raw click 3` work.
+- `emit` in RAW mode prints `table` only when `value` is a **structure**
+  (list/dict), because there the `table` **is** the value's rendering, not
+  decoration: the alternative is `str(value)`, a Python `repr` of a list of dicts
+  for `visus --raw snapshot` and `visus --raw list-fields`, useless to both a human
+  and a shell. When `value` is a **scalar** (`str`/`int`/`float`/`bool`/`None`),
+  `str(value)` is already the honest rendering and the table is decoration around
+  it, so RAW prints the bare value: `visus --raw session-screenshot -o s.png` gives
+  `C:\…\s.png`, not `saved C:\…\s.png`.
+
+That one predicate — "does `str(value)` already render this?" — is applied **inside
+`emit`**, deliberately, rather than left as a rule each call site must remember.
+There are ~55 `emit(value, table=…)` call sites across PLANS 4, 5 and 6; a per-site
+obligation would be forgotten, and forgetting it is invisible until a shell captures
+`saved /path` into a variable. Checked against every one of those sites, the
+predicate gives the right answer at all of them.
+
+The decisive case is `get-text` / `get-attribute`. PLAN 3 Task 12 makes their ops
+return `{"value": str | None, "present": bool}`, and Task 3 below emits that dict
+with `table=_render_value(result)`. If RAW dropped the table,
+`TOKEN=$(visus --raw get-attribute value 5)` — the exact scenario `--raw` exists for
+— would capture `{'value': 'tok-abc', 'present': True}`.
+
+`test_emit_raw_keeps_the_table_for_a_structure`,
+`test_emit_raw_drops_the_table_for_a_scalar` and
+`test_emit_envelope_raw_prints_only_the_result` below pin all three halves, so the
+split is a tested contract rather than an oversight. PLANS 5/6/7 consume `emit`
+and `emit_envelope` on exactly these terms.
+
+**What this means for PLANS 5 and 6: nothing to remember.** Because the predicate
+lives in `emit`, every call site is written the same way — pass the structured value
+and its pre-rendered text, and RAW does the right thing. `visus --raw list-fields`
+prints the table, `visus --raw generate-locator 3` prints the bare expression
+(PLAN 5 Task 16 passes a `str`), `visus --raw unroute "*"` prints `2` (PLAN 6 Task 6
+passes an `int`). No call site anywhere needs an `if mode() is Mode.RAW` branch.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -114,6 +211,7 @@ every click version, which is the exact property `emit_error` must guarantee.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -123,7 +221,7 @@ from visus.web.cli import output
 
 
 @pytest.fixture(autouse=True)
-def _reset_output_state() -> None:
+def _reset_output_state() -> Iterator[None]:
     output.set_mode()
     output.set_output_dir(None)
     output.set_snapshot_sink(False)
@@ -147,11 +245,23 @@ def test_emit_text_prefers_the_table(capsys: pytest.CaptureFixture[str]) -> None
     assert capsys.readouterr().out == "+---+\n| 1 |\n+---+\n"
 
 
-def test_emit_raw_also_prints_the_table(capsys: pytest.CaptureFixture[str]) -> None:
-    # --raw strips ### sections, not the value's own rendering.
+def test_emit_raw_keeps_the_table_for_a_structure(capsys: pytest.CaptureFixture[str]) -> None:
+    # --raw strips ### sections, not a structure's own rendering: str([1, 2]) is a repr.
     output.set_mode(raw=True)
     output.emit([1, 2], table="TABLE")
     assert capsys.readouterr().out == "TABLE\n"
+
+
+def test_emit_raw_drops_the_table_for_a_scalar(capsys: pytest.CaptureFixture[str]) -> None:
+    """`SHOT=$(visus --raw session-screenshot -o s.png)` must capture the path alone."""
+    output.set_mode(raw=True)
+    output.emit("C:/tmp/s.png", table="saved C:/tmp/s.png")
+    assert capsys.readouterr().out == "C:/tmp/s.png\n"
+
+
+def test_emit_text_keeps_the_table_for_a_scalar(capsys: pytest.CaptureFixture[str]) -> None:
+    output.emit("C:/tmp/s.png", table="saved C:/tmp/s.png")
+    assert capsys.readouterr().out == "saved C:/tmp/s.png\n"
 
 
 def test_emit_raw_scalar_has_no_decoration(capsys: pytest.CaptureFixture[str]) -> None:
@@ -346,17 +456,33 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False, default=str)
 
 
+def _renders_itself(value: Any) -> bool:
+    """True when ``str(value)`` is already an honest rendering of *value*.
+
+    A scalar prints as itself; a list/dict prints as a Python repr, which is useless
+    to a human and to a shell. This is the whole difference between a ``table`` that
+    is the value's RENDERING (keep it under ``--raw``) and one that is DECORATION
+    around a value that can speak for itself (drop it under ``--raw``).
+    """
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
 def emit(value: Any, *, table: str | None = None) -> None:
     """Print the primary value.
 
-    ``table`` is the pre-rendered text form (a rich table, a formatted line). It is
-    used in BOTH text and raw mode — ``--raw`` strips the ``###`` sections, which
-    ``emit`` never writes, not the value's own rendering.
+    ``table`` is the pre-rendered text form (a rich table, a formatted line).
+
+    * TEXT — always prefer ``table``; it is what a human should read.
+    * JSON — ignore ``table`` and dump ``value``.
+    * RAW  — ``--raw`` strips the ``###`` sections (which ``emit`` never writes) and
+      any decoration, but never a structure's own rendering. So the table survives
+      for a list/dict and is dropped for a scalar: ``visus --raw list-fields`` prints
+      the table, ``visus --raw session-screenshot -o s.png`` prints just the path.
     """
     if _MODE is Mode.JSON:
         typer.echo(_dumps(value))
         return
-    if table is not None:
+    if table is not None and not (_MODE is Mode.RAW and _renders_itself(value)):
         typer.echo(table)
         return
     typer.echo("" if value is None else str(value))
@@ -402,7 +528,7 @@ def emit_envelope(env: dict[str, Any], *, table: str | None = None) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_cli_output.py -v --no-cov`
-Expected: PASS (14 passed)
+Expected: PASS (16 passed)
 
 - [ ] **Step 5: Commit**
 
@@ -418,10 +544,10 @@ git commit -m "feat(cli): add the output funnel with text/json/raw modes"
 **Files:**
 - Modify: `src/visus/web/cli/main.py` (the `@app.callback()` PLAN 1 added; `_send` at `main.py:205-213`)
 - Test: `tests/test_cli_agent_loop.py`
-- Modify: `tests/test_cli_session.py` (`test_cli_send_error_exits_1`, currently at `tests/test_cli_session.py:1357-1364`)
+- Modify: `tests/test_cli_session.py` (`test_cli_send_error_exits_1`, currently at `tests/test_cli_session.py:1358-1364`)
 
 **Interfaces:**
-- Consumes: `output.set_mode`, `output.set_output_dir`, `output.set_snapshot_sink`, `output.emit_error` (Task 1); `skill_check.check_installed_skills` (PLAN 1).
+- Consumes: `output.set_mode`, `output.set_output_dir`, `output.set_snapshot_sink`, `output.emit_error` (Task 1); `skill_check.check_installed_skills` and `_SKILL_INSTALL_COMMANDS` (PLAN 1).
 - Produces: `main._root(ctx, as_json, raw, snapshot_sink, output_dir)` — the global flag surface every later task relies on.
 
 - [ ] **Step 1: Write the failing test**
@@ -513,11 +639,26 @@ def _root(
         help="Directory for screenshots/snapshots/scripts (default: the current directory).",
     ),
 ) -> None:
-    """visus.web — Playwright-style web automation on Selenium."""
+    """Global entry point for every `visus` subcommand.
+
+    This is the project's only group-level callback and therefore the single hook
+    for global flags. Click's eager `--help` exits before a group callback runs,
+    so this body does not execute for `visus --help` or bare `visus` — the flags
+    still appear in the help text because they are declared here.
+    """
+    # Local import: PLAN 1 keeps it inside the function so `visus` still starts
+    # when the skill package is unreadable.
+    from visus.web.cli.skill_check import check_installed_skills
+
+    # set_mode FIRST (PLAN 1's extension contract, rule 3): a skill-drift warning
+    # must never be written before the output mode is decided.
     output.set_mode(as_json=as_json, raw=raw)
     output.set_output_dir(output_dir)
     output.set_snapshot_sink(snapshot_sink)
-    if ctx.invoked_subcommand not in ("install", "install-skills"):
+    # The guard tuple is PLAN 1's constant — never re-inline the literal, and never
+    # shrink it: warning a user while they run the command that fixes the warning
+    # is the bug it exists to prevent.
+    if ctx.invoked_subcommand not in _SKILL_INSTALL_COMMANDS:
         check_installed_skills()
 ```
 
@@ -541,7 +682,7 @@ Expected: PASS (2 passed)
 
 - [ ] **Step 5: Repair the one existing test that asserted the error was on stdout**
 
-In `tests/test_cli_session.py`, replace `test_cli_send_error_exits_1` (at `tests/test_cli_session.py:1357-1364`):
+In `tests/test_cli_session.py`, replace `test_cli_send_error_exits_1` (at `tests/test_cli_session.py:1358-1364`):
 
 ```python
 def test_cli_send_error_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -585,17 +726,27 @@ Closes C2's concrete gap: `get-text`, `get-attribute`, `count`, `title`, `url` h
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_cli_agent_loop.py`:
+`tests/test_cli_agent_loop.py` needs four more imports. **Merge them into the existing import block at the top of the file** — appending them mid-file trips ruff's `E402` (module-level import not at top of file), which is selected by `select = ["E", …]` and has no per-file ignore for `tests/`. The block becomes:
 
 ```python
+from __future__ import annotations
+
 import json
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
+from typer.testing import CliRunner
 
 from visus.web.cli import session_client
+from visus.web.cli.main import app
+```
 
+Then append the tests:
 
+```python
 def test_global_json_works_on_commands_that_never_had_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -852,7 +1003,32 @@ def tab(
     )
 ```
 
-`get-text`, `get-attribute`, `count`: `output.emit(_send(...))`.
+`count`: `output.emit(_send("count", _target_args(index, selector, role, name, text)))`.
+
+`get-text` and `get-attribute` are the two commands PLAN 3 Task 12 already touched: their ops now return `{"value": str | None, "present": bool}` and `main.py` renders them through `_render_value` (`main.py:419`, `:558`). PLAN 3 states that PLAN 4 **re-routes** that renderer rather than reshaping it, so the structured payload becomes the emitted *value* and the human string becomes the `table`:
+
+```python
+@app.command("get-text")
+def get_text(
+    index: int = typer.Argument(None),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    text: str = typer.Option(None, "--text"),
+) -> None:
+    """Print a field's text content."""
+    result = _send("get_text", _target_args(index, selector, role, name, text))
+    output.emit(result, table=_render_value(result))
+```
+
+and the last line of `get_attribute` becomes:
+
+```python
+    result = _send("get_attribute", args)
+    output.emit(result, table=_render_value(result))
+```
+
+`--json` therefore emits `{"value": …, "present": …}` (null and empty stay distinguishable, which is the whole point of B7), while text and `--raw` mode print exactly what `render_value` printed before — the value is a dict, so `emit` keeps the table in RAW mode too. Note the deliberate consequence: `visus --raw get-text 3` on an empty element prints `(empty)`, not an empty line, and on a missing one prints `(null)`. That is PLAN 3's renderer, re-routed and not reshaped, and it is the only way text mode can distinguish the two at all; a script that needs the raw bytes uses `--json` and reads `.value`. If PLAN 3 has NOT landed, `_render_value` does not exist yet: use `output.emit(result)` for both and add the `table=_render_value(result)` argument when it does.
 
 `session-screenshot`:
 
@@ -938,8 +1114,28 @@ def eval_js(
 
 
 @app.command("find-image")
-def find_image(...) -> None:
-    ...
+def find_image(
+    template: str = typer.Argument(..., help="Path to the template PNG to search for."),
+    index: int = typer.Argument(None, help="Optional field index to scope the search."),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    text: str = typer.Option(None, "--text"),
+    confidence: float = typer.Option(0.8, "--confidence", "-c", help="Match threshold (0-1)."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Find a template image inside the page (or a targeted element)."""
+    args: dict[str, Any] = {
+        "template_path": str(Path(template).resolve()),
+        "confidence": confidence,
+    }
+    if index is not None:
+        args["index"] = index
+    if selector or role or text:
+        args["selector"] = selector
+        args["role"] = role
+        args["name"] = name
+        args["target_text"] = text
     result = _send("find_image", args)
     if as_json:
         output.set_mode(as_json=True)
@@ -966,7 +1162,11 @@ def tab_close(
     """Close a tab/window by index (or the active one if omitted)."""
     result = _send("tab_close", {"index": index})
     if result.get("remaining", 0) == 0:
-        output.emit(result, table="closed the last tab — session stopped")
+        # PLAN 3 Task 7 split this into two honest branches — keep both.
+        if result.get("session_stopped"):
+            output.emit(result, table="closed the last tab — session stopped")
+        else:
+            output.emit(result, table="closed the last tab — the browser is closed")
         return
     output.emit(
         result, table=f"closed tab {result['closed']} ({result['remaining']} remaining)"
@@ -1010,7 +1210,7 @@ git commit -m "feat(cli): route every command's output through the emit funnel"
 - Test: `tests/test_cli_session.py`
 
 **Interfaces:**
-- Consumes: `SessionHandler._fields_url` (PLAN 3).
+- Consumes: `SessionHandler._fields` and `SessionHandler.fields_stale()` (PLAN 3 Task 1); the `with self._lock:` wrapper (PLAN 3 Task 8) and `self._last_op_at` (PLAN 3 Task 14) inside `handle`.
 - Produces:
   ```python
   _MUTATING_OPS: frozenset[str]
@@ -1114,17 +1314,22 @@ Add `_post_state` immediately above `handle` (i.e. before line 224):
 
         Best-effort telemetry — it must never turn a successful action into a
         failed response, so every failure collapses to ``{}``.
+
+        Staleness is NOT re-derived here: ``fields_stale()`` (PLAN 3) is the single
+        definition, and it also treats an unreadable page as stale. It reports True
+        when there is no cache at all, so the guard is ``bool(self._fields) and …``
+        — an agent that never ran ``list-fields`` must not be warned that its
+        non-existent indexes went stale.
         """
         try:
             page = self.page()
-            url = page.url
-            stale = bool(self._fields) and self._fields_url is not None and self._fields_url != url
-            return {"url": url, "title": page.title(), "fields_stale": stale}
+            stale = bool(self._fields) and self.fields_stale()
+            return {"url": page.url, "title": page.title(), "fields_stale": stale}
         except Exception:  # noqa: BLE001 — page state is telemetry, not the result
             return {}
 ```
 
-Replace the body of `handle` (`:224-233`) — **if PLAN 3 has wrapped it in `with self._lock:`, keep that wrapper and replace only the indented body**:
+Replace `handle` (`:224-233`). PLAN 3 lands first and has already added two things to this method — the `with self._lock:` wrapper (Task 8) and the `self._last_op_at` stamp (Task 14). **Both are load-bearing and must survive**, so write the merged version:
 
 ```python
     def handle(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1133,19 +1338,29 @@ Replace the body of `handle` (`:224-233`) — **if PLAN 3 has wrapped it in `wit
         Returns ``{ok:True, result:...}`` plus, for a mutating op, the ``page``
         state the agent needs to choose its next command — the perception half of
         the perception-action loop. Failures return ``{ok:False, error:str}``.
+
+        The whole body runs under ``self._lock``: ``serve()`` runs one thread per
+        connection over a SHARED handler, and a WebDriver plus the tab bookkeeping
+        in ``_known_handles``/``_active_handle`` are not safe to interleave.
         """
         args = args or {}
-        try:
-            method = getattr(self, f"_op_{op}", None)
-            if method is None:
-                raise ValueError(f"unknown op {op!r}")
-            resp: dict[str, Any] = {"ok": True, "result": method(args)}
-        except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        if op in _MUTATING_OPS:
-            resp["page"] = self._post_state()
-        return resp
+        with self._lock:                          # PLAN 3 Task 8 — keep
+            self._last_op_at = time.monotonic()   # PLAN 3 Task 14 — keep
+            try:
+                method = getattr(self, f"_op_{op}", None)
+                if method is None:
+                    raise ValueError(f"unknown op {op!r}")
+                resp: dict[str, Any] = {"ok": True, "result": method(args)}
+            except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            if op in _MUTATING_OPS:
+                resp["page"] = self._post_state()
+            return resp
 ```
+
+If PLAN 3 has NOT landed, delete the two lines marked `PLAN 3 …— keep` and dedent
+the rest by four spaces; everything else is identical. Tasks 6 and 9 extend this
+same body and inherit the same rule.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1418,7 +1633,12 @@ def tab_close(
     env = _send_env("tab_close", {"index": index})
     result = env.get("result") or {}
     if result.get("remaining", 0) == 0:
-        output.emit_envelope(env, table="closed the last tab — session stopped")
+        # Both branches are PLAN 3 Task 7's honest message — do NOT collapse them
+        # back to the unconditional "session stopped", which was the lie B4 fixed.
+        if result.get("session_stopped"):
+            output.emit_envelope(env, table="closed the last tab — session stopped")
+        else:
+            output.emit_envelope(env, table="closed the last tab — the browser is closed")
         return
     output.emit_envelope(
         env, table=f"closed tab {result['closed']} ({result['remaining']} remaining)"
@@ -1445,7 +1665,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: Any) -> None:
     )
 ```
 
-Then run `grep -n 'session_client, "send"' tests/test_cli_session.py` and rewrite each of the 18 hits from
+Then run `grep -n 'session_client, "send"' tests/test_cli_session.py`. It returns **18** hits today: 17 written as `monkeypatch.setattr(session_client, "send", …)` and one at `tests/test_cli_session.py:729` written as `monkeypatch.setattr(console.session_client, "send", …)` — the same module object under a different name, so `_patch_client` covers it too (its fake, `lambda op, args=None, **kw: "ok"`, is call-compatible). Rewrite each hit from
 
 ```python
 monkeypatch.setattr(session_client, "send", <FAKE>)
@@ -1652,7 +1872,7 @@ class _FakeField:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_codegen.py tests/test_cli_session.py -k "generate_line or target_expr or echoes or replayable" -v --no-cov`
-Expected: FAIL — `test_generate_line_prefers_an_explicit_expression` fails with `AssertionError` (the current `generate_line` builds `"page." + _target_expr(...)` and ignores `expr`, producing `page.locator('#x')…`); `test_handle_click_by_index_echoes_the_field_code` fails with `KeyError: 'code'`.
+Expected: FAIL — `test_generate_line_prefers_an_explicit_expression` fails with `KeyError: 'value'` raised inside `codegen._target_expr` (today's version ignores `target["expr"]` entirely and falls through to `f"locator({t['value']!r})"`, and a `{"kind": "code", "expr": …}` target has no `value` key); `test_generate_line_covers_every_daemon_action` fails with `AssertionError: assert '# unsupported: dblclick' == "page.locator('#x').dblclick()"`; `test_target_expr_supports_a_text_target` fails with `AssertionError: assert "locator('Save')" == "get_by_text('Save')"`; `test_handle_click_by_index_echoes_the_field_code` fails with `KeyError: 'code'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -1791,24 +2011,31 @@ Add the import at the top of `session_server.py`, next to the other `visus.web` 
 from visus.web.cli.codegen import generate_line
 ```
 
-Extend `handle` (the version written in Task 4) to compute and attach the code:
+Extend `handle` (the version written in Task 4) to compute and attach the code. The
+indentation below assumes PLAN 3's `with self._lock:` wrapper is present — dedent by
+four and drop the two `PLAN 3` lines if it is not:
 
 ```python
         args = args or {}
-        try:
-            method = getattr(self, f"_op_{op}", None)
-            if method is None:
-                raise ValueError(f"unknown op {op!r}")
-            code = self._generated_code(op, args)
-            resp: dict[str, Any] = {"ok": True, "result": method(args)}
-        except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        if op in _MUTATING_OPS:
-            resp["page"] = self._post_state()
-        if code:
-            resp["code"] = code
-            self._script.append(code)
-        return resp
+        with self._lock:                          # PLAN 3 Task 8 — keep
+            self._last_op_at = time.monotonic()   # PLAN 3 Task 14 — keep
+            try:
+                method = getattr(self, f"_op_{op}", None)
+                if method is None:
+                    raise ValueError(f"unknown op {op!r}")
+                # Computed BEFORE method(args) runs: an index target must resolve
+                # against the cache the caller actually addressed, not the one the
+                # op is about to replace (list_fields, snapshot) or invalidate (goto).
+                code = self._generated_code(op, args)
+                resp: dict[str, Any] = {"ok": True, "result": method(args)}
+            except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            if op in _MUTATING_OPS:
+                resp["page"] = self._post_state()
+            if code:
+                resp["code"] = code
+                self._script.append(code)
+            return resp
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1993,10 +2220,10 @@ git commit -m "feat(cli): add `visus session export-script` to replay a session 
 
 ### Task 8: Scoped and depth-limited snapshots (bundle + library)
 
-`bundle.js:415-423` currently walks the whole `document` and emits `{role, name}` with no scope, no depth and no cheap way to shrink the result. This task adds the two token levers at their source.
+`bundle.js:415-424` currently walks the whole `document` and emits `{role, name}` with no scope, no depth and no cheap way to shrink the result. This task adds the two token levers at their source.
 
 **Files:**
-- Modify: `src/visus/web/backends/selenium/js/bundle.js` (`snapshot` at `:415-423`)
+- Modify: `src/visus/web/backends/selenium/js/bundle.js` (`snapshot` at `:415-424`)
 - Modify: `src/visus/web/backends/selenium/driver_delegate.py` (`snapshot` at `:635-639`)
 - Modify: `src/visus/web/backends/base.py` (`PageDelegate.snapshot` at `:77`)
 - Modify: `src/visus/web/api/page.py` (`Page.snapshot` at `:225-227`)
@@ -2089,7 +2316,7 @@ Expected: FAIL — `TypeError: snapshot() takes 1 positional argument but 2 were
 
 - [ ] **Step 4: Write minimal implementation**
 
-In `src/visus/web/backends/selenium/js/bundle.js`, replace the `snapshot` function (`:415-423`):
+In `src/visus/web/backends/selenium/js/bundle.js`, replace the `snapshot` function (`:415-424`):
 
 ```js
   function snapshot(opts) {
@@ -2269,8 +2496,11 @@ def test_handle_snapshot_shares_the_list_fields_numbering() -> None:
     page._fields[0].name = "Go"
     h = _handler_with_fake_page(page)
     result = h.handle("snapshot", {})["result"]
-    assert result["elements"][0]["ref"] == 0     # matched the cached field
-    assert result["elements"][1]["ref"] is None  # heading-ish row, not actionable
+    # Row 0 is ("button", "Go") and field 0 was just given that exact (role, name),
+    # so it gets that field's index. Row 1 is ("textbox", "Email"); field 1's role
+    # is None, so no cached field carries that key and the ref is None.
+    assert result["elements"][0]["ref"] == 0
+    assert result["elements"][1]["ref"] is None
     assert len(h._fields) == 2                   # snapshot populated the cache
 
 
@@ -2474,13 +2704,13 @@ Replace `_op_snapshot` (`:323-324`):
         return {"elements": elements, "url": page.url, "title": page.title()}
 ```
 
-Extend `handle` (Task 6's version) with the sink:
+Extend `handle` (Task 6's version) with the sink — the `if op in _MUTATING_OPS:` block gains one nested branch, everything else in the method is untouched (keep the `with self._lock:` indentation Task 4 established):
 
 ```python
-        if op in _MUTATING_OPS:
-            resp["page"] = self._post_state()
-            if args.get("snapshot"):
-                resp["snapshot"] = self._write_snapshot()
+            if op in _MUTATING_OPS:
+                resp["page"] = self._post_state()
+                if args.get("snapshot"):
+                    resp["snapshot"] = self._write_snapshot()
 ```
 
 In `src/visus/web/cli/main.py`, replace the `snapshot` command (`:520-543`):
@@ -2841,7 +3071,7 @@ git commit -m "feat(cli): add `visus find` to grep the page snapshot with contex
 **Files:**
 - Modify: `src/visus/web/cli/console.py` (`format_fields` at `:56-93`)
 - Modify: `src/visus/web/cli/main.py` (`_format_fields` at `:216-219`; `list_fields` at `:284-301`)
-- Modify: `tests/test_cli_session.py` (`test_format_fields_table_shows_visus_css_xpath` at `:654-676`)
+- Modify: `tests/test_cli_session.py` (`test_format_fields_table_shows_visus_css_xpath` at `:656-678`)
 - Test: `tests/test_cli_session.py`
 
 **Interfaces:**
@@ -2850,7 +3080,7 @@ git commit -m "feat(cli): add `visus find` to grep the page snapshot with contex
 
 - [ ] **Step 1: Write the failing test**
 
-Update the existing `test_format_fields_table_shows_visus_css_xpath` in `tests/test_cli_session.py` (`:654`) so it asks for the forensic columns explicitly — add `full=True` to the call:
+Update the existing `test_format_fields_table_shows_visus_css_xpath` in `tests/test_cli_session.py` (`:656`) so it asks for the forensic columns explicitly — add `full=True` to the call:
 
 ```python
     out = console.format_fields(
@@ -3006,7 +3236,7 @@ git commit -m "fix(cli): stop list-fields from emitting a rule and two columns p
 
 Resolves row 25's divergence: `main.py:289`/`:295` pass `highlight: not no_highlight` (on) while `mcp/server.py:87-90` passes `highlight=False`.
 
-**Decision: the CLI adopts the MCP's default — off.** The overlay appends `data-visus-field` divs to `body` (`bundle.js:800-825`), which corrupts every artifact an agent produces next: `session-screenshot`, `read-text` (OCR) and `find-image` (template matching) all read those pixels. Beyond that, a *read* command silently mutating the DOM breaks the read/write split the rest of the CLI keeps, and the numbered boxes only pay for themselves in two deliberate situations — a human watching a headed browser, or a vision model reading the numbers — both of which are worth one explicit flag. `--no-highlight` keeps working (it now names the default); `--highlight` opts in.
+**Decision: the CLI adopts the MCP's default — off.** The overlay appends `data-visus-field` divs to `body` (`bundle.js:791-822`, the `renderFieldOverlay` function), which corrupts every artifact an agent produces next: `session-screenshot`, `read-text` (OCR) and `find-image` (template matching) all read those pixels. Beyond that, a *read* command silently mutating the DOM breaks the read/write split the rest of the CLI keeps, and the numbered boxes only pay for themselves in two deliberate situations — a human watching a headed browser, or a vision model reading the numbers — both of which are worth one explicit flag. `--no-highlight` keeps working (it now names the default); `--highlight` opts in.
 
 **Files:**
 - Modify: `src/visus/web/cli/main.py` (`list_fields` at `:284-301`)
@@ -3107,7 +3337,7 @@ git commit -m "fix(cli): make the list-fields overlay opt-in, matching the MCP d
   def _target_args(index, selector, role, name, text, *,
                    exact: bool = False, frame: str | None = None) -> dict[str, Any]: ...
   ```
-  The two keys are added **only when non-default**, so the existing exact-equality assertions on the target dict (`tests/test_cli_session.py:1240-1245`, `:1430-1433`) keep passing.
+  The two keys are added **only when non-default**, so the existing exact-equality assertions on the target dict (`tests/test_cli_session.py:1240-1245`, `:1432-1433`) keep passing.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -3316,11 +3546,24 @@ def test_no_target_error_names_every_valid_form(tmp_path: Path) -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_cli_agent_loop.py::test_no_target_error_names_every_valid_form -v --no-cov`
-Expected: PASS if Task 13 landed; FAIL with `AssertionError: missing '--name alone is NOT a target'` if the guard message is still the one-liner from `main.py:233`.
+Expected: PASS. Task 13 already replaced the message, so this task is a regression lock, not a new behaviour — it exists so a later edit cannot quietly shrink the guidance back to the one-liner. If it instead FAILS with `AssertionError: missing '--name alone is NOT a target' from the guidance`, Task 13's `_target_args` replacement was not applied; apply Step 3 below.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write minimal implementation (only if Step 2 failed)**
 
-If the test failed, apply the `_target_args` replacement exactly as written in Task 13, Step 3.
+In `src/visus/web/cli/main.py`, `_target_args`'s no-target branch must be exactly:
+
+```python
+    elif not (selector or role or text):
+        output.emit_error(
+            "error: no target. Use one of:\n"
+            "  visus <cmd> <INDEX>              a number from `visus list-fields`\n"
+            "  visus <cmd> --selector '#id'     a CSS or XPath selector\n"
+            "  visus <cmd> --role button        an ARIA role (--name refines it)\n"
+            "  visus <cmd> --text 'Sign in'     the element's visible text\n"
+            "--name alone is NOT a target; it only qualifies --role.\n"
+            "Run `visus list-fields` to see what is on the page."
+        )
+```
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -3338,7 +3581,7 @@ git commit -m "test(cli): lock the no-target error to name every valid targeting
 
 ### Task 15: `--output-dir` controls where artifacts land
 
-`main.py:424`/`:442` hardcode `screenshot.png` relative to the client cwd, and `rpa()`'s `outdir` concept (`rpa.py:56`) is unreachable from the CLI. The global flag from Task 2 already exists; this task wires the client-side writers to it.
+`main.py:424`/`:442` hardcode `screenshot.png` relative to the client cwd, and `rpa()`'s `outdir` concept (`rpa.py:55`, used at `:100`) is unreachable from the CLI. The global flag from Task 2 already exists; this task wires the client-side writers to it.
 
 **Files:**
 - Modify: `src/visus/web/cli/main.py` (`screenshot` at `:117-130`, `pdf` at `:133-144`, `session_screenshot` at `:422-446`, `codegen` at `:170-194`)
@@ -3472,7 +3715,9 @@ git commit -m "feat(cli): honour --output-dir for screenshots, PDFs and generate
 
 ### Task 16: The REPL twin
 
-The REPL dispatches 32 of the 41 ops (`console.py:119-210`) and carries its own help text (`console.py:19-53`). Every output change above has a twin here, and `console.py:187` still resolves a screenshot path against the *daemon's* cwd while the non-interactive command (`main.py:440-442`) has the fix and the comment explaining it.
+The REPL dispatches 32 of the 41 ops (`console.py:116-210`) and carries its own help text (`console.py:19-53`). Every output change above has a twin here.
+
+Two branches in this rewrite are **not** new work and must not regress: PLAN 3 Task 13 already fixed `console.py:187` so the REPL `screenshot` path resolves against the CLIENT's cwd (issue B9, mirroring the comment at `main.py:440-442`), and PLAN 3 Task 7 already split the REPL `tab-close` message into its two honest branches on `session_stopped` (issue B4). Both are reproduced verbatim below so a wholesale `dispatch` rewrite cannot drop them, and both carry a test here that locks them.
 
 **Files:**
 - Modify: `src/visus/web/cli/console.py` (`_HELP` at `:19-53`, `dispatch` at `:96-215`, `run_console` at `:218-249`)
@@ -3566,7 +3811,8 @@ def test_repl_find_renders_matches() -> None:
 
 
 def test_repl_screenshot_path_resolves_against_the_client_cwd(tmp_path: Path) -> None:
-    """console.py:187 sent a raw string, so the PNG landed in the DAEMON's cwd."""
+    """Regression lock on PLAN 3 Task 13 (B9): the dispatch rewrite must keep the
+    client-cwd resolution — a raw string lands the PNG in the DAEMON's cwd."""
     captured: dict[str, Any] = {}
 
     def send(op: str, args: dict[str, Any]) -> Any:
@@ -3641,7 +3887,7 @@ _HELP = """commands:
   screenshot [path]    save a screenshot (default screenshot.png)
   export-script [path] print (or save) this session as a runnable visus.web script
   clear                remove the field highlight overlay
-  highlight            redraw the numbered field overlay
+  highlight-all        redraw the numbered field overlay for every field
   tabs                 list open tabs/windows (active marked *)
   tab N                switch to tab/window N (omit N = newest)
   tab-new [url]        open a new tab (optionally at url)
@@ -3714,7 +3960,7 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         return fmt(env.get("result")) + _footer(env)
 ```
 
-Then rewrite the mutating branches to go through `_act`, and add the new commands. Each block below **replaces** the branch of the same `cmd` in the current `dispatch` (`console.py:116-210`); the `find`, `export-script` and `highlight` blocks are new and go just before the closing `return f"unknown command {cmd!r} (try \`help\`)"`. The changed / added branches:
+Then rewrite the mutating branches to go through `_act`, and add the new commands. Each block below **replaces** the branch of the same `cmd` in the current `dispatch` (`console.py:116-210`); the `find`, `export-script` and `highlight-all` blocks are new and go just before the closing `return f"unknown command {cmd!r} (try \`help\`)"`. The changed / added branches:
 
 ```python
         if cmd in ("list", "ls"):
@@ -3801,8 +4047,10 @@ Then rewrite the mutating branches to go through `_act`, and add the new command
 
 ```python
         if cmd == "screenshot":
-            # Resolve against the CLIENT's cwd (not the daemon's) so the PNG lands
-            # where the user is — same fix as main.py's session-screenshot.
+            # PLAN 3 Task 13 (B9) — resolve against the CLIENT's cwd (not the
+            # daemon's) so the PNG lands where the user is, same fix as
+            # main.py's session-screenshot. Reproduced here so this rewrite of
+            # `dispatch` cannot silently revert it.
             shot_args: dict[str, Any] = (
                 {"path": str(Path(rest[0]).resolve())} if rest else {}
             )
@@ -3815,10 +4063,20 @@ Then rewrite the mutating branches to go through `_act`, and add the new command
                 dest.write_text(code, encoding="utf-8")
                 return f"saved {dest} ({result.get('lines', 0)} action(s))"
             return code
-        if cmd == "highlight":
+        if cmd == "highlight-all":
             send("list_fields", {"highlight": True})
             return "overlay drawn"
 ```
+
+**Why `highlight-all` and not `highlight`.** This verb redraws the numbered overlay
+for *every* field — the thing Task 12 just made opt-in. PLAN 5 Task 10 creates a
+different command that also wants the bare name: `visus highlight [idx] [target]
+[--style] [--hide]`, which boxes **one** element, plus its own REPL branch and its
+own `_HELP` line. Two branches called `highlight` in one `dispatch` would mean the
+plan that lands second (PLAN 5) silently deletes the other, and `_HELP` would carry
+two `highlight` rows. The user-facing single-element command keeps the short name
+because it has a CLI command, a README row and an inventory item (row 26) behind it;
+this REPL-only convenience takes the explicit one.
 
 ```python
         if cmd == "dialog":
@@ -3834,8 +4092,12 @@ Then rewrite the mutating branches to go through `_act`, and add the new command
             return f"opened tab {r['index']}: {str(r.get('title', ''))!r}"
 
         def _tab_close_line(r: Any) -> str:
+            # PLAN 3 Task 7 (B4) — two honest branches, not one lie. Reproduced
+            # here so this rewrite of `dispatch` cannot silently revert it.
             if r.get("remaining", 0) == 0:
-                return "closed the last tab — session stopped"
+                if r.get("session_stopped"):
+                    return "closed the last tab — session stopped"
+                return "closed the last tab — the browser is closed"
             return f"closed tab {r['closed']} ({r['remaining']} remaining)"
 
         if cmd == "tab":
@@ -3850,7 +4112,7 @@ Then rewrite the mutating branches to go through `_act`, and add the new command
 
 The three `_tab_*_line` helpers are defined inside `dispatch`, next to `_idx` and `_act`, so they are in scope for the branches above.
 
-Add `from pathlib import Path` to the imports at the top of `console.py`.
+`from pathlib import Path` must be in `console.py`'s import block (PLAN 3 Task 13 added it, between `collections.abc` and `typing` for ruff's `I` rule). Add it only if it is not already there.
 
 Finally, wire the envelope sender in `run_console` (`:235-245`):
 
@@ -3926,7 +4188,7 @@ git commit -m "feat(cli): give the REPL the same page/code footer, find, refs an
 
 ### Task 17: The MCP action tools echo page state
 
-`mcp/server.py:215` returns the bare string `"clicked"` — the same C1 defect, on the surface the skill actually documents today.
+`mcp/server.py:217` returns the bare string `"clicked"` — the same C1 defect, on the surface the skill actually documents today.
 
 **Files:**
 - Modify: `src/visus/web/mcp/server.py` (`browser_click` at `:203-217`, `browser_dblclick` at `:220-234`, `browser_fill` at `:237-252`, `browser_press` at `:255-270`, `browser_hover`, `browser_check`, `browser_uncheck`, `browser_select_option`, `browser_drag`, `browser_focus`, `browser_clear`, `browser_set_input_files`)
@@ -4006,12 +4268,12 @@ Apply the identical wrap to the remaining action tools, changing only the final 
 | `browser_check` | `return _acted("checked")` |
 | `browser_uncheck` | `return _acted("unchecked")` |
 | `browser_select_option` | `return _acted(f"selected {value!r}")` |
-| `browser_drag` | `return _acted(<its current message>)` |
-| `browser_focus` | `return _acted("focused")` |
-| `browser_clear` | `return _acted("cleared")` |
-| `browser_set_input_files` | `return _acted(<its current message>)` |
+| `browser_drag` (`:359`) | `return _acted(f"dragged to {target_selector!r}")` |
+| `browser_focus` (`:377`) | `return _acted("focused")` |
+| `browser_clear` (`:394`) | `return _acted("cleared")` |
+| `browser_set_input_files` (`:411`) | `return _acted(f"set {len(paths)} file(s)")` |
 
-For `browser_drag` and `browser_set_input_files`, wrap whatever message the function returns today rather than inventing a new one — open the file and reuse the exact f-string already there.
+Every message above is the tool's existing return value, wrapped — no wording changes, so no MCP client that string-matches on a result breaks.
 
 - [ ] **Step 4: Run tests to verify they pass**
 

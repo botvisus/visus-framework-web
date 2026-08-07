@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the 755 existing test functions run on every push across Windows and Linux, and make it impossible to publish an untested or unintended build to PyPI.
+**Goal:** Make the 775 existing test functions run on every push across Windows and Linux, and make it impossible to publish an untested or unintended build to PyPI.
 
 **Architecture:** The 90% coverage gate moves out of unconditional `addopts` into coverage's own config, so a filtered lane waives it with one explicit flag instead of throwing measurement away; a new `scripts/check_coverage.py` adds per-package floors on top of the single global number. A new `.github/workflows/ci.yml` runs four jobs (lint+types, fast tests on a 2×2 OS/Python matrix, installed-console-script tests on both OSes, and the full real-browser suite plus both coverage gates on `windows-latest`), and is exposed as a reusable workflow so `publish.yml` can make `build` depend on it. `publish.yml` gains an `if: github.event_name == 'release'` guard on every job and an assertion that the built wheel actually contains the packaged agent skill.
 
@@ -19,19 +19,51 @@
 - Commits: small, TDD (failing test → minimal impl → green → commit), semantic messages `label(scope): description`. Labels: `fix`, `feat`, `chore`, `docs`, `test`, `devops`. **Never** add `Co-Authored-By` lines.
 - Single-test runs use `--no-cov` (the 90% gate only makes sense on a full run).
 
+**The suite is 775 test functions — do not "correct" that to 778.** A naive
+`grep -r "def test_" tests | wc -l` returns **778**, and it overcounts by exactly 3:
+`tests/test_pytest_plugin.py` embeds three inner test sources as a string literal
+(`_INNER_TESTS`, holding `test_ok`, `test_fails`, `test_soft_failure_is_verified`)
+which `pytester.makepyfile` writes into a throw-away directory at run time. They are
+never collected from `tests/`. The AST-verified totals are **775 collectible test
+functions across 61 modules — 298 marked `@pytest.mark.browser`, 477 not** (the
+three phantoms are all in the non-browser bucket, which is why the browser figure
+was never wrong). Item *count* is higher than 775 because 7 `@pytest.mark.parametrize`
+sites expand. Reproduce with:
+
+```python
+# python - <<'PY'   (note utf-8-sig: one test module carries a BOM)
+import ast, pathlib
+
+FN = (ast.FunctionDef, ast.AsyncFunctionDef)
+total = 0
+for p in sorted(pathlib.Path("tests").rglob("*.py")):
+    tree = ast.parse(p.read_text(encoding="utf-8-sig"))
+    for node in tree.body:
+        if isinstance(node, FN) and node.name.startswith("test_"):
+            total += 1
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            total += sum(
+                1 for s in node.body if isinstance(s, FN) and s.name.startswith("test_")
+            )
+print(total)  # 775
+# PY
+```
+
 ## Prerequisites
 
-**PLAN 1 (`2026-08-06-tier1-skill-distribution.md`) MUST land before Task 3 of this plan.** This plan consumes these exact symbols and artifacts from it:
+**PLAN 1 (`2026-08-06-tier1-skill-distribution.md`) MUST land before Tasks 3 and 5 of this plan.** This plan consumes these exact symbols and artifacts from it:
 
 | Consumed | From | Used by |
 |---|---|---|
-| `src/visus/web/cli/_entry.py` → `cli_main() -> None` | PLAN 1 | Task 3, Task 5 |
-| `src/visus/web/cli/_entry.py` → `mcp_main() -> None` | PLAN 1 | Task 3 |
-| `pyproject.toml` `[project.scripts]` repointed to `visus = "visus.web.cli._entry:cli_main"` and `visus-web-mcp = "visus.web.cli._entry:mcp_main"` | PLAN 1 | Task 3 |
-| `src/visus/web/skills/visus-web/SKILL.md` packaged inside the `visus.web` package directory | PLAN 1 | Task 3, Task 5 |
-| The message `cli_main()` prints when the `[cli]` extra is absent **must contain the literal substring `visus-web[cli]`** | PLAN 1 | Task 3 |
+| `src/visus/web/cli/_entry.py` → `cli_main() -> None` (writes `_MISSING_CLI` to stderr and raises `SystemExit(2)` when `typer` is absent) | PLAN 1, Task 5 | Task 3 |
+| `src/visus/web/cli/_entry.py` → `mcp_main() -> None` | PLAN 1, Task 5 | Task 3 |
+| `pyproject.toml` `[project.scripts]` repointed to `visus = "visus.web.cli._entry:cli_main"` and `visus-web-mcp = "visus.web.cli._entry:mcp_main"` | PLAN 1, Task 5 | Task 3 |
+| `src/visus/web/skills/visus-web/SKILL.md` packaged inside the `visus.web` package directory | PLAN 1, Task 1 | Task 3, Task 5 |
+| The message `cli_main()` prints to **stderr** when the `[cli]` extra is absent **must contain the literal substring `visus-web[cli]`** — PLAN 1's `_MISSING_CLI` is `The visus CLI needs the [cli] extra:  pip install "visus-web[cli]"` | PLAN 1, Task 5 | Task 3 |
 
 **Tasks 1, 2, 4, 6, 7 and 8 have no dependency on PLAN 1** and may be executed before it lands.
+
+**Issue E3 (`visus` dies with `ModuleNotFoundError` without the `[cli]` extra) is NOT fixed here — it is deliberately deferred to PLAN 1**, which owns `_entry.py` and the entry-point guards. This plan only *proves* the fix from the outside, in Task 3, by installing a wheel without the extra and asserting the guard message. If PLAN 1 has not landed, Task 3's `test_visus_without_the_cli_extra_explains_itself` fails with a `ModuleNotFoundError` traceback — that is the pre-existing bug, not a defect in this plan.
 
 **Files this plan must NOT touch** (owned by other plans, editing them causes a merge collision):
 
@@ -66,16 +98,17 @@
 | `pyproject.toml:26-35` | `[dev]` gains `tomli` (3.10 only), `build`, `hatchling`, `pyyaml`. |
 | `pyproject.toml:64-74` | `addopts` loses `--cov-fail-under=90`, gains `--strict-markers --strict-config`; new `markers` entry `packaging`; new `filterwarnings`; new `[tool.coverage.run]` / `[tool.coverage.report]`. |
 | `.github/workflows/publish.yml:7-51` | Release guard on every job, `test` job calling `ci.yml`, `needs:` wiring, wheel-content assertion. |
-| `.gitignore:32-41` | Ignore `coverage.json`. |
-| `TESTING.md:12-24, 41-46` | Document the two-command full gate and the `--cov-fail-under=0` partial-run form. |
+| `.gitignore:36-39` | Ignore `coverage.json` (appended to the existing `.coverage` / `htmlcov/` / `coverage.xml` block inside the `# ---- Caches ----` section, `.gitignore:32-41`). |
+| `TESTING.md:12-24` | Document the two-command full gate and the `--cov-fail-under=0` partial-run form (Task 1). |
+| `TESTING.md:41-46` | Widen the documented lint gate from `ruff check src tests` to `ruff check src tests scripts` and name `scripts/check_coverage.py` (Task 2, once `scripts/` exists). |
 
 ---
 
 ### Task 1: Move the coverage gate out of unconditional `addopts` (E5)
 
 **Files:**
-- Modify: `pyproject.toml:26-35` (add `tomli` to `[dev]`), `pyproject.toml:64-74` (`addopts` + new `[tool.coverage.*]` sections)
-- Modify: `TESTING.md:12-24`, `TESTING.md:41-46`
+- Modify: `pyproject.toml:26-35` (add `tomli` + a `coverage` floor to `[dev]`), `pyproject.toml:64-74` (`addopts` + new `[tool.coverage.*]` sections)
+- Modify: `TESTING.md:12-24` (the "Run the suite" section; `TESTING.md:41-46`, the "Quality gates" section, is Task 2's — `scripts/` does not exist yet)
 - Test: `tests/test_pytest_config.py` (create)
 
 **Interfaces:**
@@ -94,9 +127,12 @@ addopts = "-p no:visus_web -n auto --dist loadfile --cov=visus.web --cov-report=
 
 and there is no `[tool.coverage]` section anywhere in the repo.
 
-- [ ] **Step 1: Add `tomli` to the `[dev]` extra**
+- [ ] **Step 1: Add `tomli` and a `coverage` floor to the `[dev]` extra**
 
-`tomllib` is stdlib only from Python 3.11, and `requires-python = ">=3.10"`. The config tests read the real `pyproject.toml`, so 3.10 needs the backport.
+Two additions, both load-bearing:
+
+1. `tomllib` is stdlib only from Python 3.11, and `requires-python = ">=3.10"`. The config tests and `scripts/check_coverage.py` read the real `pyproject.toml`, so 3.10 needs the backport.
+2. `exclude_also` (used by the `[tool.coverage.report]` section written in Step 5) landed in **coverage 7.2.0**. `pytest-cov>=4.0.0` alone does not guarantee it; on an older coverage the key is ignored, `if TYPE_CHECKING:` blocks count as uncovered, and the 90% gate can fail for a reason that is invisible in the config.
 
 In `pyproject.toml`, replace lines 26-35:
 
@@ -128,6 +164,9 @@ dev = [
     # tomllib is stdlib from 3.11; the config tests and scripts/check_coverage.py
     # read pyproject.toml directly and must also work on the declared 3.10 floor.
     "tomli>=2.0.1; python_version < '3.11'",
+    # [tool.coverage.report] exclude_also needs coverage >= 7.2.0; on anything
+    # older the key is silently ignored and TYPE_CHECKING blocks count as missed.
+    "coverage[toml]>=7.2.0",
 ]
 ```
 
@@ -144,7 +183,7 @@ Create `tests/test_pytest_config.py`:
 """The pytest + coverage configuration is a contract — assert it directly.
 
 `--cov-fail-under=90` used to sit unconditionally in `addopts`, which made a
-filtered lane (`-m "not browser"` selects 456 of the 755 tests) fail the coverage
+filtered lane (`-m "not browser"` selects 477 of the 775 tests) fail the coverage
 gate on arrival. The gate now lives in `[tool.coverage.report]` and is passed
 explicitly by whichever invocation is supposed to enforce it.
 """
@@ -181,7 +220,7 @@ def _addopts() -> str:
 def test_coverage_gate_is_not_baked_into_addopts() -> None:
     assert "--cov-fail-under" not in _addopts(), (
         "the 90% gate must not be unconditional: a `-m 'not browser'` lane can "
-        "never reach it (299 of 755 tests need a real browser) and would fail on "
+        "never reach it (298 of 775 tests need a real browser) and would fail on "
         "arrival. Pass the gate explicitly on the invocation that enforces it."
     )
 
@@ -256,7 +295,7 @@ addopts = "-p no:visus_web -n auto --dist loadfile --cov=visus.web --cov-report=
 with:
 
 ```toml
-# No --cov-fail-under here: a filtered lane (-m "not browser" selects 456 of 755
+# No --cov-fail-under here: a filtered lane (-m "not browser" selects 477 of 775
 # tests) can never reach 90% and would fail on arrival. Measurement stays on;
 # the gate is passed explicitly by whoever enforces it (ci.yml, CONTRIBUTING.md)
 # and waived with --cov-fail-under=0 by whoever cannot.
@@ -357,7 +396,8 @@ git commit -m "chore(test): move the 90% coverage gate out of unconditional addo
 - Create: `scripts/check_coverage.py`
 - Create: `coverage-floors.json`
 - Create: `tests/test_coverage_floors.py`
-- Modify: `.gitignore:32-41`
+- Modify: `.gitignore:36-39`
+- Modify: `TESTING.md:41-46`
 
 **Interfaces:**
 - Consumes: `[tool.coverage.report] fail_under` from Task 1.
@@ -371,7 +411,7 @@ git commit -m "chore(test): move the 90% coverage gate out of unconditional addo
   - `coverage-floors.json` — `{"slack": float, "packages": {name: float}}`
 - Task 4's `ci.yml` runs `python scripts/check_coverage.py` in the browser lane; Task 8's `CONTRIBUTING.md` documents it.
 
-**Why:** `--cov-fail-under` is one number over ~11,290 statements. `visus/web/cli` + `visus/web/mcp` are 3,172 of them (28%); in the worst case ~36% of those two packages can be uncovered while the global total still reads 90%. Re-aggregating per sub-package closes that.
+**Why:** `--cov-fail-under` is one number over the whole of `visus.web` — 11,290 lines of source across 8 sub-packages. `visus/web/cli` + `visus/web/mcp` are 3,172 of those lines (28%); in the worst case ~36% of those two packages can be uncovered while the global total still reads 90%. Re-aggregating per sub-package closes that.
 
 **Note on test doubles:** `tests/test_coverage_floors.py` feeds the functions synthetic `coverage.json` dictionaries. Those are *inputs*, not doubles — nothing is patched or faked. The real integration coverage is Task 4's browser lane, which runs the script against a real `coverage.json` produced by a real full-suite run.
 
@@ -551,8 +591,9 @@ Create `scripts/check_coverage.py`:
 ```python
 """Per-package coverage floors, on top of the single global gate.
 
-`--cov-fail-under` is one number over ~11,290 statements: `visus/web/cli` and
-`visus/web/mcp` are 3,172 of them, so either could rot for months while the
+`--cov-fail-under` is one number over the whole of `visus.web` — 11,290 lines of
+source. `visus/web/cli` and `visus/web/mcp` are 3,172 of those lines, so either
+could rot for months while the
 global total stays above 90%. This script re-aggregates the machine-readable
 `coverage.json` per top-level sub-package of `visus/web` and fails when any
 package falls below the floor recorded in `coverage-floors.json`.
@@ -742,11 +783,13 @@ coverage.json
 - [ ] **Step 5: Run the unit tests to verify all but one pass**
 
 Run: `uv run pytest tests/test_coverage_floors.py -v --no-cov`
-Expected: 13 passed, 1 failed — `test_the_committed_floors_file_is_wellformed` fails with `FileNotFoundError: ... coverage-floors.json`. Every other test passes.
+Expected: 13 passed, 1 failed — `test_the_committed_floors_file_is_wellformed` fails with
+`FileNotFoundError: [Errno 2] No such file or directory: '<repo root>\coverage-floors.json'`.
+Every other test passes.
 
 - [ ] **Step 6: Freeze the real floors from a real full-suite run**
 
-This is the one long step in the plan. It runs the complete suite (755 tests, 299 of them real-browser) to produce a truthful `coverage.json`. Budget 20-40 minutes; a headless Chrome window churns for the duration.
+This is the one long step in the plan. It runs the complete suite (775 test functions, 298 of them real-browser) to produce a truthful `coverage.json`. Budget 20-40 minutes; a headless Chrome window churns for the duration.
 
 Run: `uv run pytest -q -m "not packaging" --cov-fail-under=0 --cov-report=json`
 Expected: exits 0, writes `coverage.json` in the repo root.
@@ -755,18 +798,23 @@ Then run: `uv run python scripts/check_coverage.py --freeze`
 Expected output shape (your numbers will differ):
 
 ```
-  _root      95.12%
-  api        96.40%
-  async_api  94.02%
-  backends   91.77%
-  cli        84.55%
-  mcp        88.31%
-  observability  93.10%
-  vision     90.44%
-  TOTAL      92.68%  (global floor 90.00%)
+  _root           95.12%
+  api             96.40%
+  async_api       94.02%
+  backends        91.77%
+  cli             84.55%
+  mcp             88.31%
+  observability   93.10%
+  vision          90.44%
+  TOTAL           92.68%  (global floor 90.00%)
 
-froze 8 per-package floors into C:\...\coverage-floors.json
+froze 8 per-package floors into <repo root>\coverage-floors.json
 ```
+
+The eight bucket names are fixed by the source tree — `visus/web/` contains exactly
+`api/`, `async_api/`, `backends/`, `cli/`, `mcp/`, `observability/` and `vision/`, plus
+the top-level modules that bucket as `_root`. A ninth name appearing here means a new
+sub-package landed; a missing one means a package was deleted or renamed.
 
 `--freeze` records `floor(actual) - 3.0` so a small, honest fluctuation between machines does not fail CI. Floors only ever ratchet **up**, by re-running `--freeze` after coverage improves.
 
@@ -792,15 +840,44 @@ Coverage floors NOT met:
 
 Restore the frozen value before committing (re-run `uv run python scripts/check_coverage.py --freeze` if you lost it).
 
-- [ ] **Step 9: Lint the new script**
+- [ ] **Step 9: Widen the documented lint gate in TESTING.md**
+
+`scripts/` now exists and holds linted Python, so the gate documented in `TESTING.md` is
+one directory short. In `TESTING.md`, replace lines 41-46:
+
+````markdown
+## Quality gates
+
+```bash
+uv run ruff check src tests   # lint (and `ruff format` to format)
+uv run mypy                   # strict type-check
+```
+````
+
+with:
+
+````markdown
+## Quality gates
+
+```bash
+uv run ruff check src tests scripts   # lint (and `ruff format` to format)
+uv run mypy                           # strict type-check (visus.web only)
+```
+
+`scripts/` holds repo tooling — currently `scripts/check_coverage.py`, the per-package
+coverage floors. It is linted by ruff but **not** type-checked: `[tool.mypy] packages =
+["visus.web"]` selects mypy's own inputs. Write it fully annotated anyway.
+````
+
+- [ ] **Step 10: Lint the new script**
 
 Run: `uv run ruff check src tests scripts`
 Expected: `All checks passed!`
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add scripts/check_coverage.py coverage-floors.json tests/test_coverage_floors.py .gitignore
+git add scripts/check_coverage.py coverage-floors.json tests/test_coverage_floors.py .gitignore TESTING.md
 git commit -m "chore(coverage): enforce per-package floors on top of the global gate"
 ```
 
@@ -830,7 +907,7 @@ That is a **library function imported in-process** (`from visus.web.cli import s
         + ([url] if url else []),
 ```
 
-— `python -m`, never the `visus` executable. So the genuinely cross-process e2e test still resolves `typer` from the developer's environment and never touches `[project.scripts]`. Combined with the fact that all 50 CLI commands are driven through `typer.testing.CliRunner` against the imported `app` object, and that `twine check` validates metadata without ever installing the wheel: a broken console-script target, a missing `[cli]` extra, or a wheel that omits the packaged skill are **all invisible to every existing test and workflow**.
+— `python -m`, never the `visus` executable. So the genuinely cross-process e2e test still resolves `typer` from the developer's environment and never touches `[project.scripts]`. Combined with the fact that every CLI command — the 50 `@app.command()` functions in `main.py` plus the 3 `@session_app.command()` subcommands registered at `main.py:201-202` — is driven through `typer.testing.CliRunner` against the imported `app` object, and that `twine check` validates metadata without ever installing the wheel: a broken console-script target, a missing `[cli]` extra, or a wheel that omits the packaged skill are **all invisible to every existing test and workflow**.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -975,10 +1052,12 @@ def test_visus_without_the_cli_extra_explains_itself(bare_visus: Path) -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_installed_entry_points.py -v --no-cov`
-Expected: FAIL — all six tests error during the `wheel` fixture, because `build` is not installed:
+Expected: FAIL — all six tests error during the `wheel` fixture, because `build` is not installed. The fixture's `assert proc.returncode == 0, proc.stdout + proc.stderr` reports:
 
 ```
-E       AssertionError: ... No module named build
+E       AssertionError: <path to python>: No module named build
+E
+E       assert 1 == 0
 ```
 
 - [ ] **Step 3: Add the build dependencies and register the marker**
@@ -1065,7 +1144,7 @@ and `session_client.py:28-39` probes process liveness with `tasklist`:
 
 `session_client.py:157-161` also picks Windows-only `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` creation flags. A Linux-only CI would leave every one of those paths untested on the platform this project targets.
 
-**Why the browser lane is the gated one, and how the browser gets there.** Coverage is only meaningful over the whole suite — 299 of the 755 tests need a real browser — so the 90% gate and the per-package floors run in the lane that executes them. GitHub's `windows-latest` image ships Google Chrome, Microsoft Edge and Firefox pre-installed; nothing needs to be downloaded for the browsers themselves. The **driver** is resolved by Selenium Manager at launch time: `backends/browsers/chrome.py:39-41` is
+**Why the browser lane is the gated one, and how the browser gets there.** Coverage is only meaningful over the whole suite — 298 of the 775 test functions need a real browser — so the 90% gate and the per-package floors run in the lane that executes them. GitHub's `windows-latest` image ships Google Chrome, Microsoft Edge and Firefox pre-installed; nothing needs to be downloaded for the browsers themselves. The **driver** is resolved by Selenium Manager at launch time: `backends/browsers/chrome.py:39-41` is
 
 ```python
 def build_service() -> Service:
@@ -1073,7 +1152,7 @@ def build_service() -> Service:
     return Service()
 ```
 
-so the runner needs outbound network on first launch and nothing else. The lane's first step is `visus doctor` (`main.py:97-107`), which launches Chrome headless, navigates a data URL and exits 1 with the exception on failure — a 5-second smoke test that turns "Chrome or chromedriver is missing on this runner" into an unambiguous failure instead of 299 confusing ones. `tests/test_e2e_edge_ie.py:21-22` skips itself under xdist (which is always on here via `-n auto`), and `tests/test_e2e_firefox.py:35-37` runs for real because the runner has Firefox.
+so the runner needs outbound network on first launch and nothing else. The lane's first step is `visus doctor` (`main.py:97-107`), which launches Chrome headless, navigates a data URL and exits 1 with the exception on failure — a 5-second smoke test that turns "Chrome or chromedriver is missing on this runner" into an unambiguous failure instead of 298 confusing ones. `tests/test_e2e_edge_ie.py:21-22` skips itself under xdist (which is always on here via `-n auto`), and `tests/test_e2e_firefox.py:35-37` runs for real because the runner has Firefox.
 
 - [ ] **Step 1: Add PyYAML to `[dev]`**
 
@@ -1174,7 +1253,7 @@ def test_browser_lane_is_windows_and_carries_both_coverage_gates() -> None:
     job = _load(CI)["jobs"]["browser-tests"]
     assert job["runs-on"] == "windows-latest"
     run = _run_text(job)
-    assert "visus doctor" in run, "smoke-test Chrome + Selenium Manager before 299 tests"
+    assert "visus doctor" in run, "smoke-test Chrome + Selenium Manager before 298 browser tests"
     assert "--cov-fail-under=90" in run
     assert "--cov-report=json" in run
     assert "scripts/check_coverage.py" in run
@@ -1183,7 +1262,9 @@ def test_browser_lane_is_windows_and_carries_both_coverage_gates() -> None:
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_ci_workflows.py -v --no-cov`
-Expected: FAIL — all eight tests raise `FileNotFoundError: ... .github\workflows\ci.yml`.
+Expected: FAIL — all **seven** tests raise
+`FileNotFoundError: [Errno 2] No such file or directory: '<repo root>\.github\workflows\ci.yml'`
+from `_load(CI)`.
 
 - [ ] **Step 4: Write the workflow**
 
@@ -1331,7 +1412,7 @@ jobs:
           fi
       # Chrome ships with the runner image; Selenium Manager resolves chromedriver
       # on first launch (backends/browsers/chrome.py:39-41). Fail loudly here rather
-      # than 299 times below.
+      # than 298 times below.
       - name: Smoke-test browser + driver
         run: visus doctor
       - name: pytest (full suite, real browsers) + global coverage gate
@@ -1350,7 +1431,7 @@ jobs:
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_ci_workflows.py -v --no-cov`
-Expected: PASS, 8 passed.
+Expected: PASS, 7 passed.
 
 - [ ] **Step 6: Verify the workflow parses the way GitHub will**
 
@@ -1427,13 +1508,11 @@ def test_build_asserts_the_wheel_ships_the_agent_skill() -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_ci_workflows.py -v --no-cov`
-Expected: 8 passed, 4 failed.
-- `test_every_publish_job_is_guarded_to_a_real_release` → `AssertionError: job 'build' has no release guard...`
-- `test_build_cannot_run_before_the_ci_gates` → `KeyError: 'test'`
-- `test_build_asserts_the_wheel_ships_the_agent_skill` → `AssertionError`
-- `test_workflow_dispatch_is_still_declared_so_the_guard_is_observable` passes.
-
-(Exact count: 3 failures if the dispatch test passes as expected.)
+Expected: 8 passed, 3 failed (7 pre-existing `ci.yml` tests + `test_workflow_dispatch_is_still_declared_so_the_guard_is_observable` pass; the other 3 new tests fail).
+- `test_every_publish_job_is_guarded_to_a_real_release` → `AssertionError: job 'build' has no release guard — a workflow_dispatch from ANY branch would publish that branch to PyPI`
+- `test_build_cannot_run_before_the_ci_gates` → `KeyError: 'test'` (today `publish.yml` declares only `build` and `publish`)
+- `test_build_asserts_the_wheel_ships_the_agent_skill` → `AssertionError: assert 'visus/web/skills/visus-web/SKILL.md' in ...` — today the `build` job's only `run:` step is the three lines `python -m pip install --upgrade pip build twine` / `python -m build` / `twine check dist/*` (`publish.yml:23-27`), which never opens the wheel.
+- `test_workflow_dispatch_is_still_declared_so_the_guard_is_observable` passes — `publish.yml:7-10` already declares both triggers; that is the point.
 
 - [ ] **Step 3: Rewrite `publish.yml`**
 
@@ -1537,7 +1616,7 @@ jobs:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_ci_workflows.py -v --no-cov`
-Expected: PASS, 12 passed.
+Expected: PASS, 11 passed (7 from Task 4 + the 4 appended here).
 
 - [ ] **Step 5: Prove the wheel assertion catches a real regression**
 
@@ -1564,7 +1643,7 @@ git commit -m "devops(release): guard publishing to real releases and gate it on
 ### Task 6: Strict markers, fatal pytest warnings, and the forbid-only guards (row 34)
 
 **Files:**
-- Modify: `pyproject.toml:64-75` (`addopts` + new `filterwarnings`)
+- Modify: `pyproject.toml` `[tool.pytest.ini_options]` — the block that starts at `pyproject.toml:64` today and has grown by the `[tool.coverage.*]` sections Task 1 appended after it, so match on the `addopts = ` and `markers = ` keys rather than on line numbers.
 - Modify: `tests/test_pytest_config.py` (append)
 - Create: `tests/test_repo_hygiene.py`
 
@@ -1578,7 +1657,7 @@ git commit -m "devops(release): guard publishing to real releases and gate it on
 2. `--strict-config` — an unknown or misspelled ini key errors instead of being ignored.
 3. `tests/test_repo_hygiene.py` — CONVENTIONS forbids `skip`/`xfail`; the guard fails on any *new* one, with the two pre-existing conditional skips named explicitly in an allowlist.
 
-Plus `filterwarnings` promoting pytest's **own** warning classes to errors. Only pytest's own classes are promoted: a blanket `error` would turn third-party `DeprecationWarning`s from selenium/urllib3/onnxruntime into 755 failures for reasons this repo cannot fix.
+Plus `filterwarnings` promoting pytest's **own** warning classes to errors. Only pytest's own classes are promoted: a blanket `error` would turn third-party `DeprecationWarning`s from selenium/urllib3/onnxruntime into 775 failures for reasons this repo cannot fix.
 
 **Verified pre-conditions** (do not re-derive):
 - The only markers applied anywhere in `tests/` are `browser` (300 sites), `parametrize` (7), `timeout` (1) and `skipif` (1) — all registered or builtin, so `--strict-markers` is safe today.
@@ -1607,7 +1686,7 @@ def test_pytests_own_warnings_are_fatal() -> None:
     assert "error::pytest.PytestUnknownMarkWarning" in filters
     assert "error::pytest.PytestCollectionWarning" in filters
     assert not any(f.strip() == "error" for f in filters), (
-        "a blanket `error` would fail 755 tests on selenium/urllib3/onnxruntime "
+        "a blanket `error` would fail 775 tests on selenium/urllib3/onnxruntime "
         "deprecations this repo cannot fix"
     )
 ```
@@ -1697,10 +1776,12 @@ def test_no_test_function_returns_a_value() -> None:
 - [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_pytest_config.py tests/test_repo_hygiene.py -v --no-cov`
-Expected: the two hygiene tests PASS (the repo is already clean — that is the point of a guard). The three new config tests FAIL:
-- `test_markers_and_config_are_strict` → `AssertionError: a typo'd marker must error...`
+Expected: the two hygiene tests PASS (the repo is already clean — that is the point of a guard). Two of the three new config tests FAIL:
+- `test_markers_and_config_are_strict` → `AssertionError: a typo'd marker must error, not silently register`
 - `test_pytests_own_warnings_are_fatal` → `KeyError: 'filterwarnings'`
-- `test_the_packaging_marker_is_registered` passes if Task 3 has landed.
+- `test_the_packaging_marker_is_registered` PASSES if Task 3 has landed; if Task 3 has not landed it fails with `AssertionError: assert False` on `any(m.startswith("packaging:") for m in markers)`. Land Task 3 first.
+
+Overall: 7 passed, 2 failed (5 Task-1 config tests + 2 hygiene tests pass).
 
 - [ ] **Step 4: Write the config change**
 
@@ -1720,7 +1801,7 @@ Then add, immediately after the `addopts` line:
 
 ```toml
 # pytest's OWN warnings are defects in this repo, so they are fatal. A blanket
-# `error` is NOT used: selenium/urllib3/onnxruntime deprecations would fail 755
+# `error` is NOT used: selenium/urllib3/onnxruntime deprecations would fail 775
 # tests for reasons this repo cannot fix.
 filterwarnings = [
     "error::pytest.PytestUnknownMarkWarning",
@@ -1736,7 +1817,9 @@ Expected: PASS, 10 passed.
 - [ ] **Step 6: Verify strictness across the whole suite without running it**
 
 Run: `uv run pytest --collect-only -q -n 0 --no-cov`
-Expected: ends with `755 tests collected` (exact number may drift as other plans land) and **no** `PytestUnknownMarkWarning`, `PytestCollectionWarning` or `ERROR` lines. Collection exercises every one of the 61 modules, so an unregistered marker or an uncollectable `Test*` class would surface here.
+Expected: a final `<N> tests collected` line with **no** `PytestUnknownMarkWarning`, `PytestCollectionWarning`, `errors` or `ERROR` lines. `N` is larger than the 775 test *functions* in `tests/` because the 7 `@pytest.mark.parametrize` sites expand into several items each — assert on the absence of warnings and errors, not on `N`. Collection exercises every one of the 61 modules plus the modules this plan adds, so an unregistered marker or an uncollectable `Test*` class surfaces here.
+
+The marker inventory this must stay consistent with (verified today): `pytest.mark.browser` × 300, `pytest.mark.parametrize` × 7, `pytest.mark.skipif` × 1, `pytest.mark.timeout` × 1 — and no module-level `pytestmark`.
 
 - [ ] **Step 7: Verify a filtered run still passes**
 
@@ -1884,7 +1967,7 @@ git commit -m "chore(dev): add a local-only pre-commit config mirroring the CI g
 - Modify: `tests/test_repo_hygiene.py` (append)
 
 **Interfaces:**
-- Consumes: the gate commands established in Tasks 1, 2, 4 and 5.
+- Consumes: the gate commands established in Tasks 1, 2, 4 and 5; `tests/test_repo_hygiene.py` with its module-level `REPO_ROOT` (created by Task 6) and its module-level `import yaml` (added by Task 7). **Task 8 must run after Tasks 6 and 7** — without Task 7 the appended `test_dependabot_watches_pip_and_github_actions` fails with `NameError: name 'yaml' is not defined`.
 - Produces: nothing other plans consume.
 
 **The gap:** `.github/` contains exactly one file (`workflows/publish.yml`); the repo root has no `CONTRIBUTING.md`, no `SECURITY.md` and no release runbook. `selenium>=4.38,<5` has nothing testing an upgrade. The reference repo carries `.claude/skills/dev/roll.md` (47 lines) and `release.md` (77 lines) for exactly this.
@@ -2013,7 +2096,7 @@ uv run python scripts/check_coverage.py
 
 - The **global** 90% floor lives in `[tool.coverage.report] fail_under` and is passed
   explicitly on the pytest command. It is deliberately *not* in `addopts`: a filtered
-  run (`-m "not browser"` selects 456 of 755 tests) can never reach it.
+  run (`-m "not browser"` selects 477 of 775 tests) can never reach it.
 - `scripts/check_coverage.py` adds **per-package** floors from `coverage-floors.json`,
   so `cli/` and `mcp/` — 3,172 of 11,290 lines — cannot rot behind a healthy total.
   Floors ratchet up only: after coverage improves, re-run
@@ -2176,8 +2259,11 @@ branch to PyPI, unversioned and untested.
 7. **Verify what landed.**
 
    ```bash
-   pip download --no-deps --dest /tmp/vw "visus-web[cli]==X.Y.Z"
+   pip download --no-deps --dest ./_verify "visus-web[cli]==X.Y.Z"
    ```
+
+   (`./_verify` rather than `/tmp` — this is a Windows-first project and the same command
+   has to work in PowerShell. Delete the directory afterwards.)
 
    Then install it into a clean venv and run `visus --help` and `visus version`. The
    `packaging-tests` job already does this against the pre-release wheel on both
@@ -2225,9 +2311,11 @@ git commit -m "docs(repo): add CONTRIBUTING, SECURITY, RELEASING and dependabot"
 
 ## Done means
 
-- `git push` on a branch triggers `.github/workflows/ci.yml`: ruff + mypy on ubuntu, the
+- A push to `main`, or a pull request targeting `main`, triggers `.github/workflows/ci.yml`
+  (those are the only two `on:` triggers besides `workflow_call`; a push to an unmerged
+  feature branch is covered by its PR, not by the push event): ruff + mypy on ubuntu, the
   non-browser suite on 4 OS/Python combinations including `windows-latest` × 3.10, the
-  installed-console-script tests on both OSes, and the full 755-test suite with real
+  installed-console-script tests on both OSes, and the full 775-test suite with real
   browsers plus both coverage gates on `windows-latest`.
 - A `workflow_dispatch` of `publish.yml` from any branch does nothing at all.
 - Publishing a GitHub Release runs the whole CI matrix, then builds, then asserts the

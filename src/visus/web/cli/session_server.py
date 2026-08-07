@@ -316,6 +316,7 @@ class SessionHandler:
         url = args["url"]
         page = self.page()
         page.goto(url)
+        self._invalidate_fields()  # cached indexes belonged to the previous page
         return page.url
 
     def _op_screenshot(self, args: dict[str, Any]) -> str:
@@ -341,16 +342,19 @@ class SessionHandler:
     def _op_back(self, args: dict[str, Any]) -> str:
         page = self.page()
         page.go_back()
+        self._invalidate_fields()  # cached indexes belonged to the previous page
         return page.url
 
     def _op_forward(self, args: dict[str, Any]) -> str:
         page = self.page()
         page.go_forward()
+        self._invalidate_fields()  # cached indexes belonged to the previous page
         return page.url
 
     def _op_reload(self, args: dict[str, Any]) -> str:
         page = self.page()
         page.reload()
+        self._invalidate_fields()  # a reload rebuilds the DOM from scratch
         return page.url
 
     # --- inspect ---------------------------------------------------------
@@ -447,7 +451,7 @@ class SessionHandler:
         new = [h for h in handles if h not in before]
         self._known_handles = handles
         self._active_handle = new[-1] if new else handles[-1]
-        self._fields = []
+        self._invalidate_fields()
         url = args.get("url")
         if url:
             driver.switch_to.window(self._active_handle)
@@ -480,7 +484,7 @@ class SessionHandler:
         driver.close()
         remaining = list(driver.window_handles)
         self._known_handles = remaining
-        self._fields = []
+        self._invalidate_fields()
         if not remaining:
             self.close()
             return {"closed": i, "remaining": 0}
@@ -600,7 +604,7 @@ class SessionHandler:
             if i < 0 or i >= len(handles):
                 raise IndexError(f"tab index {i} out of range (have {len(handles)} tabs)")
             self._active_handle = handles[i]
-        self._fields = []  # cached field indices belonged to the previous tab
+        self._invalidate_fields()  # cached indexes belonged to the previous tab
         try:
             driver.switch_to.window(self._active_handle)
             title = driver.title

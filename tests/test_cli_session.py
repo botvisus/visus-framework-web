@@ -1786,6 +1786,38 @@ def test_handle_real_back_forward_reload(base_url: str) -> None:
 
 
 @pytest.mark.browser
+def test_handle_real_same_url_reload_and_goto_still_drop_the_field_cache(
+    base_url: str,
+) -> None:
+    """A reload — or a goto to the CURRENT url — rebuilds the DOM without changing
+    the url, so Task 1's url stamp alone would never notice. The explicit
+    `_invalidate_fields()` clear is what catches this case."""
+    url = f"{base_url}/fields.html"
+    h = session_server.SessionHandler(engine="chrome", headless=True, url=url)
+    try:
+        fields = h.handle("list_fields", {"highlight": False})["result"]["fields"]
+        assert fields
+        assert h._fields_url == url  # same url before and after -> stamp is unchanged
+
+        rel = h.handle("reload", {})
+        assert rel["ok"] is True and rel["result"] == url
+        assert h._fields == [] and h._fields_url is None
+        stale = h.handle("click", {"index": 0})
+        assert stale["ok"] is False and "run list_fields first" in stale["error"]
+
+        h.handle("list_fields", {"highlight": False})
+        assert h._fields
+
+        same_goto = h.handle("goto", {"url": url})
+        assert same_goto["ok"] is True and same_goto["result"] == url
+        assert h._fields == [] and h._fields_url is None
+        stale2 = h.handle("click", {"index": 0})
+        assert stale2["ok"] is False and "run list_fields first" in stale2["error"]
+    finally:
+        h.close()
+
+
+@pytest.mark.browser
 def test_handle_real_title_url_snapshot(base_url: str) -> None:
     h = session_server.SessionHandler(engine="chrome", headless=True, url=f"{base_url}/fields.html")
     try:
@@ -1983,6 +2015,43 @@ def test_invalidate_fields_drops_cache_and_stamp() -> None:
     assert h._fields and h._fields_url is not None
     h._invalidate_fields()
     assert h._fields == [] and h._fields_url is None
+
+
+def test_navigation_ops_invalidate_the_field_cache() -> None:
+    """goto/back/forward/reload drop cached indexes — like tab/tab_new/tab_close."""
+    for op, args in (
+        ("goto", {"url": "http://elsewhere.test/"}),
+        ("back", {}),
+        ("forward", {}),
+        ("reload", {}),
+    ):
+        page = _FakePage()
+        h = _handler_with_fake_page(page)
+        h.handle("list_fields", {})
+        assert h._fields, op
+        assert h.handle(op, args)["ok"] is True, op
+        assert h._fields == [], f"{op} left the field cache in place"
+        assert h._fields_url is None, f"{op} left the page stamp in place"
+        resp = h.handle("click", {"index": 0})
+        assert resp["ok"] is False, op
+        assert "run list_fields first" in resp["error"], op
+
+
+def test_tab_ops_also_drop_the_page_stamp() -> None:
+    """The pre-existing `self._fields = []` sites must clear the stamp too."""
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("list_fields", {})
+    h._invalidate_fields()
+    assert h._fields_url is None
+    # tab ops need a real driver, so assert the source contract instead: every
+    # site that empties the cache goes through _invalidate_fields(), so the only
+    # remaining literal is the one inside _invalidate_fields itself.
+    src = Path(session_server.__file__).read_text(encoding="utf-8")
+    assert src.count("self._fields = []") == 1, (
+        "clear the cache via self._invalidate_fields(); the only literal "
+        "`self._fields = []` belongs inside _invalidate_fields itself"
+    )
 
 
 def test_cli_tabs_and_tab(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -144,3 +144,40 @@ def test_troubleshooting_reference_carries_the_literal_daemon_errors() -> None:
         "out of range (have",
     ):
         assert literal in text, f"missing the literal error {literal!r}"
+
+
+_REFERENCES = (
+    "cli-session.md",
+    "cli-targeting.md",
+    "cli-commands.md",
+    "cli-json-and-piping.md",
+    "cli-repl.md",
+    "windows-shell.md",
+    "mcp-tools.md",
+    "vision.md",
+    "tracing-reports.md",
+    "pytest-plugin.md",
+    "troubleshooting.md",
+    "library-api.md",
+)
+
+
+def test_every_reference_exists_and_is_linked() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    linked = set(re.findall(r"\]\(references/([A-Za-z0-9._-]+)\)", text))
+    on_disk = {p.name for p in (SKILL_DIR / "references").glob("*.md")}
+    assert on_disk == set(_REFERENCES), f"unexpected reference files: {on_disk}"
+    assert linked == set(_REFERENCES), f"unlinked: {sorted(set(_REFERENCES) - linked)}"
+
+
+def test_no_reference_link_is_dead() -> None:
+    for path in (SKILL_DIR / "references").glob("*.md"):
+        for target in re.findall(r"\]\(([A-Za-z0-9._-]+\.md)\)", path.read_text(encoding="utf-8")):
+            assert (SKILL_DIR / "references" / target).is_file(), f"{path.name} -> {target}"
+
+
+def test_skill_has_a_specific_tasks_index() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "## Specific tasks" in text
+    tail = text.split("## Specific tasks", 1)[1]
+    assert tail.count("](references/") >= 9

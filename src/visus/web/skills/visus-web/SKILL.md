@@ -157,3 +157,18 @@ Automate <task> on <url> using the `visus` CLI.
 Run `visus --help` and `visus <command> --help` for the available commands.
 Start with `visus session start <url>`, then `visus list-fields`.
 ```
+
+## Specific tasks
+
+* **Session daemon lifecycle** [references/cli-session.md](references/cli-session.md)
+* **Targeting an element** [references/cli-targeting.md](references/cli-targeting.md)
+* **Every command** [references/cli-commands.md](references/cli-commands.md)
+* **JSON, exit codes, piping** [references/cli-json-and-piping.md](references/cli-json-and-piping.md)
+* **The interactive REPL** [references/cli-repl.md](references/cli-repl.md)
+* **Quoting on Windows** [references/windows-shell.md](references/windows-shell.md)
+* **The MCP server** [references/mcp-tools.md](references/mcp-tools.md)
+* **OCR and image matching** [references/vision.md](references/vision.md)
+* **Tracing and HTML reports** [references/tracing-reports.md](references/tracing-reports.md)
+* **The pytest plugin** [references/pytest-plugin.md](references/pytest-plugin.md)
+* **Troubleshooting** [references/troubleshooting.md](references/troubleshooting.md)
+* **The Python API** [references/library-api.md](references/library-api.md)

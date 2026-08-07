@@ -9,6 +9,7 @@ none is running) and the stdin read loop.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from visus.web.cli import session_client
@@ -201,7 +202,9 @@ def dispatch(line: str, send: SendFn) -> str:
             accept = not (rest and rest[0].lower() in ("dismiss", "cancel", "no"))
             return str(send("dialog", {"accept": accept, "prompt_text": None}))
         if cmd == "screenshot":
-            args = {"path": rest[0]} if rest else {}
+            # Resolve the path against the CLIENT's cwd (not the daemon's) so the
+            # PNG lands where the user is, mirroring `visus session-screenshot`.
+            args = {"path": str(Path(rest[0]).resolve())} if rest else {}
             return f"saved {send('screenshot', args)}"
         if cmd == "clear":
             return str(send("clear_highlights", {}))

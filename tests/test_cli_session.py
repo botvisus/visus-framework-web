@@ -635,6 +635,21 @@ def test_dispatch_goto_text_screenshot() -> None:
     assert "saved /tmp/shot.png" in console.dispatch("screenshot", send)
 
 
+def test_dispatch_screenshot_resolves_the_path_against_the_client_cwd() -> None:
+    """The daemon's cwd is not the user's; a relative path must be resolved here."""
+    calls, send = _recording_send()
+    out = console.dispatch("screenshot shots/out.png", send)
+    assert "saved" in out
+    op, args = calls[-1]
+    assert op == "screenshot"
+    assert args == {"path": str(Path("shots/out.png").resolve())}
+    assert Path(args["path"]).is_absolute()
+
+    # No argument still means "let the daemon use its default name".
+    console.dispatch("screenshot", send)
+    assert calls[-1][1] == {}
+
+
 def test_render_value_keeps_null_and_empty_apart() -> None:
     assert console.render_value({"value": "hi", "present": True}) == "hi"
     assert console.render_value({"value": "", "present": True}) == "(empty)"

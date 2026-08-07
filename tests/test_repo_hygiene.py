@@ -104,3 +104,49 @@ def test_pre_commit_hooks_are_local_only() -> None:
         "remote hook repos would need a network clone and could pin a different "
         "ruff/mypy than the CI gates"
     )
+
+
+DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
+
+FULL_GATE = (
+    "uv run ruff check src tests scripts",
+    "uv run mypy",
+    "uv run pytest -q --cov-fail-under=90 --cov-report=json",
+    "uv run python scripts/check_coverage.py",
+)
+
+
+def test_dependabot_watches_pip_and_github_actions() -> None:
+    config = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
+    assert config["version"] == 2
+    ecosystems = {update["package-ecosystem"] for update in config["updates"]}
+    assert {"pip", "github-actions"} <= ecosystems
+
+
+def test_the_repo_hygiene_documents_exist() -> None:
+    for name in ("CONTRIBUTING.md", "SECURITY.md", "RELEASING.md"):
+        path = REPO_ROOT / name
+        assert path.is_file(), f"{name} is missing"
+        assert path.read_text(encoding="utf-8").strip(), f"{name} is empty"
+
+
+def test_contributing_documents_the_full_gate_verbatim() -> None:
+    text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for command in FULL_GATE:
+        assert command in text, f"CONTRIBUTING.md does not document `{command}`"
+
+
+def test_release_runbook_names_both_version_strings() -> None:
+    text = (REPO_ROOT / "RELEASING.md").read_text(encoding="utf-8")
+    assert "pyproject.toml" in text
+    assert "src/visus/web/__init__.py" in text, (
+        "the version is duplicated there (line 17) — a release that bumps only "
+        "pyproject.toml ships a package whose `visus version` lies"
+    )
+    assert "workflow_dispatch" in text, "the runbook must state that dispatch does not publish"
+
+
+def test_security_policy_points_at_a_private_channel() -> None:
+    text = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert "security/advisories/new" in text
+    assert "do not open a public issue" in text.lower()

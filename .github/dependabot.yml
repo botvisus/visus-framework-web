@@ -1,0 +1,32 @@
+version: 2
+
+updates:
+  # Python dependencies are declared in pyproject.toml (PEP 621 + optional-dependencies).
+  # NOTE: `selenium>=4.38,<5` is a range, so Dependabot will only open a PR when a
+  # release falls OUTSIDE it. Rolling Selenium within the range is a manual step —
+  # see RELEASING.md, "Rolling Selenium".
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      dev-tooling:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "pre-commit"
+          - "build"
+          - "hatchling"
+          - "tomli"
+          - "pyyaml"
+
+  # Pinned action majors in ci.yml and publish.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5

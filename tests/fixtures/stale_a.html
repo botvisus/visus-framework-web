@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+  <head><title>stale A</title></head>
+  <body>
+    <h1 id="amarker">Page A</h1>
+
+    <!-- Three leading inputs so the nameless button below lands at field INDEX 3. -->
+    <input id="a_one" placeholder="one" />
+    <input id="a_two" placeholder="two" />
+    <input id="a_three" placeholder="three" />
+
+    <!-- No id / name / test hook / aria-label AND no accessible name (empty
+         content), so bundle.js bestLocator falls all the way through to the
+         minimal-CSS tier and emits the GENERIC selector `button.btn.primary`.
+         The same generic selector also matches a DIFFERENT button on page B —
+         which is exactly how a stale index used to click the wrong element. -->
+    <button class="btn primary" style="width:120px;height:32px;"
+            onclick="document.body.dataset.clicked='A'"></button>
+
+    <!-- Navigating by CLICKING this link is a JS/DOM navigation: it never goes
+         through the daemon's `goto` op, so only the URL stamp can catch it. -->
+    <a id="tob" href="stale_b.html">Go to B</a>
+  </body>
+</html>

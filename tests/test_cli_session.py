@@ -1905,6 +1905,86 @@ def test_handle_real_drag(base_url: str) -> None:
         h.close()
 
 
+# ---------------------------------------------------------------------------
+# Field-cache staleness contract
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.browser
+def test_index_targeting_refuses_after_a_js_driven_navigation(base_url: str) -> None:
+    """A cached index must never re-resolve against a page it was not captured on.
+
+    The two fixtures share the generic fallback selector `button.btn.primary`, so
+    before this fix `click <index>` returned "clicked" having hit page B's button.
+    """
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/stale_a.html"
+    )
+    try:
+        fields = h.handle("list_fields", {"highlight": False})["result"]["fields"]
+        by_locator = {f["locator"]: f["index"] for f in fields}
+        assert "button.btn.primary" in by_locator, by_locator
+        btn_idx = by_locator["button.btn.primary"]
+        link_idx = by_locator["#tob"]
+
+        # Navigate by CLICKING the link: a JS/DOM navigation that never reaches
+        # the `goto` op, so only the URL stamp can catch it.
+        assert h.handle("click", {"index": link_idx})["ok"] is True
+        assert h.handle(
+            "wait", {"selector": "#bmarker", "state": "visible", "timeout": 5000}
+        )["result"] == "element is visible"
+
+        resp = h.handle("click", {"index": btn_idx})
+        assert resp["ok"] is False
+        assert "StaleFieldIndexError" in resp["error"]
+        assert "run list-fields again" in resp["error"]
+
+        # Proof the risk was real: the stale selector DOES match an element here,
+        # and it was not clicked.
+        assert h.handle("count", {"selector": "button.btn.primary"})["result"] == 1
+        clicked = h.handle(
+            "eval", {"expression": "() => document.body.dataset.clicked || ''"}
+        )["result"]["result"]
+        assert clicked == "", f"a stale index clicked the wrong element: {clicked!r}"
+
+        # A fresh list_fields re-stamps and the SAME selector is a different index.
+        fresh = h.handle("list_fields", {"highlight": False})["result"]["fields"]
+        fresh_by_locator = {f["locator"]: f["index"] for f in fresh}
+        assert fresh_by_locator["button.btn.primary"] != btn_idx
+        assert h.handle(
+            "click", {"index": fresh_by_locator["button.btn.primary"]}
+        )["ok"] is True
+        assert h.handle(
+            "eval", {"expression": "() => document.body.dataset.clicked || ''"}
+        )["result"]["result"] == "B"
+    finally:
+        h.close()
+
+
+def test_fields_stale_predicate() -> None:
+    """fields_stale() is the single source of truth PLAN 4's page footer reads."""
+    h = session_server.SessionHandler(engine="chrome", headless=True)
+    assert h.fields_stale() is True  # no browser, no cache
+
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    assert h.fields_stale() is True  # browser up, but nothing cached yet
+    h.handle("list_fields", {})
+    assert h.fields_stale() is False
+    assert h._fields_url == page.url
+    page.url = "http://elsewhere.test/"
+    assert h.fields_stale() is True
+
+
+def test_invalidate_fields_drops_cache_and_stamp() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("list_fields", {})
+    assert h._fields and h._fields_url is not None
+    h._invalidate_fields()
+    assert h._fields == [] and h._fields_url is None
+
+
 def test_cli_tabs_and_tab(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

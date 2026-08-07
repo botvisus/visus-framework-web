@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <head><title>stale B</title></head>
+  <body>
+    <h1 id="bmarker">Page B</h1>
+
+    <!-- Only ONE leading input, so `button.btn.primary` sits at field index 1
+         here and at index 3 on page A: the same cached index means two
+         different buttons. -->
+    <input id="b_first" placeholder="first" />
+
+    <!-- Same generic fallback selector as page A's button, different action. -->
+    <button class="btn primary" style="width:120px;height:32px;"
+            onclick="document.body.dataset.clicked='B'"></button>
+
+    <a id="toa" href="stale_a.html">Back to A</a>
+  </body>
+</html>

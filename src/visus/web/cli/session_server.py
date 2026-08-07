@@ -71,6 +71,17 @@ def make_locator(
     raise ValueError("provide one of: index, role, text, selector")
 
 
+class StaleFieldIndexError(RuntimeError):
+    """Raised when a cached field index no longer belongs to the current page.
+
+    Index targeting re-resolves a stored selector against whatever page is loaded
+    now. Generated selectors intentionally fall back to generic forms
+    (``button.btn.primary``, ``input[type="email"]``, a bare tag), each of which
+    matches *something* on a different page — so without this guard a stale index
+    clicks the wrong element and reports success.
+    """
+
+
 class SessionHandler:
     """Holds a live browser/context/page and dispatches ops to page operations.
 
@@ -97,6 +108,7 @@ class SessionHandler:
         self._context: Context | None = None
         self._page: Page | None = None
         self._fields: list[Field] = []
+        self._fields_url: str | None = None
         self._known_handles: list[str] = []
         self._active_handle: str | None = None
 
@@ -165,7 +177,25 @@ class SessionHandler:
         self._browser = None
         self._context = None
         self._page = None
+        self._invalidate_fields()
+
+    def _invalidate_fields(self) -> None:
+        """Drop the cached field list and its page stamp — index targeting is void."""
         self._fields = []
+        self._fields_url = None
+
+    def fields_stale(self) -> bool:
+        """True when cached field indexes no longer address the current page.
+
+        The single source of truth for staleness: never raises, so a status/footer
+        caller can read it unconditionally.
+        """
+        if self._browser is None or not self._fields or self._fields_url is None:
+            return True
+        try:
+            return self.page().url != self._fields_url
+        except Exception:  # noqa: BLE001 — an unreadable page is a stale page
+            return True
 
     def context(self) -> Context:
         """The browser context (shared with the active page) — cookies live here.
@@ -189,6 +219,13 @@ class SessionHandler:
                 f"field index {index} out of range "
                 f"(have {len(self._fields)}; run list_fields first)"
             )
+        if self._fields_url is not None:
+            current = self.page().url
+            if current != self._fields_url:
+                raise StaleFieldIndexError(
+                    f"field indexes were captured on {self._fields_url}, "
+                    f"page is now {current} — run list-fields again"
+                )
         field = self._fields[index]
         root: Any = self.page()
         for sel in field.frame:
@@ -236,10 +273,13 @@ class SessionHandler:
         kinds = args.get("kinds")
         include_hidden = bool(args.get("include_hidden", False))
         highlight = bool(args.get("highlight", True))
-        fields = self.page().list_fields(
+        page = self.page()
+        fields = page.list_fields(
             kinds=kinds, include_hidden=include_hidden, highlight=highlight
         )
         self._fields = list(fields)
+        # Stamp the page identity so a later index op can tell the page moved.
+        self._fields_url = page.url
         return {"fields": [f.to_dict() for f in fields]}
 
     def _op_click(self, args: dict[str, Any]) -> str:

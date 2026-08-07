@@ -926,10 +926,11 @@ visus-framework-web/
 │   ├── vision/                 # OCR + image matching ([vision] extra)
 │   ├── backends/               # Selenium engine (all selenium.* confined here) + browser drivers
 │   ├── cli/                    # the `visus` CLI + persistent session daemon
+│   ├── skills/visus-web/       # the shipped agent skill (installed by `visus install --skills`)
 │   ├── mcp/                    # the visus-web-mcp server (45 tools)
 │   └── observability/          # run recording + HTML report rendering
 ├── examples/                   # demo_rpa.py, login.py, login_rpa.py, login_mcp.py, dolar.py
-├── skills/                     # using-visus-web, developing-visus-web (agent/contributor guides)
+├── .claude/skills/             # developing-visus-web (contributor guide, not shipped)
 ├── tests/                      # pytest suite (parallel, real headless-Chrome integration)
 ├── TESTING.md
 ├── LICENSE
@@ -949,9 +950,10 @@ uv run pytest -q          # parallel (xdist), real headless-Chrome integration t
 uv run ruff check src tests && uv run mypy
 ```
 
-See [`TESTING.md`](TESTING.md) for the test matrix (including the Edge IE-mode end-to-end tests) and
-the `skills/` directory for the agent-facing usage playbook (`using-visus-web`) and contributor guide
-(`developing-visus-web`).
+See [`TESTING.md`](TESTING.md) for the test matrix (including the Edge IE-mode end-to-end tests),
+`.claude/skills/developing-visus-web/` for the contributor guide, and
+`src/visus/web/skills/visus-web/` for the agent-facing playbook that
+`visus install --skills` copies into your repo.
 
 ---
 

@@ -18,6 +18,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 |---|---|
 | `visus session start [URL] --engine <e> --headless` | Start the persistent browser daemon (headed by default). |
 | `visus session stop` | Stop the session (closes the browser). |
+| `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
 | `visus console [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 

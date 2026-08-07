@@ -328,6 +328,19 @@ def session_stop() -> None:
     typer.echo(session_client.stop())
 
 
+@session_app.command("kill")
+def session_kill() -> None:
+    """Force-clear a wedged session: terminate the daemon and delete its state.
+
+    Use when `visus session start` reports a timeout or `visus session stop`
+    cannot reach the daemon — those paths cannot recover a process that was
+    killed mid-flight and left `.visus/session.json.lock` behind.
+    """
+    from visus.web.cli import session_client
+
+    typer.echo(session_client.kill())
+
+
 @session_app.command("status")
 def session_status(
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),

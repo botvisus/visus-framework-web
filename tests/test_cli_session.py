@@ -1197,6 +1197,49 @@ def _exited_pid() -> int:
     return proc.pid
 
 
+def test_kill_removes_json_and_lock_and_reports(tmp_path: Path) -> None:
+    sf = _write_session(tmp_path, {"pid": _exited_pid(), "port": 2, "token": "t"})
+    lock = sf.with_name(sf.name + ".lock")
+    lock.write_text("999999", encoding="utf-8")
+    msg = session_client.kill(start_dir=tmp_path)
+    assert not sf.exists() and not lock.exists()
+    assert "session.json" in msg and "session.json.lock" in msg
+
+
+def test_kill_removes_an_orphaned_lock_with_no_session_file(tmp_path: Path) -> None:
+    """The wedge case: the json was cleaned, the lock was not."""
+    visus = tmp_path / ".visus"
+    visus.mkdir(parents=True)
+    lock = visus / "session.json.lock"
+    lock.write_text(str(_exited_pid()), encoding="utf-8")
+    msg = session_client.kill(start_dir=tmp_path)
+    assert not lock.exists()
+    assert "session.json.lock" in msg
+
+
+def test_kill_with_nothing_to_remove(tmp_path: Path) -> None:
+    assert session_client.kill(start_dir=tmp_path) == "no session state to remove"
+
+
+def test_kill_terminates_a_live_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    killed: list[int] = []
+    sf = _write_session(tmp_path, {"pid": 4242, "port": 2, "token": "t"})
+    sf.with_name(sf.name + ".lock").write_text("4242", encoding="utf-8")
+    monkeypatch.setattr(session_client, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(session_client, "_terminate", killed.append)
+    msg = session_client.kill(start_dir=tmp_path)
+    assert killed == [4242]
+    assert "killed daemon pid 4242" in msg
+
+
+def test_cli_session_kill(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_client, "kill", lambda: "removed session.json")
+    r = runner.invoke(app, ["session", "kill"])
+    assert r.exit_code == 0 and "removed session.json" in r.output
+
+
 def test_claim_lock_reclaims_a_lock_whose_owner_is_dead(tmp_path: Path) -> None:
     """A `kill -9`'d daemon leaves its lock behind; the next daemon must reclaim it."""
     import os as _os

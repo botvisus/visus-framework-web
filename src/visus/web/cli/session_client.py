@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -236,3 +237,80 @@ def status(*, start_dir: str | Path | None = None) -> dict[str, Any] | None:
     if isinstance(result, dict):
         merged.update(result)
     return merged
+
+
+def _find_lock_file(start_dir: str | Path | None = None) -> Path | None:
+    """Search upward from *start_dir* for ``.visus/session.json.lock`` (git-style).
+
+    A wedged project has the LOCK but no session file, so the lock needs its own
+    discovery walk — :func:`_find_session_file` would return ``None``.
+    """
+    cur = Path(start_dir) if start_dir is not None else Path.cwd()
+    cur = cur.resolve()
+    for d in [cur, *cur.parents]:
+        candidate = d / ".visus" / "session.json.lock"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _terminate(pid: int) -> None:
+    """Best-effort terminate of a daemon process (``taskkill`` / ``SIGTERM``)."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10
+            )
+        except Exception:
+            pass
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        pass
+
+
+def kill(*, start_dir: str | Path | None = None) -> str:
+    """Force-clear this project's session state. Returns a status message.
+
+    The escape hatch for a wedged daemon: ``stop()`` needs a reachable socket and
+    ``start()`` refuses while a lock exists, so neither can recover a process that
+    was killed mid-flight. ``kill`` terminates the recorded pid when it is still
+    alive and deletes ``session.json`` and ``session.json.lock`` unconditionally.
+    """
+    removed: list[str] = []
+    pid = -1
+
+    sf = _find_session_file(start_dir)
+    if sf is not None:
+        try:
+            info: dict[str, Any] = json.loads(sf.read_text(encoding="utf-8"))
+            pid = int(info.get("pid", -1))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pid = -1
+        lock_beside = sf.with_name(sf.name + ".lock")
+        had_lock = lock_beside.is_file()
+        _cleanup(sf)  # removes the session file AND the lock beside it
+        removed.append(sf.name)
+        if had_lock:
+            removed.append(lock_beside.name)
+
+    lock = _find_lock_file(start_dir)
+    if lock is not None:
+        if pid <= 0:
+            try:
+                pid = int(lock.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                pid = -1
+        try:
+            lock.unlink()
+            removed.append(lock.name)
+        except OSError:
+            pass
+
+    if pid > 0 and _pid_alive(pid):
+        _terminate(pid)
+        return f"killed daemon pid {pid}; removed {', '.join(removed) or 'nothing'}"
+    if not removed:
+        return "no session state to remove"
+    return f"removed {', '.join(removed)}"

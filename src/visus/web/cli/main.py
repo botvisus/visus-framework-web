@@ -318,6 +318,32 @@ def _send(op: str, args: dict[str, Any] | None = None) -> Any:
         output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
 
 
+def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Send an op and return the daemon's full envelope, mapping failures to Exit(1).
+
+    Commands that change the page use this so they can print ``### Code`` and
+    ``### Page``; plain reads keep using :func:`_send`, whose bare value pipes
+    cleanly.
+
+    Mirrors ALL THREE of ``_send``'s exception handlers (not just
+    ``SessionError``) — a mutating command hitting a socket timeout or a
+    corrupt reply must exit(1) cleanly too, not leak a raw traceback.
+    """
+    from visus.web.cli import session_client
+
+    payload = dict(args or {})
+    if output.snapshot_sink():
+        payload["snapshot"] = True
+    try:
+        return session_client.send_envelope(op, payload)
+    except session_client.SessionError as exc:
+        output.emit_error(f"error: {exc}")
+    except _json.JSONDecodeError as exc:
+        output.emit_error(f"error: daemon sent a malformed response — {exc}")
+    except OSError as exc:
+        output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
+
+
 def _format_fields(fields: list[dict[str, Any]]) -> str:
     from visus.web.cli.console import format_fields
 
@@ -439,7 +465,7 @@ def click(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Click a field by index or by --selector/--role/--text."""
-    output.emit(_send("click", _target_args(index, selector, role, name, text)))
+    output.emit_envelope(_send_env("click", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -460,7 +486,7 @@ def fill(
     if fill_value is None:
         output.emit_error("error: no text to fill — use `visus fill <index> <text>` or `--value`")
     args["text"] = fill_value
-    output.emit(_send("fill", args))
+    output.emit_envelope(_send_env("fill", args))
 
 
 @app.command()
@@ -471,7 +497,7 @@ def check(
     name: str = typer.Option(None, "--name"),
 ) -> None:
     """Check a checkbox/radio field."""
-    output.emit(_send("check", _target_args(index, selector, role, name, None)))
+    output.emit_envelope(_send_env("check", _target_args(index, selector, role, name, None)))
 
 
 @app.command()
@@ -482,7 +508,7 @@ def uncheck(
     name: str = typer.Option(None, "--name"),
 ) -> None:
     """Uncheck a checkbox field."""
-    output.emit(_send("uncheck", _target_args(index, selector, role, name, None)))
+    output.emit_envelope(_send_env("uncheck", _target_args(index, selector, role, name, None)))
 
 
 @app.command()
@@ -505,7 +531,7 @@ def select(
             "error: no option value — use `visus select <index> <value>` or `--value`"
         )
     args["value"] = val
-    output.emit(_send("select", args))
+    output.emit_envelope(_send_env("select", args))
 
 
 @app.command()
@@ -526,14 +552,14 @@ def press(
     if k is None:
         output.emit_error("error: no key — use `visus press <index> <key>` or `--key`")
     args["key"] = k
-    output.emit(_send("press", args))
+    output.emit_envelope(_send_env("press", args))
 
 
 @app.command()
 def goto(url: str = typer.Argument(..., help="URL to navigate to.")) -> None:
     """Navigate the session's page to a URL."""
-    result = _send("goto", {"url": url})
-    output.emit(result, table=f"navigated to {result}")
+    env = _send_env("goto", {"url": url})
+    output.emit_envelope(env, table=f"navigated to {env.get('result')}")
 
 
 @app.command("get-text")
@@ -606,9 +632,10 @@ def tab(
     index: int = typer.Argument(None, help="Tab/window index from `visus tabs` (omit = newest)."),
 ) -> None:
     """Switch the session to a tab/window by index (or the newest if omitted)."""
-    result = _send("tab", {"index": index})
-    output.emit(
-        result, table=f"switched to tab {result['active']}: {str(result.get('title', ''))!r}"
+    env = _send_env("tab", {"index": index})
+    result = env.get("result") or {}
+    output.emit_envelope(
+        env, table=f"switched to tab {result['active']}: {str(result.get('title', ''))!r}"
     )
 
 
@@ -620,22 +647,22 @@ def tab(
 @app.command()
 def back() -> None:
     """Navigate back in the session's history."""
-    result = _send("back", {})
-    output.emit(result, table=f"went back to {result}")
+    env = _send_env("back", {})
+    output.emit_envelope(env, table=f"went back to {env.get('result')}")
 
 
 @app.command()
 def forward() -> None:
     """Navigate forward in the session's history."""
-    result = _send("forward", {})
-    output.emit(result, table=f"went forward to {result}")
+    env = _send_env("forward", {})
+    output.emit_envelope(env, table=f"went forward to {env.get('result')}")
 
 
 @app.command()
 def reload() -> None:
     """Reload the session's current page."""
-    result = _send("reload", {})
-    output.emit(result, table=f"reloaded {result}")
+    env = _send_env("reload", {})
+    output.emit_envelope(env, table=f"reloaded {env.get('result')}")
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +750,7 @@ def hover(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Hover over a field by index or by --selector/--role/--text."""
-    output.emit(_send("hover", _target_args(index, selector, role, name, text)))
+    output.emit_envelope(_send_env("hover", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -735,7 +762,7 @@ def dblclick(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Double-click a field by index or by --selector/--role/--text."""
-    output.emit(_send("dblclick", _target_args(index, selector, role, name, text)))
+    output.emit_envelope(_send_env("dblclick", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -747,7 +774,7 @@ def focus(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Focus a field by index or by --selector/--role/--text."""
-    output.emit(_send("focus", _target_args(index, selector, role, name, text)))
+    output.emit_envelope(_send_env("focus", _target_args(index, selector, role, name, text)))
 
 
 @app.command("clear-input")
@@ -759,7 +786,7 @@ def clear_input(
     text: str = typer.Option(None, "--text"),
 ) -> None:
     """Clear an input field's value (distinct from `clear`, which removes highlights)."""
-    output.emit(_send("clear_input", _target_args(index, selector, role, name, text)))
+    output.emit_envelope(_send_env("clear_input", _target_args(index, selector, role, name, text)))
 
 
 @app.command()
@@ -785,7 +812,7 @@ def drag(
         output.emit_error(
             "error: provide a drag target — `<target_index>`, --to-selector, or --to-index"
         )
-    output.emit(_send("drag", args))
+    output.emit_envelope(_send_env("drag", args))
 
 
 # Module-level singleton default (B008: a function call cannot be a mutable
@@ -808,7 +835,7 @@ def upload(
     args = _target_args(index, selector, role, name, text)
     # Resolve paths against the CLIENT's cwd so the daemon receives absolute paths.
     args["paths"] = [str(Path(p).resolve()) for p in paths]
-    output.emit(_send("upload", args))
+    output.emit_envelope(_send_env("upload", args))
 
 
 # ---------------------------------------------------------------------------
@@ -870,8 +897,11 @@ def tab_new(
     url: str = typer.Argument(None, help="Optional URL to open in the new tab."),
 ) -> None:
     """Open a new tab/window (optionally at URL) and switch the session to it."""
-    result = _send("tab_new", {"url": url})
-    output.emit(result, table=f"opened tab {result['index']}: {str(result.get('title', ''))!r}")
+    env = _send_env("tab_new", {"url": url})
+    result = env.get("result") or {}
+    output.emit_envelope(
+        env, table=f"opened tab {result['index']}: {str(result.get('title', ''))!r}"
+    )
 
 
 @app.command("tab-close")
@@ -879,16 +909,18 @@ def tab_close(
     index: int = typer.Argument(None, help="Tab index to close (omit = the active tab)."),
 ) -> None:
     """Close a tab/window by index (or the active one if omitted)."""
-    result = _send("tab_close", {"index": index})
+    env = _send_env("tab_close", {"index": index})
+    result = env.get("result") or {}
     if result.get("remaining", 0) == 0:
-        # PLAN 3 Task 7 split this into two honest branches — keep both.
+        # Both branches are PLAN 3 Task 7's honest message — do NOT collapse them
+        # back to the unconditional "session stopped", which was the lie B4 fixed.
         if result.get("session_stopped"):
-            output.emit(result, table="closed the last tab — session stopped")
+            output.emit_envelope(env, table="closed the last tab — session stopped")
         else:
-            output.emit(result, table="closed the last tab — the browser is closed")
+            output.emit_envelope(env, table="closed the last tab — the browser is closed")
         return
-    output.emit(
-        result, table=f"closed tab {result['closed']} ({result['remaining']} remaining)"
+    output.emit_envelope(
+        env, table=f"closed tab {result['closed']} ({result['remaining']} remaining)"
     )
 
 
@@ -905,7 +937,7 @@ def dialog(
     prompt_text: str = typer.Option(None, "--prompt-text", help="Text for a prompt() dialog."),
 ) -> None:
     """Handle the next pending dialog (alert/confirm/prompt)."""
-    output.emit(_send("dialog", {"accept": accept, "prompt_text": prompt_text}))
+    output.emit_envelope(_send_env("dialog", {"accept": accept, "prompt_text": prompt_text}))
 
 
 # ---------------------------------------------------------------------------
@@ -940,13 +972,13 @@ def add_cookies(
         output.emit_error(f"error: invalid JSON — {exc}")
     if not isinstance(parsed, list):
         output.emit_error("error: expected a JSON list of cookie objects")
-    output.emit(_send("add_cookies", {"cookies": parsed}))
+    output.emit_envelope(_send_env("add_cookies", {"cookies": parsed}))
 
 
 @app.command("clear-cookies")
 def clear_cookies() -> None:
     """Clear all cookies in the session's context."""
-    output.emit(_send("clear_cookies", {}))
+    output.emit_envelope(_send_env("clear_cookies", {}))
 
 
 # ---------------------------------------------------------------------------
@@ -967,10 +999,11 @@ def eval_js(
             parsed_arg = _json.loads(arg)
         except _json.JSONDecodeError:
             parsed_arg = arg  # treat as a plain string when not valid JSON
-    result = _send("eval", {"expression": expression, "arg": parsed_arg})
+    env = _send_env("eval", {"expression": expression, "arg": parsed_arg})
     if as_json:
         output.set_mode(as_json=True)
-    output.emit(result.get("result"))
+    value = (env.get("result") or {}).get("result")
+    output.emit_envelope(env, table="" if value is None else str(value))
 
 
 # ---------------------------------------------------------------------------

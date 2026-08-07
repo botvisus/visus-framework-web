@@ -12,6 +12,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -86,3 +87,96 @@ def test_missing_target_error_exits_1_without_writing_stdout_value(
     r = runner.invoke(app, ["get-text"])
     assert r.exit_code == 1
     assert "never-called" not in r.output
+
+
+def _envelope(monkeypatch: pytest.MonkeyPatch, env: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Point session_client.send_envelope at a canned envelope; record the calls."""
+    calls: list[tuple[str, Any]] = []
+
+    def fake(op: str, args: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+        calls.append((op, args))
+        return env
+
+    monkeypatch.setattr(session_client, "send_envelope", fake)
+    return calls
+
+
+def test_click_prints_the_page_footer(monkeypatch: pytest.MonkeyPatch) -> None:
+    _envelope(
+        monkeypatch,
+        {
+            "ok": True,
+            "result": "clicked",
+            "page": {"url": "http://x/dash", "title": "Dash", "fields_stale": False},
+        },
+    )
+    r = runner.invoke(app, ["click", "3"])
+    assert r.exit_code == 0
+    assert "clicked" in r.output
+    assert "### Page" in r.output
+    assert "- URL: http://x/dash" in r.output
+    assert "- Title: Dash" in r.output
+
+
+def test_raw_click_prints_only_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    _envelope(
+        monkeypatch,
+        {"ok": True, "result": "clicked", "page": {"url": "u", "title": "t"}},
+    )
+    r = runner.invoke(app, ["--raw", "click", "3"])
+    assert r.exit_code == 0
+    assert r.output == "clicked\n"
+
+
+def test_json_click_emits_the_whole_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = {"ok": True, "result": "clicked", "page": {"url": "u", "title": "t"}}
+    _envelope(monkeypatch, env)
+    r = runner.invoke(app, ["--json", "click", "3"])
+    assert r.exit_code == 0
+    assert json.loads(r.output) == env
+
+
+def test_goto_keeps_its_human_line_and_gains_the_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _envelope(
+        monkeypatch,
+        {
+            "ok": True,
+            "result": "http://x/dash",
+            "page": {"url": "http://x/dash", "title": "Dash", "fields_stale": False},
+        },
+    )
+    r = runner.invoke(app, ["goto", "http://x/dash"])
+    assert r.exit_code == 0
+    assert "navigated to http://x/dash" in r.output
+    assert "### Page" in r.output
+
+
+def test_snapshot_flag_is_forwarded_to_the_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _envelope(
+        monkeypatch, {"ok": True, "result": "clicked", "page": {"url": "u", "title": "t"}}
+    )
+    assert runner.invoke(app, ["--snapshot", "click", "3"]).exit_code == 0
+    assert calls[-1][1]["snapshot"] is True
+    assert runner.invoke(app, ["click", "3"]).exit_code == 0
+    assert "snapshot" not in calls[-1][1]
+
+
+@pytest.mark.browser
+def test_real_daemon_click_echoes_the_new_page(base_url: str, tmp_path: Path) -> None:
+    """The loop closes: a click that navigates reports the URL it produced."""
+    info = session_client.start_daemon(
+        "chrome", headless=True, url=f"{base_url}/links.html", cwd=tmp_path
+    )
+    assert info["pid"]
+    try:
+        env = session_client.send_envelope(
+            "click", {"target_text": "Go to page two"}, start_dir=tmp_path
+        )
+        assert env["ok"] is True
+        assert env["result"] == "clicked"
+        assert env["page"]["url"].endswith("/page2.html")
+        assert env["page"]["title"] == "page two"
+    finally:
+        session_client.stop(start_dir=tmp_path)

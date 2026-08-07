@@ -26,6 +26,21 @@ from visus.web.cli.main import app
 runner = CliRunner()
 
 
+def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: Any) -> None:
+    """Point BOTH client entry points at one fake.
+
+    `session_client.send` returns only `result`; `send_envelope` returns the whole
+    reply. Mutating commands go through `send_envelope`, plain reads through
+    `send`, so a test that stubs only one of them silently reaches a real socket.
+    """
+    monkeypatch.setattr(session_client, "send", fake)
+    monkeypatch.setattr(
+        session_client,
+        "send_envelope",
+        lambda op, args=None, **_: {"ok": True, "result": fake(op, args)},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
@@ -820,11 +835,7 @@ def test_run_console_gotos_when_session_exists(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         console.session_client, "find_session", lambda d=None: {"pid": 1, "port": 2}
     )
-    monkeypatch.setattr(
-        console.session_client,
-        "send",
-        lambda op, args=None, **kw: sent.append((op, args)) or None,
-    )
+    _patch_client(monkeypatch, lambda op, args=None, **kw: sent.append((op, args)) or None)
     console.run_console(
         "http://dest",
         input_fn=lambda _p: "quit",
@@ -837,7 +848,7 @@ def test_run_console_loop_dispatches_then_quits(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         console.session_client, "find_session", lambda d=None: {"pid": 1, "port": 2}
     )
-    monkeypatch.setattr(console.session_client, "send", lambda op, args=None, **kw: "ok")
+    _patch_client(monkeypatch, lambda op, args=None, **kw: "ok")
     lines = iter(["help", "quit"])
     outputs: list[str] = []
     console.run_console(
@@ -1083,10 +1094,11 @@ def test_cli_send_maps_a_socket_timeout_to_a_clean_exit(
 ) -> None:
     """socket.timeout is an OSError, not a SessionError — it used to traceback."""
 
-    def boom(op: str, args: dict[str, Any] | None = None) -> Any:
+    def boom(op: str, args: dict[str, Any] | None = None, **_: Any) -> Any:
         raise TimeoutError("timed out")
 
     monkeypatch.setattr(session_client, "send", boom)
+    monkeypatch.setattr(session_client, "send_envelope", boom)
     r = runner.invoke(app, ["click", "0"])
     assert r.exit_code == 1
     assert not isinstance(r.exception, TimeoutError), "the raw exception escaped"
@@ -1096,10 +1108,11 @@ def test_cli_send_maps_a_socket_timeout_to_a_clean_exit(
 def test_cli_send_maps_a_corrupt_response_to_a_clean_exit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def boom(op: str, args: dict[str, Any] | None = None) -> Any:
+    def boom(op: str, args: dict[str, Any] | None = None, **_: Any) -> Any:
         raise json.JSONDecodeError("Expecting value", "{oops", 0)
 
     monkeypatch.setattr(session_client, "send", boom)
+    monkeypatch.setattr(session_client, "send_envelope", boom)
     r = runner.invoke(app, ["click", "0"])
     assert r.exit_code == 1
     assert not isinstance(r.exception, json.JSONDecodeError)
@@ -1919,7 +1932,7 @@ def test_cli_list_fields_json(monkeypatch: pytest.MonkeyPatch) -> None:
         captured["args"] = args
         return {"fields": [{"index": 0, "kind": "input", "name": "n", "locator": "#n"}]}
 
-    monkeypatch.setattr(session_client, "send", lambda op, args=None: fake_send(op, args or {}))
+    _patch_client(monkeypatch, lambda op, args=None: fake_send(op, args or {}))
     r = runner.invoke(app, ["list-fields", "--kind", "input,button", "--all", "--json"])
     assert r.exit_code == 0
     assert captured["op"] == "list_fields"
@@ -1949,7 +1962,7 @@ def test_cli_list_fields_blocks_and_no_highlight(monkeypatch: pytest.MonkeyPatch
             ]
         }
 
-    monkeypatch.setattr(session_client, "send", fake_send)
+    _patch_client(monkeypatch, fake_send)
     r = runner.invoke(app, ["list-fields", "--no-highlight"])
     assert r.exit_code == 0
     assert captured["args"]["highlight"] is False
@@ -1963,7 +1976,7 @@ def test_cli_click_by_index(monkeypatch: pytest.MonkeyPatch) -> None:
         captured["op"], captured["args"] = op, args
         return "clicked"
 
-    monkeypatch.setattr(session_client, "send", fake_send)
+    _patch_client(monkeypatch, fake_send)
     r = runner.invoke(app, ["click", "2"])
     assert r.exit_code == 0 and "clicked" in r.output
     assert captured["op"] == "click" and captured["args"] == {"index": 2}
@@ -1971,8 +1984,8 @@ def test_cli_click_by_index(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_cli_click_by_selector(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: captured.update(op=op, args=args) or "clicked"
+    _patch_client(
+        monkeypatch, lambda op, args=None: captured.update(op=op, args=args) or "clicked"
     )
     r = runner.invoke(app, ["click", "--selector", "#go"])
     assert r.exit_code == 0
@@ -1980,7 +1993,7 @@ def test_cli_click_by_selector(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_click_requires_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(session_client, "send", lambda op, args=None: "x")
+    _patch_client(monkeypatch, lambda op, args=None: "x")
     r = runner.invoke(app, ["click"])
     assert r.exit_code == 1
     assert "provide an index" in r.output
@@ -1989,8 +2002,8 @@ def test_cli_click_requires_target(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cli_click_by_role_and_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """--role/--name wire through to the target dict (role re-resolution path)."""
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: captured.update(op=op, args=args) or "ok"
+    _patch_client(
+        monkeypatch, lambda op, args=None: captured.update(op=op, args=args) or "ok"
     )
     r = runner.invoke(app, ["get-text", "--role", "button", "--name", "OK"])
     assert r.exit_code == 0
@@ -2005,8 +2018,8 @@ def test_cli_click_by_role_and_name(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cli_click_by_text_maps_to_target_text(monkeypatch: pytest.MonkeyPatch) -> None:
     """--text becomes a target_text TARGET (never a colliding 'text' key)."""
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: captured.update(op=op, args=args) or "ok"
+    _patch_client(
+        monkeypatch, lambda op, args=None: captured.update(op=op, args=args) or "ok"
     )
     r = runner.invoke(app, ["click", "--text", "Save"])
     assert r.exit_code == 0
@@ -2019,8 +2032,8 @@ def test_cli_fill_keeps_text_value_and_target_text_distinct(
 ) -> None:
     """fill's positional VALUE lands in 'text'; a --selector target stays separate."""
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: captured.update(op=op, args=args) or "ok"
+    _patch_client(
+        monkeypatch, lambda op, args=None: captured.update(op=op, args=args) or "ok"
     )
     r = runner.invoke(app, ["fill", "--selector", "#email", "--value", "hi"])
     assert r.exit_code == 0
@@ -2031,8 +2044,8 @@ def test_cli_fill_keeps_text_value_and_target_text_distinct(
 
 def test_cli_fill_select_press(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
-    monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: calls.append((op, args)) or "ok"
+    _patch_client(
+        monkeypatch, lambda op, args=None: calls.append((op, args)) or "ok"
     )
     # index-first, value-second (intuitive: `visus fill 7 hello`, like `click N`)
     assert runner.invoke(app, ["fill", "1", "hello"]).exit_code == 0
@@ -2047,7 +2060,7 @@ def test_cli_goto_and_get_text(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_send(op: str, args: dict[str, Any] | None = None) -> Any:
         return "http://x" if op == "goto" else "the text"
 
-    monkeypatch.setattr(session_client, "send", fake_send)
+    _patch_client(monkeypatch, fake_send)
     assert "navigated to http://x" in runner.invoke(app, ["goto", "http://x"]).output
     assert "the text" in runner.invoke(app, ["get-text", "0"]).output
 
@@ -2055,7 +2068,7 @@ def test_cli_goto_and_get_text(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cli_check_uncheck_clear_screenshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(session_client, "send", lambda op, args=None: f"did-{op}")
+    _patch_client(monkeypatch, lambda op, args=None: f"did-{op}")
     assert "did-check" in runner.invoke(app, ["check", "0"]).output
     assert "did-uncheck" in runner.invoke(app, ["uncheck", "0"]).output
     assert "did-clear_highlights" in runner.invoke(app, ["clear"]).output
@@ -2068,8 +2081,8 @@ def test_cli_session_screenshot_full_page_and_element(
 ) -> None:
     """--full-page and element targeting reach the daemon (MCP browser_screenshot parity)."""
     calls: list[tuple[str, dict[str, Any]]] = []
-    monkeypatch.setattr(
-        session_client, "send", lambda op, args=None: calls.append((op, args or {})) or "/p.png"
+    _patch_client(
+        monkeypatch, lambda op, args=None: calls.append((op, args or {})) or "/p.png"
     )
     out = tmp_path / "x.png"
 
@@ -2117,10 +2130,11 @@ def test_cli_send_error_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
     subprocess by tests/test_cli_agent_loop.py — CliRunner's stream merging is
     click-version dependent, so only the exit code is asserted here."""
 
-    def boom(op: str, args: dict[str, Any] | None = None) -> Any:
+    def boom(op: str, args: dict[str, Any] | None = None, **_: Any) -> Any:
         raise session_client.SessionError("no live session")
 
     monkeypatch.setattr(session_client, "send", boom)
+    monkeypatch.setattr(session_client, "send_envelope", boom)
     r = runner.invoke(app, ["click", "0"])
     assert r.exit_code == 1
 
@@ -2154,7 +2168,7 @@ def _record(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
             return {"found": True, "x": 10, "y": 20, "confidence": 0.95}
         return f"did-{op}"
 
-    monkeypatch.setattr(session_client, "send", fake_send)
+    _patch_client(monkeypatch, fake_send)
     return calls
 
 
@@ -2195,7 +2209,7 @@ def test_cli_get_text_and_get_attribute_render_the_distinction(
             {"value": None, "present": False},
         ]
     )
-    monkeypatch.setattr(session_client, "send", lambda op, args=None: next(payloads))
+    _patch_client(monkeypatch, lambda op, args=None: next(payloads))
     assert "(empty)" in runner.invoke(app, ["get-text", "0"]).output
     assert "(null)" in runner.invoke(app, ["get-attribute", "href", "0"]).output
 
@@ -2287,9 +2301,8 @@ def test_cli_tab_new_and_close(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_tab_close_last_tab_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        session_client,
-        "send",
+    _patch_client(
+        monkeypatch,
         lambda op, args=None: {"closed": 0, "remaining": 0, "session_stopped": True},
     )
     r = runner.invoke(app, ["tab-close"])
@@ -2300,9 +2313,8 @@ def test_cli_tab_close_last_tab_message_when_session_survives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Never claim the session stopped when it did not."""
-    monkeypatch.setattr(
-        session_client,
-        "send",
+    _patch_client(
+        monkeypatch,
         lambda op, args=None: {"closed": 0, "remaining": 0, "session_stopped": False},
     )
     r = runner.invoke(app, ["tab-close"])
@@ -2382,7 +2394,7 @@ def test_cli_find_image(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
 
 
 def test_cli_find_image_not_found(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(session_client, "send", lambda op, args=None: {"found": False})
+    _patch_client(monkeypatch, lambda op, args=None: {"found": False})
     tpl = tmp_path / "tpl.png"
     tpl.write_bytes(b"x")
     r = runner.invoke(app, ["find-image", str(tpl)])
@@ -2904,7 +2916,7 @@ def test_cli_tabs_and_tab(monkeypatch: pytest.MonkeyPatch) -> None:
             }
         return {"active": 1, "title": "B"}
 
-    monkeypatch.setattr(session_client, "send", lambda op, args=None: fake_send(op, args))
+    _patch_client(monkeypatch, lambda op, args=None: fake_send(op, args))
     r = runner.invoke(app, ["tabs"])
     assert r.exit_code == 0 and "[0]" in r.output and "[1]" in r.output and "*" in r.output
     r2 = runner.invoke(app, ["tab", "1"])

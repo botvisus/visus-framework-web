@@ -167,14 +167,18 @@ def _send_raw(
         return resp
 
 
-def send(
+def send_envelope(
     op: str,
     args: dict[str, Any] | None = None,
     *,
     start_dir: str | Path | None = None,
     timeout: float | None = None,
-) -> Any:
-    """Send an op to the live daemon and return its ``result`` (raises on failure).
+) -> dict[str, Any]:
+    """Send an op and return the daemon's FULL reply envelope.
+
+    The envelope carries ``result`` plus, for a mutating op, ``page`` state, the
+    generated ``code`` line, and the ``snapshot`` file path — everything the CLI
+    needs to print the perception half of the loop. Raises on ``ok: False``.
 
     The socket deadline defaults to :func:`socket_timeout_for` so a long
     ``--timeout`` on the op is not cut short by the transport.
@@ -189,7 +193,18 @@ def send(
     )
     if not resp.get("ok"):
         raise SessionError(str(resp.get("error", "unknown error")))
-    return resp.get("result")
+    return resp
+
+
+def send(
+    op: str,
+    args: dict[str, Any] | None = None,
+    *,
+    start_dir: str | Path | None = None,
+    timeout: float | None = None,
+) -> Any:
+    """Send an op to the live daemon and return its ``result`` (raises on failure)."""
+    return send_envelope(op, args, start_dir=start_dir, timeout=timeout).get("result")
 
 
 def _log_tail(base: Path, *, lines: int = 20) -> str:

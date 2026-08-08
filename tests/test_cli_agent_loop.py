@@ -262,6 +262,41 @@ def test_snapshot_filename_writes_yaml(
     assert str(dest) in r.output
 
 
+def test_output_dir_redirects_the_session_screenshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return (args or {}).get("path", "")
+
+    monkeypatch.setattr(session_client, "send", fake)
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    r = runner.invoke(app, ["--output-dir", str(shots), "session-screenshot"])
+    assert r.exit_code == 0
+    assert captured["args"]["path"] == str((shots / "screenshot.png").resolve())
+
+
+def test_output_dir_is_ignored_for_an_absolute_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return (args or {}).get("path", "")
+
+    monkeypatch.setattr(session_client, "send", fake)
+    explicit = str((tmp_path / "here.png").resolve())
+    r = runner.invoke(
+        app, ["--output-dir", str(tmp_path / "elsewhere"), "session-screenshot", "-o", explicit]
+    )
+    assert r.exit_code == 0
+    assert captured["args"]["path"] == explicit
+
+
 def test_find_renders_matches_with_a_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         session_client,

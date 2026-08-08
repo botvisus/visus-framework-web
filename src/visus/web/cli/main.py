@@ -221,11 +221,12 @@ def screenshot(
     engine: str = "chrome",
 ) -> None:
     """Screenshot a URL to a PNG file."""
+    dest = output.resolve_out(input_path)
     with launch(Engine.from_str(engine), headless=headless) as b:
         p = b.new_page()
         p.goto(url)
-        p.screenshot(path=input_path, full_page=full_page)
-    output.emit(input_path, table=f"saved {input_path}")
+        p.screenshot(path=dest, full_page=full_page)
+    output.emit(dest, table=f"saved {dest}")
 
 
 @app.command()
@@ -235,11 +236,12 @@ def pdf(
     engine: str = "chrome",
 ) -> None:
     """Print a URL to a PDF (Chromium)."""
+    dest = output.resolve_out(input_path)
     with launch(Engine.from_str(engine), headless=True) as b:
         p = b.new_page()
         p.goto(url)
-        p.pdf(path=input_path)
-    output.emit(input_path, table=f"saved {input_path}")
+        p.pdf(path=dest)
+    output.emit(dest, table=f"saved {dest}")
 
 
 @app.command()
@@ -286,10 +288,11 @@ def codegen(
             events = drain(p)
     code = generate_script(url, events)
     if input_path:
-        Path(input_path).write_text(code, encoding="utf-8")
-        output.emit(input_path, table=f"saved {input_path}")
+        dest = Path(output.resolve_out(input_path))
+        dest.write_text(code, encoding="utf-8")
+        output.emit(code, table=f"saved {dest}")
     else:
-        output.emit(code)
+        output.emit(code, table=code)
 
 
 # ---------------------------------------------------------------------------

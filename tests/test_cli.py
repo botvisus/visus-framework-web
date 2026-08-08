@@ -199,9 +199,41 @@ def test_screenshot(tmp_path: pytest.TempPathFactory, base_url: str) -> None:
 
 
 @pytest.mark.browser
+def test_screenshot_relative_path_honours_output_dir(
+    tmp_path: pytest.TempPathFactory, base_url: str
+) -> None:
+    """A relative -o resolves against --output-dir, not the client cwd."""
+    shots = tmp_path / "shots"  # type: ignore[operator]
+    shots.mkdir()
+    r = runner.invoke(
+        app,
+        ["--output-dir", str(shots), "screenshot", f"{base_url}/forms.html", "-o", "page.png"],
+    )
+    assert r.exit_code == 0, r.output
+    landed = shots / "page.png"
+    assert landed.exists(), f"screenshot did not land in --output-dir: {r.output}"
+    assert landed.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.browser
 def test_pdf(tmp_path: pytest.TempPathFactory, base_url: str) -> None:
     out = tmp_path / "s.pdf"  # type: ignore[operator]
     r = runner.invoke(app, ["pdf", f"{base_url}/forms.html", "-o", str(out)])
     assert r.exit_code == 0
     assert out.exists()  # type: ignore[union-attr]
     assert out.read_bytes()[:5] == b"%PDF-"  # type: ignore[union-attr]
+
+
+@pytest.mark.browser
+def test_pdf_relative_path_honours_output_dir(
+    tmp_path: pytest.TempPathFactory, base_url: str
+) -> None:
+    docs = tmp_path / "docs"  # type: ignore[operator]
+    docs.mkdir()
+    r = runner.invoke(
+        app, ["--output-dir", str(docs), "pdf", f"{base_url}/forms.html", "-o", "page.pdf"]
+    )
+    assert r.exit_code == 0, r.output
+    landed = docs / "page.pdf"
+    assert landed.exists(), f"pdf did not land in --output-dir: {r.output}"
+    assert landed.read_bytes()[:5] == b"%PDF-"

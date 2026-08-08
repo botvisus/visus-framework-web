@@ -188,6 +188,30 @@ def test_raw_click_suppresses_the_generated_code(monkeypatch: pytest.MonkeyPatch
     assert r.output == "clicked\n"
 
 
+def test_export_script_writes_the_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = "from visus.web import launch\n"
+    monkeypatch.setattr(
+        session_client, "send", lambda op, args=None: {"script": script, "lines": 1}
+    )
+    dest = tmp_path / "flow.py"
+    r = runner.invoke(app, ["session", "export-script", "-o", str(dest)])
+    assert r.exit_code == 0
+    assert dest.read_text(encoding="utf-8") == script
+    assert "saved" in r.output
+
+
+def test_export_script_raw_prints_the_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = "from visus.web import launch\n"
+    monkeypatch.setattr(
+        session_client, "send", lambda op, args=None: {"script": script, "lines": 1}
+    )
+    r = runner.invoke(app, ["--raw", "session", "export-script"])
+    assert r.exit_code == 0
+    assert r.output == script + "\n"
+
+
 @pytest.mark.browser
 def test_real_daemon_click_echoes_the_new_page(base_url: str, tmp_path: Path) -> None:
     """The loop closes: a click that navigates reports the URL it produced."""

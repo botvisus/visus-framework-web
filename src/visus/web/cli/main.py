@@ -437,6 +437,24 @@ def session_status(
     )
 
 
+@session_app.command("export-script")
+def session_export_script(
+    output_path: str = typer.Option(
+        None, "-o", "--output", help="Write the script here (default: print it)."
+    ),
+) -> None:
+    """Emit a runnable visus.web script from everything this session did."""
+    result = _send("export_script", {})
+    code = str(result.get("script", ""))
+    if output_path:
+        dest = Path(output.resolve_out(output_path))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(code, encoding="utf-8")
+        output.emit(code, table=f"saved {dest} ({result.get('lines', 0)} action(s))")
+        return
+    output.emit(code, table=code)
+
+
 @app.command("list-fields")
 def list_fields(
     kind: str = typer.Option(None, "--kind", help="Comma-separated kinds (e.g. input,button)."),

@@ -847,6 +847,24 @@ class SessionHandler:
                 pass
         return info
 
+    def _op_export_script(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Everything this session did, as a runnable visus.web script.
+
+        The daemon has been the recorder since the first action: each op's
+        generated line was appended to ``_script`` by :meth:`handle`.
+        """
+        body = list(self._script)
+        lines = [
+            "from visus.web import launch",
+            "",
+            "with launch(headless=False) as browser:",
+            "    page = browser.new_page()",
+        ]
+        lines.extend("    " + line for line in body)
+        if not body:
+            lines.append("    pass  # no recorded actions yet")
+        return {"script": "\n".join(lines) + "\n", "lines": len(body)}
+
     def _op_shutdown(self, args: dict[str, Any]) -> str:
         self.close()
         return "shutdown"

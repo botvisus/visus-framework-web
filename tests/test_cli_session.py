@@ -627,6 +627,30 @@ def test_handle_records_a_replayable_script() -> None:
     ]
 
 
+def test_handle_export_script_wraps_the_recorded_lines() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("goto", {"url": "http://x"})
+    h.handle("fill", {"selector": "#u", "text": "ada"})
+    result = h.handle("export_script", {})["result"]
+    assert result["lines"] == 2
+    assert result["script"] == (
+        "from visus.web import launch\n"
+        "\n"
+        "with launch(headless=False) as browser:\n"
+        "    page = browser.new_page()\n"
+        "    page.goto('http://x')\n"
+        "    page.locator('#u').fill('ada')\n"
+    )
+
+
+def test_handle_export_script_with_nothing_recorded_is_still_runnable() -> None:
+    h = _handler_with_fake_page(_FakePage())
+    result = h.handle("export_script", {})["result"]
+    assert result["lines"] == 0
+    assert result["script"].endswith("    pass  # no recorded actions yet\n")
+
+
 def test_handle_status_not_running() -> None:
     h = session_server.SessionHandler(engine="firefox", headless=True)
     status = h.handle("status", {})["result"]

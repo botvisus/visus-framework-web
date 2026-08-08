@@ -307,6 +307,7 @@ Targeting: most commands accept a positional **field index** (from the last `lis
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
+| `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file. |
 | `visus console [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 
 ### Navigation

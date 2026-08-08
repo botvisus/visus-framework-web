@@ -289,7 +289,8 @@ def test_start_daemon_exports_launch_options(
             captured["env"] = kwargs["env"]
 
     monkeypatch.setattr(session_client.subprocess, "Popen", _Popen)
-    monkeypatch.setattr(session_client, "find_session", lambda base: None)
+    # Two positional args: start_daemon passes the resolved session name too.
+    monkeypatch.setattr(session_client, "find_session", lambda base, name=None: None)
     monkeypatch.setattr(session_client, "_socket_open", lambda port: False)
     try:
         session_client.start_daemon(

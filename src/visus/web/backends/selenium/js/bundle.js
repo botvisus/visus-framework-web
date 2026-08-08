@@ -412,13 +412,24 @@
     });
   }
 
-  function snapshot() {
+  function snapshot(opts) {
+    opts = opts || {};
     var roles = ["button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox",
                  "heading", "tab", "menuitem", "option", "switch", "slider", "spinbutton"];
-    var out = [], all = document.querySelectorAll("*");
+    var root = document.body || document.documentElement;
+    if (opts.selector) {
+      root = document.querySelector(opts.selector);
+      if (!root) return [];
+    }
+    var maxDepth = (typeof opts.depth === "number") ? opts.depth : null;
+    var out = [], all = root.querySelectorAll("*");
     for (var i = 0; i < all.length; i++) {
       var e = all[i], r = computeRole(e);
-      if (roles.indexOf(r) >= 0 && isVisible(e)) out.push({ role: r, name: accessibleName(e) });
+      if (roles.indexOf(r) < 0 || !isVisible(e)) continue;
+      var d = 0, p = e.parentNode;
+      while (p && p !== root && p.nodeType === 1) { d++; p = p.parentNode; }
+      if (maxDepth !== null && d > maxDepth) continue;
+      out.push({ role: r, name: accessibleName(e), depth: d });
     }
     return out;
   }

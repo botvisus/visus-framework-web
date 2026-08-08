@@ -222,9 +222,17 @@ class Page:
     def get_by_test_id(self, test_id: str) -> Locator:
         return Locator(self._delegate, (), self._defaults).get_by_test_id(test_id)
 
-    def snapshot(self) -> list[dict]:  # type: ignore[type-arg]
-        """Return the page's interactive elements as a list of {role, name} dicts."""
-        return self._delegate.snapshot()
+    def snapshot(
+        self, selector: str | None = None, *, depth: int | None = None
+    ) -> list[dict]:  # type: ignore[type-arg]
+        """Return the page's interactive elements as ``{role, name, depth}`` dicts.
+
+        ``selector`` scopes the snapshot to one subtree (``page.snapshot("#main")``)
+        and ``depth`` keeps only elements at most N element levels below that root
+        (a direct child is depth 0). Both exist to keep a snapshot of a large page
+        small enough to read.
+        """
+        return self._delegate.snapshot(selector=selector, depth=depth)
 
     def list_fields(
         self,

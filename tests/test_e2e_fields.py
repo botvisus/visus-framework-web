@@ -234,3 +234,36 @@ def test_field_and_field_locator_work_in_iframe_and_shadow(page):
     assert shadow_f.deep is True
     page.field_locator(shadow_f).fill("in-shadow")
     assert page.field_locator(shadow_f).input_value() == "in-shadow"
+
+
+@pytest.mark.browser
+def test_snapshot_scope_and_depth_shrink_the_result(browser, base_url: str) -> None:  # type: ignore[no-untyped-def]
+    page = browser.new_page()
+    page.goto(f"{base_url}/snapshot_tree.html")
+
+    full = page.snapshot()
+    names = {e["name"] for e in full}
+    assert {"Top level", "Nav link", "Main heading", "Deep button", "Footer link"} <= names
+    assert all("depth" in e for e in full)
+
+    scoped = page.snapshot("#main")
+    scoped_names = {e["name"] for e in scoped}
+    assert "Deep button" in scoped_names
+    assert "Main heading" in scoped_names
+    assert "Footer link" not in scoped_names  # scope really excludes the rest
+    assert "Top level" not in scoped_names
+
+    # Inside #main: h2 and the input are direct children (depth 0); the button is
+    # two divs down (depth 2).
+    shallow = page.snapshot("#main", depth=0)
+    assert {e["name"] for e in shallow} == {"Main heading", "Search main"}
+
+    deep_enough = page.snapshot("#main", depth=2)
+    assert "Deep button" in {e["name"] for e in deep_enough}
+
+
+@pytest.mark.browser
+def test_snapshot_of_a_missing_scope_is_empty(browser, base_url: str) -> None:  # type: ignore[no-untyped-def]
+    page = browser.new_page()
+    page.goto(f"{base_url}/snapshot_tree.html")
+    assert page.snapshot("#nope") == []

@@ -632,11 +632,24 @@ class SeleniumPageDelegate:
             alert.dismiss()
         return (message, "dialog")
 
-    def snapshot(self) -> list[dict]:  # type: ignore[type-arg]
-        """Return interactive elements as {role, name} dicts using the __visus bundle."""
+    def snapshot(
+        self, *, selector: str | None = None, depth: int | None = None
+    ) -> list[dict]:  # type: ignore[type-arg]
+        """Return interactive elements as {role, name, depth} dicts using the __visus bundle.
+
+        ``selector`` scopes the walk to one subtree and ``depth`` caps how far
+        below that root an element may sit — the two cheapest ways to shrink a
+        snapshot on a large page.
+        """
         self._activate()
         self._ensure_bundle()
-        return cast(list[dict], self._driver.execute_script("return window.__visus.snapshot();"))  # type: ignore[type-arg]
+        return cast(
+            list[dict],  # type: ignore[type-arg]
+            self._driver.execute_script(
+                "return window.__visus.snapshot(arguments[0]);",
+                {"selector": selector, "depth": depth},
+            ),
+        )
 
     def list_fields(
         self, *, kinds: list[str] | None, include_hidden: bool, highlight: bool

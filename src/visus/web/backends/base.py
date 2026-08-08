@@ -74,7 +74,9 @@ class PageDelegate(Protocol):
     def handle_next_dialog(
         self, *, accept: bool, prompt_text: str | None, timeout_ms: int
     ) -> tuple[str, str]: ...
-    def snapshot(self) -> list[dict]: ...  # type: ignore[type-arg]
+    def snapshot(
+        self, *, selector: str | None, depth: int | None
+    ) -> list[dict]: ...  # type: ignore[type-arg]
     def list_fields(
         self, *, kinds: list[str] | None, include_hidden: bool, highlight: bool
     ) -> list[Field]: ...

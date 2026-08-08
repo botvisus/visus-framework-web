@@ -389,8 +389,10 @@ class AsyncPage:
     async def close(self) -> None:
         await asyncio.to_thread(self._p.close)
 
-    async def snapshot(self) -> list[dict]:  # type: ignore[type-arg]
-        return await asyncio.to_thread(self._p.snapshot)
+    async def snapshot(
+        self, selector: str | None = None, *, depth: int | None = None
+    ) -> list[dict]:  # type: ignore[type-arg]
+        return await asyncio.to_thread(self._p.snapshot, selector, depth=depth)
 
     async def pdf(self, *, path: str | None = None) -> bytes:
         return await asyncio.to_thread(lambda: self._p.pdf(path=path))

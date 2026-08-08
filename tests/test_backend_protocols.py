@@ -95,7 +95,7 @@ class _FakePage:
     def handle_next_dialog(self, *, accept, prompt_text, timeout_ms):
         return ("", "dialog")
 
-    def snapshot(self):
+    def snapshot(self, *, selector=None, depth=None):
         return []
 
     def pdf(self):

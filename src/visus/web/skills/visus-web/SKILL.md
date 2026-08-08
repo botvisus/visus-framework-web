@@ -52,8 +52,10 @@ Full reference: **[references/cli-session.md](references/cli-session.md)**.
   `visus expect-text` are the synchronisation primitives.
 - **`visus clear` removes the highlight overlay. `visus clear-input` clears an
   input's value.** They are different commands.
-- **`visus screenshot <URL>` launches a throwaway browser.** The session's
-  screenshot command is `visus session-screenshot`.
+- **The URL decides which browser `screenshot`/`pdf` use.** `visus screenshot
+  <URL>` launches a throwaway browser that has none of the session's state;
+  `visus screenshot` with **no URL** shoots the live session. (`visus
+  session-screenshot` / `session-pdf` still work as deprecated aliases.)
 
 Targeting in depth: **[references/cli-targeting.md](references/cli-targeting.md)**.
 When something goes wrong: **[references/troubleshooting.md](references/troubleshooting.md)**.
@@ -90,7 +92,7 @@ visus get-text|get-attribute <attr>|count [idx] [target]
 visus title | visus url | visus tabs | visus tab <idx>
 visus wait [idx] --state visible|hidden|attached|detached --timeout <ms>
 visus expect-text [idx] <text> --timeout <ms>
-visus session-screenshot -o shot.png [--full-page] [idx]
+visus screenshot -o shot.png [--full-page] [--hires] [-i idx]  # no URL = session
 visus eval "() => document.title" [--json]
 visus cookies [--json] | visus add-cookies '<json>' | visus clear-cookies
 ```

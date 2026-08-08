@@ -119,10 +119,9 @@ through `visus eval`, whose quotes PowerShell mangles.
 
 | Command | What it does |
 |---|---|
-| `visus screenshot <URL> -o <png> --full-page --headless --engine <e>` | Screenshot a URL to a PNG (one-off browser). |
-| `visus session-screenshot [idx] -o <png> --full-page [--hires]` | Screenshot the session's page or a single element. `--hires` captures at device-pixel-ratio 2 -- markedly better for `read-text` OCR and for a vision model reading the numbered overlay. The scale is restored to 1x afterwards even if the capture fails. |
-| `visus pdf <URL> -o <pdf>` | Print a URL to a PDF. *One-off browser* — it has none of the session's state. |
-| `visus session-pdf [-o <pdf>]` | Print the **live session's** current page to a PDF, so a page you logged into and navigated to can actually be captured. The path resolves against your cwd; the daemon writes it and returns the absolute path. |
+| `visus screenshot [URL] -o <png> --full-page [--hires] [target]` | Screenshot to a PNG. **The URL decides which browser.** With one: a *one-off browser* (`--headless`, `--engine`) that has none of the session's state. Without: the **live session** — the whole page, or one element via `-i N` / `-s` / `--role` / `--text`. `--hires` (session only) captures at device-pixel-ratio 2, markedly better for `read-text` OCR and for a vision model reading the numbered overlay; the scale is restored to 1x even if the capture fails. |
+| `visus pdf [URL] -o <pdf>` | Print to a PDF (Chromium). Same split as `screenshot`: with a URL a one-off browser, without one the **live session** — so a page you logged into and navigated to can actually be captured. |
+| `visus session-screenshot` / `visus session-pdf` | **Deprecated** aliases for the two above with no URL. They still work and print a notice on stderr. After the rename **no session command carries a `session-` prefix**, and the REPL's `screenshot`/`pdf` mean the same thing as the CLI's. |
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |
 | `visus clear` | Remove the numbered field-highlight overlay drawn by `list-fields --highlight`. |
 | `visus highlight [idx] [target] [--style <css>] [--hide]` | Box **one** element on the live page — what a human needs to see which element the agent chose. `--style` replaces the default border (e.g. `"2px dashed #0a0"`), `--hide` removes the box. Distinct from `visus clear`, which erases the numbered overlay. |

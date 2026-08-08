@@ -212,15 +212,70 @@ def install_skills_cmd(
     _install_skills(target, force=force)
 
 
+def _session_screenshot(
+    *,
+    output_path: str,
+    full_page: bool,
+    hires: bool,
+    index: int | None,
+    selector: str | None,
+    role: str | None,
+    name: str | None,
+    text: str | None,
+) -> None:
+    """Screenshot the LIVE session's page (or one element) and print the path.
+
+    Shared by `visus screenshot` (no URL) and the deprecated
+    `visus session-screenshot`, so the two can never drift apart.
+    """
+    # Resolve the path against the CLIENT's cwd (not the daemon's) so the PNG
+    # lands where the user invoked the command, not under the daemon's base dir.
+    args: dict[str, Any] = {"path": output.resolve_out(output_path), "full_page": full_page}
+    if hires:
+        args["hires"] = True  # only sent when asked, so the payload stays minimal
+    if index is not None or selector or role or text:
+        args.update(_target_args(index, selector, role, name, text))
+    result = _send("screenshot", args)
+    output.emit(result, table=f"saved {result}")
+
+
+def _session_pdf(*, output_path: str) -> None:
+    """Print the LIVE session's page to a PDF and print the path."""
+    result = _send("pdf", {"path": output.resolve_out(output_path)})
+    output.emit(result, table=f"saved {result}")
+
+
 @app.command()
 def screenshot(
-    url: str,
+    url: str = typer.Argument(
+        None, help="URL for a one-off browser. Omit it to shoot the LIVE session."
+    ),
     input_path: str = typer.Option("screenshot.png", "-o", "--output"),
     full_page: bool = False,
     headless: bool = True,
     engine: str = "chrome",
+    hires: bool = typer.Option(
+        False, "--hires", help="Session only: capture at device-pixel-ratio 2."
+    ),
+    index: int = typer.Option(None, "--index", "-i", help="Session only: field index to shoot."),
+    selector: str = typer.Option(None, "--selector", "-s", help="Session only."),
+    role: str = typer.Option(None, "--role", help="Session only."),
+    name: str = typer.Option(None, "--name", help="Session only."),
+    text: str = typer.Option(None, "--text", help="Session only."),
 ) -> None:
-    """Screenshot a URL to a PNG file."""
+    """Screenshot to a PNG. With a URL: a one-off browser. Without: the live session."""
+    if url is None:
+        _session_screenshot(
+            output_path=input_path,
+            full_page=full_page,
+            hires=hires,
+            index=index,
+            selector=selector,
+            role=role,
+            name=name,
+            text=text,
+        )
+        return
     dest = output.resolve_out(input_path)
     with launch(Engine.from_str(engine), headless=headless) as b:
         p = b.new_page()
@@ -231,11 +286,16 @@ def screenshot(
 
 @app.command()
 def pdf(
-    url: str,
+    url: str = typer.Argument(
+        None, help="URL for a one-off browser. Omit it to print the LIVE session."
+    ),
     input_path: str = typer.Option("page.pdf", "-o", "--output"),
     engine: str = "chrome",
 ) -> None:
-    """Print a URL to a PDF (Chromium)."""
+    """Print to a PDF (Chromium). With a URL: a one-off browser. Without: the live session."""
+    if url is None:
+        _session_pdf(output_path=input_path)
+        return
     dest = output.resolve_out(input_path)
     with launch(Engine.from_str(engine), headless=True) as b:
         p = b.new_page()
@@ -885,35 +945,36 @@ def session_screenshot(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text", help="Target an element by its visible text."),
-    exact: bool = _EXACT_OPT,
-    frame: str = _FRAME_OPT,
 ) -> None:
-    """Screenshot the session's page (or a single element) to a PNG file.
-
-    With no target it captures the page (``--full-page`` for the whole scroll
-    height). Give an index or ``--selector``/``--role``/``--text`` to screenshot
-    just that element (mirrors the MCP ``browser_screenshot`` tool).
-    """
-    # Resolve the path against the CLIENT's cwd (not the daemon's) so the PNG
-    # lands where the user invoked the command, not under the daemon's base dir.
-    abs_output = output.resolve_out(input_path)
-    args: dict[str, Any] = {"path": abs_output, "full_page": full_page}
-    if hires:
-        args["hires"] = True  # only sent when asked, so the payload stays minimal
-    if index is not None or selector or role or text:
-        args.update(_target_args(index, selector, role, name, text, exact=exact, frame=frame))
-    saved = _send("screenshot", args)
-    output.emit(saved, table=f"saved {saved}")
+    """DEPRECATED alias for `visus screenshot` with no URL."""
+    typer.echo(
+        "warning: `visus session-screenshot` is deprecated — use `visus screenshot` "
+        "(with no URL it shoots the live session).",
+        err=True,
+    )
+    _session_screenshot(
+        output_path=input_path,
+        full_page=full_page,
+        hires=hires,
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+    )
 
 
 @app.command("session-pdf")
 def session_pdf(
     output_file: str = typer.Option("page.pdf", "-o", "--output"),
 ) -> None:
-    """Print the session's current page to a PDF (keeps your login and navigation)."""
-    # Resolve the path against the CLIENT's cwd (not the daemon's).
-    result = _send("pdf", {"path": str(Path(output_file).resolve())})
-    output.emit(result, table=f"saved {result}")
+    """DEPRECATED alias for `visus pdf` with no URL."""
+    typer.echo(
+        "warning: `visus session-pdf` is deprecated — use `visus pdf` "
+        "(with no URL it prints the live session).",
+        err=True,
+    )
+    _session_pdf(output_path=output_file)
 
 
 @app.command("clear")

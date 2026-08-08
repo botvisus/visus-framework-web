@@ -21,7 +21,7 @@ differ:
 | `text N` | `visus get-text N` |
 | `attr href N` | `visus get-attribute href N` |
 | `expect N some words` | `visus expect-text N "some words"` |
-| `screenshot [path]` | `visus session-screenshot -o path` |
+| `screenshot [path]` | `visus screenshot -o path` (no URL = the session) |
 | `highlight-all` | `visus list-fields --highlight` |
 
 The REPL takes the **same targets as the CLI**: a field index (`click 3`), a bare

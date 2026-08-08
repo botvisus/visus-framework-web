@@ -1118,3 +1118,160 @@ def test_hires_doubles_the_pixel_dimensions(base_url: str, tmp_path: Path) -> No
     aw, _ = _png_size(after)
     assert hw >= nw * 2 - 2 and hh >= nh * 2 - 2, (nw, nh, hw, hh)
     assert abs(aw - nw) <= 2, (nw, aw)
+
+
+# ---------------------------------------------------------------------------
+# screenshot / pdf: URL = one-off browser, no URL = the live session
+# ---------------------------------------------------------------------------
+
+
+def _all_output(result: Any) -> str:
+    """stdout + stderr, across Click versions.
+
+    Click < 8.2 mixes stderr into ``output`` and raises on ``.stderr``;
+    Click >= 8.2 captures them separately.
+    """
+    try:
+        return result.output + result.stderr
+    except ValueError:
+        return result.output
+
+
+class _OneShotPage:
+    def __init__(self, seen: dict[str, Any]) -> None:
+        self._seen = seen
+
+    def goto(self, url: str) -> None:
+        self._seen["goto"] = url
+
+    def screenshot(self, *, path: str | None = None, full_page: bool = False) -> bytes:
+        self._seen["shot"] = path
+        Path(path or "s.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        return b"png"
+
+    def pdf(self, *, path: str | None = None) -> bytes:
+        self._seen["pdf"] = path
+        Path(path or "p.pdf").write_bytes(b"%PDF-1.4\n")
+        return b"pdf"
+
+
+class _OneShotBrowser:
+    def __init__(self, seen: dict[str, Any]) -> None:
+        self._seen = seen
+
+    def new_page(self) -> _OneShotPage:
+        return _OneShotPage(self._seen)
+
+    def __enter__(self) -> _OneShotBrowser:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def close(self) -> None:
+        pass
+
+
+def _patch_one_shot(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    from visus.web.cli import main as cli_main
+
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(cli_main, "launch", lambda engine, **kw: _OneShotBrowser(seen))
+    return seen
+
+
+def test_screenshot_with_a_url_uses_a_one_off_browser(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = _patch_one_shot(monkeypatch)
+    sent: list[str] = []
+    monkeypatch.setattr(session_client, "send", lambda op, args=None: sent.append(op))
+    out = tmp_path / "s.png"
+    r = runner.invoke(app, ["screenshot", "http://example.com", "-o", str(out)])
+    assert r.exit_code == 0, r.output
+    assert seen["goto"] == "http://example.com"
+    assert seen["shot"] == str(out)
+    assert sent == [], "a URL must never touch the daemon"
+
+
+def test_screenshot_without_a_url_hits_the_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {})) or str(tmp_path / "s.png"),
+    )
+    out = tmp_path / "s.png"
+    r = runner.invoke(app, ["screenshot", "-o", str(out), "--full-page", "--hires"])
+    assert r.exit_code == 0, r.output
+    assert calls[0][0] == "screenshot"
+    assert calls[0][1]["path"] == str(out.resolve())
+    assert calls[0][1]["full_page"] is True
+    assert calls[0][1]["hires"] is True
+
+
+def test_screenshot_without_a_url_accepts_a_session_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {})) or "ok",
+    )
+    r = runner.invoke(app, ["screenshot", "-o", str(tmp_path / "s.png"), "-i", "4"])
+    assert r.exit_code == 0, r.output
+    assert calls[0][1]["index"] == 4
+
+
+def test_pdf_with_and_without_a_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = _patch_one_shot(monkeypatch)
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {})) or str(tmp_path / "p.pdf"),
+    )
+    out = tmp_path / "p.pdf"
+    assert runner.invoke(app, ["pdf", "http://example.com", "-o", str(out)]).exit_code == 0
+    assert seen["pdf"] == str(out)
+    assert calls == []
+
+    assert runner.invoke(app, ["pdf", "-o", str(out)]).exit_code == 0
+    assert calls[0] == ("pdf", {"path": str(out.resolve())})
+
+
+def test_deprecated_aliases_still_work_and_warn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {})) or "ok",
+    )
+    r1 = runner.invoke(app, ["session-screenshot", "-o", str(tmp_path / "s.png"), "2"])
+    assert r1.exit_code == 0, r1.output
+    text1 = _all_output(r1)
+    assert "deprecated" in text1 and "visus screenshot" in text1
+    assert calls[0][0] == "screenshot" and calls[0][1]["index"] == 2
+
+    r2 = runner.invoke(app, ["session-pdf", "-o", str(tmp_path / "p.pdf")])
+    assert r2.exit_code == 0
+    text2 = _all_output(r2)
+    assert "deprecated" in text2 and "visus pdf" in text2
+    assert calls[1][0] == "pdf"
+
+
+def test_deprecation_notices_go_to_stderr() -> None:
+    """A piped `visus session-screenshot > out` must not get the warning in its stdout."""
+    import inspect
+
+    from visus.web.cli import main as cli_main
+
+    for fn in (cli_main.session_screenshot, cli_main.session_pdf):
+        assert "err=True" in inspect.getsource(fn), f"{fn.__name__} must warn on stderr"

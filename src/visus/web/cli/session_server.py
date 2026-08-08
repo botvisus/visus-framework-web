@@ -138,7 +138,8 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "click", "dblclick", "fill", "check", "uncheck", "select", "press",
         "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
-        "add_cookies", "clear_cookies", "eval", "route", "unroute", "state_load",
+        "add_cookies", "clear_cookies", "eval", "route", "unroute", "run_code",
+        "state_load",
         "type", "key_down", "key_up",
         "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
         "storage_set", "storage_delete", "storage_clear",
@@ -165,6 +166,25 @@ _CODE_ACTIONS: dict[str, tuple[str, str | None]] = {
 def generate_script_goto(url: str) -> str:
     """The generated line for a navigation."""
     return f"page.goto({url!r})"
+
+
+def _jsonable(value: Any, *, depth: int = 0) -> Any:
+    """Coerce a ``run_code`` return value into something ``json.dumps`` accepts.
+
+    A snippet can legitimately return a ``Page``, a ``Locator`` or any other live
+    object; those have no JSON form, and an unencodable reply would break the
+    socket protocol rather than the snippet. Anything unknown becomes its
+    ``repr`` — informative, and always encodable.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if depth >= 6:  # guards a self-referential structure
+        return repr(value)
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(v, depth=depth + 1) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v, depth=depth + 1) for k, v in value.items()}
+    return repr(value)
 
 
 class SessionHandler:
@@ -1258,12 +1278,14 @@ class SessionHandler:
 
     # --- arbitrary python against the live session (opt-in) ---------------
     def _op_run_code(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Refuse to execute Python unless this session opted in.
+        """Execute Python with ``page``/``context``/``browser``/``expect`` bound live.
 
-        The gate ships BEFORE the capability on purpose: the refusal is the
-        behaviour that has to be right, and it is checked before the payload is
-        even looked at — an empty or absent ``code`` must not read as consent.
-        Execution itself lands in the next commit.
+        The escape hatch that turns the command list into a floor instead of a
+        ceiling. A single expression is evaluated and returned; a longer snippet is
+        executed and whatever it assigned to ``result`` is returned.
+
+        Refused unless the session was started with ``--allow-run-code``: this runs
+        anything the caller sends inside a browser holding the user's logins.
         """
         if not self._allow_run_code:
             raise PermissionError(
@@ -1271,7 +1293,27 @@ class SessionHandler:
                 "in your live browser. Restart with "
                 "`visus session start --allow-run-code` to enable it."
             )
-        raise NotImplementedError("run-code execution is not wired up yet")
+        code = str(args.get("code") or "")
+        if not code.strip():
+            raise ValueError("run-code: no code given")
+        self._ensure()
+        namespace: dict[str, Any] = {
+            "page": self.page(),
+            "context": self.context(),
+            "browser": self._browser,
+            "expect": expect,
+            "result": None,
+        }
+        try:
+            expression = compile(code, "<visus run-code>", "eval")
+        except SyntaxError:
+            exec(compile(code, "<visus run-code>", "exec"), namespace, namespace)
+            value = namespace.get("result")
+        else:
+            value = eval(expression, namespace, namespace)
+        # The snippet may have navigated, so cached indexes are void either way.
+        self._invalidate_fields()
+        return {"result": _jsonable(value)}
 
     # --- tracing ---------------------------------------------------------
     def _op_tracing_start(self, args: dict[str, Any]) -> dict[str, Any]:

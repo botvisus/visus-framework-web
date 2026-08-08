@@ -7,13 +7,14 @@ before anything can run.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
-from visus.web.cli import session_client, session_server
+from visus.web.cli import console, session_client, session_server
 from visus.web.cli.main import app
 
 runner = CliRunner()
@@ -129,3 +130,160 @@ def test_cli_session_start_passes_the_gate(monkeypatch: pytest.MonkeyPatch) -> N
     assert captured["allow_run_code"] is False
     assert runner.invoke(app, ["session", "start", "--allow-run-code"]).exit_code == 0
     assert captured["allow_run_code"] is True
+
+
+def _enabled_handler() -> session_server.SessionHandler:
+    from test_cli_session import _FakePage, _handler_with_fake_page
+
+    h = _handler_with_fake_page(_FakePage())
+    h._allow_run_code = True
+    return h
+
+
+def test_run_code_evaluates_a_single_expression() -> None:
+    h = _enabled_handler()
+    assert h.handle("run_code", {"code": "page.title()"})["result"] == {
+        "result": "FakeTitle"
+    }
+
+
+def test_run_code_runs_a_script_and_returns_result() -> None:
+    h = _enabled_handler()
+    code = "\n".join(
+        [
+            "titles = [page.title() for _ in range(2)]",
+            "result = {'titles': titles, 'url': page.url}",
+        ]
+    )
+    resp = h.handle("run_code", {"code": code})
+    assert resp["ok"] is True
+    assert resp["result"]["result"] == {"titles": ["FakeTitle", "FakeTitle"], "url": "about:blank"}
+
+
+def test_run_code_binds_every_documented_name() -> None:
+    h = _enabled_handler()
+    resp = h.handle(
+        "run_code",
+        {"code": "result = sorted(n for n in ('page','context','browser','expect'))"},
+    )
+    assert resp["ok"] is True
+    code = "result = [type(page).__name__, browser is not None, callable(expect)]"
+    got = h.handle("run_code", {"code": code})["result"]["result"]
+    assert got[1] is True and got[2] is True
+
+
+def test_run_code_reports_an_exception_without_killing_the_daemon() -> None:
+    h = _enabled_handler()
+    resp = h.handle("run_code", {"code": "raise ValueError('boom')"})
+    assert resp["ok"] is False
+    assert "ValueError: boom" in resp["error"]
+    # The handler is still usable.
+    assert h.handle("title", {})["result"] == "FakeTitle"
+
+
+def test_run_code_reports_a_syntax_error_clearly() -> None:
+    h = _enabled_handler()
+    resp = h.handle("run_code", {"code": "def ("})
+    assert resp["ok"] is False and "SyntaxError" in resp["error"]
+
+
+def test_run_code_rejects_empty_code_once_enabled() -> None:
+    h = _enabled_handler()
+    resp = h.handle("run_code", {"code": "   "})
+    assert resp["ok"] is False and "no code" in resp["error"]
+
+
+def test_run_code_invalidates_cached_field_indexes() -> None:
+    """Arbitrary code may navigate — a cached index must not survive it."""
+    h = _enabled_handler()
+    h.handle("list_fields", {})
+    assert h._fields
+    h.handle("run_code", {"code": "result = 1"})
+    assert h._fields == [] and h._fields_url is None
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("None", None),
+        ("42", 42),
+        ("3.5", 3.5),
+        ("True", True),
+        ("'hi'", "hi"),
+        ("[1, 'a', None]", [1, "a", None]),
+        ("(1, 2)", [1, 2]),
+        ("{'k': [1, {'n': 2}]}", {"k": [1, {"n": 2}]}),
+        ("{1: 'a'}", {"1": "a"}),
+    ],
+)
+def test_run_code_return_values_are_json_safe(expression: str, expected: Any) -> None:
+    h = _enabled_handler()
+    value = h.handle("run_code", {"code": f"result = {expression}"})["result"]["result"]
+    assert value == expected
+    json.dumps(value)  # the reply must survive the socket
+
+
+def test_run_code_falls_back_to_repr_for_a_live_object() -> None:
+    h = _enabled_handler()
+    value = h.handle("run_code", {"code": "result = page"})["result"]["result"]
+    assert isinstance(value, str) and "FakePage" in value
+    json.dumps(value)
+
+
+def test_cli_run_code_sends_the_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None, **kw: captured.update(op=op, args=args) or {"result": "ok"},
+    )
+    r = runner.invoke(app, ["run-code", "page.title()"])
+    assert r.exit_code == 0, r.output
+    assert captured == {"op": "run_code", "args": {"code": "page.title()"}}
+    assert "ok" in r.output
+
+
+def test_cli_run_code_reads_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "snippet.py"
+    script.write_text("result = page.url\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None, **kw: captured.update(args=args) or {"result": "http://x"},
+    )
+    r = runner.invoke(app, ["run-code", "--file", str(script)])
+    assert r.exit_code == 0, r.output
+    assert captured["args"]["code"] == "result = page.url\n"
+
+
+def test_cli_run_code_needs_code_or_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_client, "send", lambda op, args=None, **kw: {"result": None})
+    r = runner.invoke(app, ["run-code"])
+    assert r.exit_code == 1
+
+
+def test_cli_run_code_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        session_client, "send", lambda op, args=None, **kw: {"result": {"a": 1}}
+    )
+    r = runner.invoke(app, ["--json", "run-code", "result = {'a': 1}"])
+    assert r.exit_code == 0
+    assert json.loads(r.output) == {"a": 1}
+
+
+def test_repl_run_code_twin() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return {"result": "Dashboard"}
+
+    assert console.dispatch("run-code page.title()", send) == "Dashboard"
+    assert calls == [("run_code", {"code": "page.title()"})]
+
+
+def test_repl_help_lists_run_code() -> None:
+    assert "run-code" in console.dispatch("help", lambda op, args: None)

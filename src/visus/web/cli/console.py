@@ -71,6 +71,7 @@ commands:
   state-save [file]    save cookies + web storage (default storage-state.json)
   state-load file      restore a snapshot (navigate to the origin first)
   eval expr            evaluate a JS expression
+  run-code code...     run Python against the live session (needs --allow-run-code)
   route pat [st] [body] mock requests matching pat (Chromium only)
   unroute [pat]        remove one route (omit pat = all)
   routes               list the installed routes
@@ -563,6 +564,8 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 {"expression": " ".join(rest)},
                 lambda r: str((r or {}).get("result")),
             )
+        if cmd == "run-code":
+            return str(send("run_code", {"code": " ".join(rest)}).get("result"))
         if cmd == "route":
             route_args: dict[str, Any] = {"pattern": rest[0]}
             if len(rest) > 1:

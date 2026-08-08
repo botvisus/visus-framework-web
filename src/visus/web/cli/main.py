@@ -1816,6 +1816,33 @@ def eval_js(
     output.emit_envelope(env, table="" if value is None else str(value))
 
 
+@app.command("run-code")
+def run_code(
+    code: str = typer.Argument(
+        None, help="Python to run, e.g. 'page.title()' or 'result = page.url'."
+    ),
+    file: str = typer.Option(None, "--file", "-f", help="Read the code from a file instead."),
+) -> None:
+    """Run Python against the LIVE session (`page`, `context`, `browser`, `expect`).
+
+    Requires `visus session start --allow-run-code`. A single expression is
+    returned directly; a longer snippet returns whatever it assigns to `result`::
+
+        visus run-code "page.set_geolocation(51.5074, -0.1278)"
+        visus run-code --file ./snippet.py
+    """
+    from visus.web.cli import output
+
+    if file is not None:
+        # Read on the CLIENT side so the path resolves against the user's cwd.
+        source = Path(file).read_text(encoding="utf-8")
+    elif code is not None:
+        source = code
+    else:
+        output.emit_error("no code — pass it as an argument or use --file <path>")
+    output.emit(_send("run_code", {"code": source}).get("result"))
+
+
 # ---------------------------------------------------------------------------
 # Network mocking (Chromium)
 # ---------------------------------------------------------------------------

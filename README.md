@@ -387,10 +387,16 @@ command accepts `--json`.
 | `visus state-save [FILE]` / `visus state-load <FILE>` | Save / restore cookies + web storage (skip a login next run). |
 | `visus storage list/get/set/delete/clear [--session-storage]` | Read/write the origin's localStorage (or sessionStorage). |
 | `visus eval "<fn>" [arg] [target] [--json]` | Evaluate JS. On the page `'() => document.title'`; on an element `'(el) => el.id' -s "#u"`. |
+| `visus run-code "<python>"` / `--file <f>` | Run Python against the live session (`page`, `context`, `browser`, `expect`). Needs `session start --allow-run-code`. |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far (Chromium). |
 | `visus requests [--filter <s>] [--json]` | Network responses captured so far (Chromium). |
 | `visus request <N> [--json]` | One captured response in full, including its body. |
 | `visus network start` / `stop` / `export -o <json>` | Capture what the page itself sends — request bodies, JSONP, `sendBeacon`, pixel pings — and export it scrubbed. Complements `visus requests`, which reads the CDP response log. |
+
+`visus eval` runs **JavaScript in the page**; `visus run-code` runs **Python against the live
+session objects**, and `visus run <script.py>` runs a script in a *separate* process with its own
+browser. `run-code` is the only one that can reach the daemon's page — which is why it is off
+until you start the session with `--allow-run-code`.
 
 ### Network mocking *(Chromium only)*
 

@@ -497,3 +497,81 @@ def kill(*, start_dir: str | Path | None = None, name: str | None = None) -> str
     if not removed:
         return "no session state to remove"
     return f"removed {', '.join(removed)}"
+
+
+def _find_sessions_dir(start_dir: str | Path | None = None) -> Path | None:
+    """Search upward for a ``.visus/sessions`` directory (git-style). First hit wins."""
+    cur = Path(start_dir) if start_dir is not None else Path.cwd()
+    cur = cur.resolve()
+    for d in [cur, *cur.parents]:
+        candidate = d / ".visus" / "sessions"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    try:
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _entry(info: dict[str, Any], *, sf: Path, scope: str) -> dict[str, Any]:
+    """Shape one session record for :func:`list_sessions` — never carries the token."""
+    pid = int(info.get("pid", -1) or -1)
+    port = int(info.get("port", -1) or -1)
+    return {
+        "name": str(info.get("name") or sf.stem),
+        "cwd": str(info.get("cwd") or sf.parent.parent.parent),
+        "file": str(info.get("file") or sf),
+        "pid": pid,
+        "port": port,
+        "engine": info.get("engine"),
+        "headless": info.get("headless"),
+        "url": info.get("url"),
+        "live": bool(pid > 0 and _probe_pid(pid) and _socket_open(port)),
+        "scope": scope,
+    }
+
+
+def list_sessions(start_dir: str | Path | None = None) -> list[dict[str, Any]]:
+    """Every session visus knows about: this project's, plus every other project's.
+
+    Two sources are merged on ``(cwd, name)``: the project's own
+    ``.visus/sessions/*.json`` (found with the same upward walk commands use) and
+    the cross-project registry under ``~/.visus/sessions``. Local records win —
+    they are the authoritative file the daemon writes. Liveness is probed with
+    the UNCACHED :func:`_probe_pid`, because a stale "alive" here would hide a
+    dead daemon from ``kill-all``.
+    """
+    from visus.web.cli import session_server
+
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+
+    local_dir = _find_sessions_dir(start_dir)
+    if local_dir is not None:
+        for sf in sorted(local_dir.glob("*.json")):
+            info = _read_json(sf)
+            if info is None:
+                continue
+            row = _entry(info, sf=sf, scope="local")
+            merged[(str(Path(row["cwd"]).resolve()), row["name"])] = row
+
+    try:
+        registry = sorted(session_server.registry_dir().glob("*.json"))
+    except OSError:
+        registry = []
+    for entry_file in registry:
+        info = _read_json(entry_file)
+        if info is None:
+            continue
+        row = _entry(info, sf=entry_file, scope="other")
+        key = (str(Path(row["cwd"]).resolve()), row["name"])
+        if key not in merged:
+            merged[key] = row
+
+    return sorted(
+        merged.values(), key=lambda r: (r["scope"] != "local", r["name"], r["cwd"])
+    )

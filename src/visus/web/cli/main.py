@@ -676,6 +676,39 @@ def session_status(
     )
 
 
+@session_app.command("list")
+def session_list() -> None:
+    """List every session — this project's and any left running in other projects."""
+    from visus.web.cli import output, session_client
+
+    rows = session_client.list_sessions()
+    if not rows:
+        output.emit([], table="no sessions")
+        return
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
+    for column in ("NAME", "SCOPE", "STATE", "PID", "PORT", "ENGINE", "URL", "DIR"):
+        table.add_column(column, overflow="fold", no_wrap=column in ("NAME", "STATE"))
+    for row in rows:
+        table.add_row(
+            str(row["name"]),
+            str(row["scope"]),
+            "live" if row["live"] else "dead",
+            str(row["pid"]),
+            str(row["port"]),
+            str(row.get("engine") or ""),
+            str(row.get("url") or ""),
+            str(row["cwd"]),
+        )
+    console_obj = Console()
+    with console_obj.capture() as cap:
+        console_obj.print(table)
+    output.emit(rows, table=cap.get().rstrip("\n"))
+
+
 @session_app.command("export-script")
 def session_export_script(
     output_path: str = typer.Option(

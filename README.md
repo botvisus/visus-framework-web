@@ -309,6 +309,7 @@ command accepts `--json`.
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
+| `visus session list [--json]` | List every session — this project's and any daemon left running in another project. |
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file. |
 | `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 | `visus console [URL]` | Deprecated alias for `visus repl` (prints a notice on stderr). |
@@ -905,6 +906,8 @@ Default timeouts (`visus.web.config.Defaults`, all in ms): `action_timeout_ms = 
 | `VISUS_WEB_ENGINE` | MCP & CLI session | `chrome` | Browser engine for the daemon/MCP session. |
 | `VISUS_WEB_HEADLESS` | MCP & CLI session | `1` (MCP) | `"0"` to run headed. |
 | `VISUS_WEB_URL` | CLI session | — | Initial URL opened when the daemon starts. |
+| `VISUS_WEB_SESSION` | CLI session | `default` | Session name (same as `--session` / `-S`). |
+| `VISUS_WEB_HOME` | CLI session | `~/.visus` | Where the cross-project session registry lives. |
 | `VISUS_WEB_USER_DATA_DIR` | CLI session | — | Persistent browser profile directory for the daemon. |
 | `VISUS_WEB_REMOTE_URL` | CLI session | — | Selenium Grid / Remote WebDriver URL for the daemon. |
 | `VISUS_WEB_SLOW_MO` | CLI session | `0` | Delay every daemon action by this many milliseconds. |

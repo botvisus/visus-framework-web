@@ -15,6 +15,7 @@ entrypoint: it reads engine/headless/url from argv/env, writes
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import logging
 import os
@@ -1659,6 +1660,75 @@ def session_file(cwd: str | Path | None = None, name: str | None = None) -> Path
     return sessions_dir(cwd) / f"{name or 'default'}.json"
 
 
+def visus_home() -> Path:
+    """The per-user visus directory — ``VISUS_WEB_HOME`` when set, else ``~/.visus``.
+
+    The override exists so tests and CI never touch a real home directory; the
+    registry it holds is the ONLY visus state outside the project tree.
+    """
+    override = os.environ.get("VISUS_WEB_HOME")
+    return Path(override) if override else Path.home() / ".visus"
+
+
+def registry_dir() -> Path:
+    """Directory of the cross-project session registry."""
+    return visus_home() / "sessions"
+
+
+def registry_file(cwd: str | Path, name: str) -> Path:
+    """Registry path for session *name* under *cwd*.
+
+    Keyed by a hash of the ABSOLUTE cwd plus the session name: a daemon started in
+    another project is otherwise invisible (discovery only walks upward) and so
+    can be neither listed nor killed from the CLI.
+    """
+    resolved = str(Path(cwd).resolve())
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+    return registry_dir() / f"{digest}-{name}.json"
+
+
+def _register(
+    sf: Path,
+    *,
+    name: str,
+    cwd: Path,
+    pid: int,
+    port: int,
+    engine: str,
+    headless: bool,
+    url: str | None,
+) -> Path | None:
+    """Mirror a live session into the registry. Returns the entry path, or ``None``.
+
+    Deliberately token-free: the shared secret stays in the owner-only session
+    file, and the entry records that file's PATH so a caller who can read it can
+    still shut the daemon down politely. Never raises — a read-only or missing
+    home must not stop a daemon from serving.
+    """
+    try:
+        entry = registry_file(cwd, name)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text(
+            json.dumps(
+                {
+                    "name": name,
+                    "cwd": str(cwd),
+                    "file": str(sf),
+                    "pid": pid,
+                    "port": port,
+                    "engine": engine,
+                    "headless": headless,
+                    "url": url,
+                    "started_at": time.time(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        return entry
+    except OSError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # JSON-lines TCP server
 # ---------------------------------------------------------------------------
@@ -1845,6 +1915,22 @@ def serve(
     _write_private(tmp, payload)
     os.replace(tmp, sf)
 
+    # Mirror the session into the cross-project registry: discovery only walks
+    # UP, so without this a daemon started in a sibling project can be neither
+    # listed nor stopped from here. Best-effort — a registry write must never
+    # keep a working daemon from serving.
+    base_dir = (Path(cwd) if cwd is not None else Path.cwd()).resolve()
+    registry_entry = _register(
+        sf,
+        name=resolved_name,
+        cwd=base_dir,
+        pid=os.getpid(),
+        port=port,
+        engine=handler._engine,
+        headless=handler._headless,
+        url=handler._url,
+    )
+
     stop = threading.Event()
     handler.bind_stop(stop)
     threads: list[threading.Thread] = []
@@ -1887,6 +1973,11 @@ def serve(
             lock.unlink()
         except OSError:
             pass
+        if registry_entry is not None:
+            try:
+                registry_entry.unlink()
+            except OSError:
+                pass
 
 
 def _idle_timeout_from_env() -> float | None:

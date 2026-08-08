@@ -200,3 +200,198 @@ def test_cli_session_flag_is_capital_s_only() -> None:
     r2 = runner.invoke(app, ["click", "--help"])
     assert r2.exit_code == 0
     assert "-s" in r2.output and "--selector" in r2.output
+
+
+def _registry_entry(tmp_path: Path, name: str, cwd: Path, port: int, pid: int) -> Path:
+    """Write a registry mirror by hand, exactly as serve() would."""
+    reg = session_server.registry_file(cwd, name)
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text(
+        json.dumps(
+            {
+                "name": name,
+                "cwd": str(cwd),
+                "file": str(session_server.session_file(cwd, name)),
+                "pid": pid,
+                "port": port,
+                "engine": "chrome",
+                "headless": True,
+                "url": "http://x",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return reg
+
+
+def test_registry_paths_are_keyed_by_cwd_and_name(tmp_path: Path) -> None:
+    a = session_server.registry_file(tmp_path / "proj-a", "default")
+    b = session_server.registry_file(tmp_path / "proj-b", "default")
+    c = session_server.registry_file(tmp_path / "proj-a", "auth")
+    assert a.parent == session_server.registry_dir()
+    assert a != b, "two projects must not share a registry entry"
+    assert a != c, "two names in one project must not share a registry entry"
+    assert a.name.endswith("-default.json") and c.name.endswith("-auth.json")
+
+
+def test_registry_dir_honours_visus_web_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tests (and CI) must never write into the developer's real ~/.visus."""
+    monkeypatch.setenv("VISUS_WEB_HOME", str(tmp_path / "custom"))
+    assert session_server.registry_dir() == tmp_path / "custom" / "sessions"
+
+
+def test_registry_never_records_the_token(tmp_path: Path) -> None:
+    import threading as _threading
+    import time as _time
+
+    from test_cli_session import _FakePage, _handler_with_fake_page, _shutdown_thread
+
+    handler = _handler_with_fake_page(_FakePage())
+    t = _threading.Thread(
+        target=session_server.serve,
+        kwargs={"handler": handler, "token": "super-secret", "cwd": tmp_path},
+        daemon=True,
+    )
+    t.start()
+    sf = session_server.session_file(tmp_path)
+    for _ in range(200):
+        if sf.is_file():
+            break
+        _time.sleep(0.02)
+    port = int(json.loads(sf.read_text(encoding="utf-8"))["port"])
+    reg = session_server.registry_file(tmp_path, "default")
+    try:
+        assert reg.is_file(), "serve() did not mirror the session into the registry"
+        entry = json.loads(reg.read_text(encoding="utf-8"))
+        assert "token" not in entry
+        assert entry["file"] == str(sf)
+        assert entry["port"] == port
+    finally:
+        _shutdown_thread(t, port, "super-secret")
+    assert not reg.exists(), "the registry entry outlived the daemon"
+
+
+def test_list_sessions_merges_local_and_other_projects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket as _socket
+
+    srv = _socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        here = tmp_path / "here"
+        elsewhere = tmp_path / "elsewhere"
+        sessions = here / ".visus" / "sessions"
+        sessions.mkdir(parents=True)
+        (sessions / "default.json").write_text(
+            json.dumps(
+                {
+                    "name": "default",
+                    "cwd": str(here),
+                    "pid": 11,
+                    "port": port,
+                    "token": "t",
+                    "engine": "chrome",
+                    "headless": False,
+                    "url": "http://here",
+                }
+            ),
+            encoding="utf-8",
+        )
+        _registry_entry(tmp_path, "default", here, port, 11)
+        _registry_entry(tmp_path, "scrape", elsewhere, port, 22)
+        monkeypatch.setattr(session_client, "_probe_pid", lambda pid: True)
+
+        rows = session_client.list_sessions(here)
+        by_key = {(r["name"], r["scope"]): r for r in rows}
+        assert ("default", "local") in by_key
+        assert ("scrape", "other") in by_key
+        assert by_key[("default", "local")]["live"] is True
+        assert by_key[("default", "local")]["url"] == "http://here"
+        assert Path(by_key[("scrape", "other")]["cwd"]) == elsewhere
+        assert all("token" not in r for r in rows), "list_sessions leaked a token"
+    finally:
+        srv.close()
+
+
+def test_list_sessions_marks_a_dead_entry_not_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _registry_entry(tmp_path, "ghost", tmp_path / "gone", 1, 999999)
+    monkeypatch.setattr(session_client, "_probe_pid", lambda pid: False)
+    rows = session_client.list_sessions(tmp_path)
+    assert [(r["name"], r["live"]) for r in rows] == [("ghost", False)]
+
+
+def test_cli_session_list_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        session_client,
+        "list_sessions",
+        lambda start_dir=None: [
+            {
+                "name": "auth",
+                "cwd": "/p/a",
+                "file": "/p/a/.visus/sessions/auth.json",
+                "pid": 4,
+                "port": 5,
+                "engine": "chrome",
+                "headless": False,
+                "url": "http://x",
+                "live": True,
+                "scope": "local",
+            }
+        ],
+    )
+    r = runner.invoke(app, ["--json", "session", "list"])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.output)[0]["name"] == "auth"
+
+
+def test_cli_session_list_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_client, "list_sessions", lambda start_dir=None: [])
+    r = runner.invoke(app, ["session", "list"])
+    assert r.exit_code == 0
+    assert "no sessions" in r.output
+
+
+def test_cli_session_list_table_shows_scope_and_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        session_client,
+        "list_sessions",
+        lambda start_dir=None: [
+            {
+                "name": "auth",
+                "cwd": "/p/a",
+                "file": "/p/a/.visus/sessions/auth.json",
+                "pid": 4,
+                "port": 5,
+                "engine": "chrome",
+                "headless": False,
+                "url": "http://x",
+                "live": True,
+                "scope": "local",
+            },
+            {
+                "name": "ghost",
+                "cwd": "/p/b",
+                "file": "/p/b/.visus/sessions/ghost.json",
+                "pid": 9,
+                "port": 0,
+                "engine": "chrome",
+                "headless": True,
+                "url": None,
+                "live": False,
+                "scope": "other",
+            },
+        ],
+    )
+    r = runner.invoke(app, ["session", "list"])
+    assert r.exit_code == 0, r.output
+    for token in ("auth", "ghost", "local", "other", "live", "dead"):
+        assert token in r.output, f"{token!r} missing from the session table"

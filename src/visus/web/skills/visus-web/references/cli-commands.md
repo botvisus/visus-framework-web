@@ -25,6 +25,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
+| `visus session list [--json]` | Every session visus knows about, not just this project's: the local `.visus/sessions/*.json` merged with the cross-project registry under `~/.visus/sessions` (`VISUS_WEB_HOME` moves it). `SCOPE` is `local` when the upward walk found it from here, `other` when only the registry knows it; `STATE` is `live` when the pid is alive AND the port accepts. Use it to find a headed browser abandoned in another project. |
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file (relative paths honour `--output-dir`). |
 | `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 | `visus console [URL] --engine <e> --headless` | **Deprecated** alias for `visus repl`; prints a notice on stderr and still opens the REPL. The name is reserved for the browser's console messages, which are `visus logs`. |

@@ -11,6 +11,26 @@ import pytest
 FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(scope="session")
+def _visus_home_root(tmp_path_factory):  # type: ignore[no-untyped-def]
+    return tmp_path_factory.mktemp("visus-home")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_visus_home(_visus_home_root, monkeypatch):  # type: ignore[no-untyped-def]
+    """Point the cross-project session registry at a tmp dir for EVERY test.
+
+    ``serve()`` mirrors each live session into ``visus_home()/sessions``, which
+    defaults to the real ``~/.visus`` — so without this any test that starts a
+    daemon writes into the developer's (or CI's) home directory. Registry entries
+    are keyed by a hash of the project cwd, and every test gets its own
+    ``tmp_path``, so one shared root cannot collide. A test wanting a registry of
+    its own just sets ``VISUS_WEB_HOME`` again — a module-level autouse fixture
+    runs after this one and wins.
+    """
+    monkeypatch.setenv("VISUS_WEB_HOME", str(_visus_home_root))
+
+
 class _FixtureHandler(http.server.SimpleHTTPRequestHandler):
     """Serve fixture files, with a /echo-headers endpoint for header tests."""
 

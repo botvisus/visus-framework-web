@@ -18,8 +18,10 @@ visus find-image button.png -c 0.85 --json # OpenCV template match over the page
 visus find-image icon.png 4                # scope the search to field 4
 ```
 
-Clear the numbered overlay first (`visus clear`) or list with `--no-highlight` —
-the highlight markers are real DOM nodes and they show up in the pixels.
+`visus list-fields` no longer draws the numbered overlay unless you pass
+`--highlight`, so the pixels stay clean by default. If you did opt in, run
+`visus clear` before any of these — the highlight markers are real DOM nodes and
+they show up in the image.
 
 ## Library entry points
 

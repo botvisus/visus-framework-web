@@ -81,7 +81,7 @@ The ones you will use most:
 
 ```bash
 visus goto <URL> | back | forward | reload
-visus list-fields [--kind input,button] [--all] [--no-highlight] [--json]
+visus list-fields [--kind input,button] [--all] [--highlight] [--full] [--json]
 visus snapshot ["#main"] [--depth N]     # REF/role/name table; REF is a list-fields index
 visus click|dblclick|hover|focus|check|uncheck [idx] [target]
 visus fill <idx> <text>                  # or: -s "#user" --value text

@@ -1030,6 +1030,43 @@ def test_cli_list_fields_full_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "XPATH" in runner.invoke(app, ["list-fields", "--full"]).output
 
 
+def test_cli_list_fields_does_not_draw_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read must not mutate the DOM: the overlay pollutes screenshots/OCR."""
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return {"fields": []}
+
+    _patch_client(monkeypatch, fake)
+    assert runner.invoke(app, ["list-fields"]).exit_code == 0
+    assert captured["args"]["highlight"] is False
+
+
+def test_cli_list_fields_highlight_is_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return {"fields": []}
+
+    _patch_client(monkeypatch, fake)
+    assert runner.invoke(app, ["list-fields", "--highlight"]).exit_code == 0
+    assert captured["args"]["highlight"] is True
+
+
+def test_cli_list_fields_no_highlight_still_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return {"fields": []}
+
+    _patch_client(monkeypatch, fake)
+    assert runner.invoke(app, ["list-fields", "--no-highlight"]).exit_code == 0
+    assert captured["args"]["highlight"] is False
+
+
 # ---------------------------------------------------------------------------
 # console.run_console — session attach + input loop (injected fns)
 # ---------------------------------------------------------------------------

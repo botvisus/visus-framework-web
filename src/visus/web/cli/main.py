@@ -499,14 +499,19 @@ def list_fields(
     kind: str = typer.Option(None, "--kind", help="Comma-separated kinds (e.g. input,button)."),
     show_all: bool = typer.Option(False, "--all", help="Include hidden/disabled fields."),
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
-    no_highlight: bool = typer.Option(False, "--no-highlight", help="Skip the numbered overlay."),
+    highlight: bool = typer.Option(
+        False,
+        "--highlight/--no-highlight",
+        help="Draw the numbered overlay on the page (off by default: it injects "
+        "divs that would show up in a later screenshot / OCR / template match).",
+    ),
     full: bool = typer.Option(False, "--full", help="Also print the CSS and XPATH columns."),
 ) -> None:
     """Enumerate interactive fields on the current page (numbered, highlighted)."""
     kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
     result = _send(
         "list_fields",
-        {"kinds": kinds, "include_hidden": show_all, "highlight": not no_highlight},
+        {"kinds": kinds, "include_hidden": show_all, "highlight": highlight},
     )
     fields = result.get("fields", [])
     if as_json:

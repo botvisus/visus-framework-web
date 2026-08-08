@@ -38,12 +38,15 @@ Filter a long page instead of paging through it:
 visus list-fields --kind input,button        # kinds: input textarea editable button
 visus list-fields --kind link,checkbox       #        link checkbox radio select dropdown
 visus list-fields --all                      # include hidden/disabled fields
-visus list-fields --no-highlight             # skip the overlay (keeps screenshots clean)
+visus list-fields --highlight                # opt in to the numbered overlay
 visus clear                                  # remove the overlay afterwards
 ```
 
-The overlay injects marker elements into the page. Take screenshots, run OCR or
-run `find-image` **before** listing, or list with `--no-highlight`.
+The overlay injects marker elements into the page, so it is **off by default** —
+a plain `visus list-fields` leaves the DOM untouched and later screenshots, OCR
+and `find-image` stay clean. Turn it on with `--highlight` when a human is
+watching a headed browser or a vision model has to read the numbers, and run
+`visus clear` when you are done.
 
 ## 2. By selector / role / text
 

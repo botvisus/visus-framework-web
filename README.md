@@ -290,8 +290,8 @@ visus expect-text --role heading "Logged In Successfully"
 visus session stop                      # close the browser
 ```
 
-Run `visus --help` (or `visus <command> --help`) for inline help. Use `visus console` for an
-interactive REPL attached to the session.
+Run `visus --help` (or `visus <command> --help`) for inline help. Use `visus repl` for an
+interactive REPL attached to the session, and `visus logs` for the browser's console messages.
 
 <details>
 <summary><b>Full command reference</b> (click to expand)</summary>
@@ -310,7 +310,8 @@ command accepts `--json`.
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file. |
-| `visus console [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
+| `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
+| `visus console [URL]` | Deprecated alias for `visus repl` (prints a notice on stderr). |
 
 ### Navigation
 

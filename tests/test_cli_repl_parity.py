@@ -10,7 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+from typer.testing import CliRunner
+
 from visus.web.cli import console
+from visus.web.cli.main import app
 
 
 def _recorder() -> tuple[list[tuple[str, dict[str, Any]]], console.SendFn]:
@@ -127,3 +131,59 @@ def test_help_lists_the_new_commands() -> None:
     for cmd in ("upload", "drag", "add-cookies", "clear-cookies",
                 "read-text", "solve-captcha", "find-image"):
         assert cmd in out, f"{cmd} missing from REPL help"
+
+
+# ---------------------------------------------------------------------------
+# `visus repl` (canonical) and `visus console` (deprecated alias)
+# ---------------------------------------------------------------------------
+
+runner = CliRunner()
+
+
+def _all_output(result: Any) -> str:
+    """stdout + stderr, across Click versions.
+
+    Click < 8.2 mixes stderr into ``output`` and raises on ``.stderr``;
+    Click >= 8.2 captures them separately.
+    """
+    try:
+        return result.output + result.stderr
+    except ValueError:
+        return result.output
+
+
+def test_repl_command_starts_the_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_run_console(url: str | None = None, **kwargs: Any) -> None:
+        seen["url"] = url
+        seen["kwargs"] = kwargs
+
+    monkeypatch.setattr(console, "run_console", fake_run_console)
+    r = runner.invoke(app, ["repl", "http://x", "--engine", "edge", "--headless"])
+    assert r.exit_code == 0, _all_output(r)
+    assert seen["url"] == "http://x"
+    assert seen["kwargs"]["engine"] == "edge"
+    assert seen["kwargs"]["headless"] is True
+
+
+def test_console_alias_still_works_and_warns(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        console, "run_console", lambda url=None, **kw: seen.update(url=url, kwargs=kw)
+    )
+    r = runner.invoke(app, ["console"])
+    assert r.exit_code == 0
+    assert "url" in seen, "the deprecated alias must still open the REPL"
+    text = _all_output(r)
+    assert "deprecated" in text and "visus repl" in text
+
+
+def test_console_deprecation_does_not_pollute_stdout() -> None:
+    """The notice is a warning, so it must not corrupt a piped `visus console` run."""
+    import inspect
+
+    from visus.web.cli import main as cli_main
+
+    src = inspect.getsource(cli_main.console)
+    assert "err=True" in src, "the deprecation notice must go to stderr"

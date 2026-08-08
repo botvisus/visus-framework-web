@@ -1,11 +1,15 @@
 # The interactive REPL
 
 ```bash
-visus console                 # attach to the running session
-visus console https://example.com --headless
+visus repl                    # attach to the running session
+visus repl https://example.com --headless
 ```
 
-If no session is running, `visus console` **starts one** — headed unless you
+`visus console` is a deprecated alias that still opens the REPL (it prints a
+notice on stderr). The plain name now belongs to the browser's console
+messages: those are `visus logs`.
+
+If no session is running, `visus repl` **starts one** — headed unless you
 pass `--headless`. `quit` exits the REPL and leaves the session alive.
 
 The REPL is a shorter dialect of the CLI, not a different tool. Six names

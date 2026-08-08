@@ -1273,13 +1273,30 @@ def find_image(
     output.emit(result, table=table)
 
 
-@app.command()
-def console(
+@app.command("repl")
+def repl(
     url: str = typer.Argument(None, help="Optional URL to open."),
     engine: str = typer.Option("chrome", "--engine", "-e"),
     headless: bool = typer.Option(False, "--headless"),
 ) -> None:
     """Open an interactive REPL attached to the session (starts one if none)."""
+    from visus.web.cli.console import run_console
+
+    run_console(url, engine=engine, headless=headless)
+
+
+@app.command("console")
+def console(
+    url: str = typer.Argument(None, help="Optional URL to open."),
+    engine: str = typer.Option("chrome", "--engine", "-e"),
+    headless: bool = typer.Option(False, "--headless"),
+) -> None:
+    """DEPRECATED alias for `visus repl`. Browser console messages are `visus logs`."""
+    typer.echo(
+        "warning: `visus console` is deprecated — use `visus repl`. "
+        "(Browser console messages are `visus logs`.)",
+        err=True,
+    )
     from visus.web.cli.console import run_console
 
     run_console(url, engine=engine, headless=headless)

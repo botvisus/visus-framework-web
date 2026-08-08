@@ -103,8 +103,10 @@ On Windows, the shell mangles `<`, `>` and `"` — `visus translate` exists
 precisely for that. Read **[references/windows-shell.md](references/windows-shell.md)**
 before quoting a selector in PowerShell.
 
-`visus console` opens a REPL attached to the live session with a shorter
-vocabulary: **[references/cli-repl.md](references/cli-repl.md)**.
+`visus repl` opens a REPL attached to the live session with a shorter
+vocabulary: **[references/cli-repl.md](references/cli-repl.md)**. (`visus
+console` still works as a deprecated alias; the name now belongs to the
+browser's console messages, which are `visus logs`.)
 
 ## MCP server
 

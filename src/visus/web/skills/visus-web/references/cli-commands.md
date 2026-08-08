@@ -26,7 +26,8 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file (relative paths honour `--output-dir`). |
-| `visus console [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
+| `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
+| `visus console [URL] --engine <e> --headless` | **Deprecated** alias for `visus repl`; prints a notice on stderr and still opens the REPL. The name is reserved for the browser's console messages, which are `visus logs`. |
 
 ### Navigation
 

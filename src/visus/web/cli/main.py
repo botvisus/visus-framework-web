@@ -1208,6 +1208,40 @@ def clear_cookies() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Storage state (cookies + localStorage/sessionStorage)
+# ---------------------------------------------------------------------------
+
+
+@app.command("state-save")
+def state_save(
+    file: str = typer.Argument("storage-state.json", help="Where to write the snapshot."),
+) -> None:
+    """Save cookies + web storage to a JSON file (reuse it to skip a login)."""
+    # Resolve against the CLIENT's cwd — the daemon's cwd may differ.
+    path = str(Path(file).resolve())
+    result = _send("state_save", {"path": path})
+    output.emit(
+        result,
+        table=(
+            f"saved {result['path']} "
+            f"({result['cookies']} cookie(s), {result['origins']} origin(s))"
+        ),
+    )
+
+
+@app.command("state-load")
+def state_load(
+    file: str = typer.Argument(..., help="A snapshot written by `visus state-save`."),
+) -> None:
+    """Restore cookies + web storage from a JSON file.
+
+    Navigate to the target origin first (`visus goto <url>`): cookies only apply
+    to the loaded domain and web storage is per-origin.
+    """
+    output.emit(_send("state_load", {"path": str(Path(file).resolve())}))
+
+
+# ---------------------------------------------------------------------------
 # JavaScript
 # ---------------------------------------------------------------------------
 

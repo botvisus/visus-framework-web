@@ -373,6 +373,7 @@ command accepts `--json`.
 | `visus dialog --accept/--dismiss --prompt-text <t>` | Handle the next alert/confirm/prompt. |
 | `visus cookies [--json]` | List cookies. |
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
+| `visus state-save [FILE]` / `visus state-load <FILE>` | Save / restore cookies + web storage (skip a login next run). |
 | `visus eval "<fn>" [arg] [--json]` | Evaluate JS in the page (e.g. `'() => document.title'`). |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far (Chromium). |
 | `visus requests [--filter <s>] [--json]` | Network responses captured so far (Chromium). |

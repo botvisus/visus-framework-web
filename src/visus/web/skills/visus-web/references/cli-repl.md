@@ -66,6 +66,8 @@ expect TARGET text   assert the target contains text (PASSED/FAILED)
 cookies              list cookies for the context
 add-cookies json     add cookies from a JSON list
 clear-cookies        clear every cookie in the context
+state-save [file]    save cookies + web storage (default storage-state.json)
+state-load file      restore a snapshot (navigate to the origin first)
 eval expr            evaluate a JS expression
 logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
 requests [FILTER]    captured network responses (substring URL filter)

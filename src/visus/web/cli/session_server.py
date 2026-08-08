@@ -101,7 +101,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "click", "dblclick", "fill", "check", "uncheck", "select", "press",
         "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
-        "add_cookies", "clear_cookies", "eval",
+        "add_cookies", "clear_cookies", "eval", "state_load",
     }
 )
 
@@ -835,6 +835,27 @@ class SessionHandler:
     def _op_clear_cookies(self, args: dict[str, Any]) -> str:
         self.context().clear_cookies()
         return "cookies cleared"
+
+    # --- storage state (context-level) -----------------------------------
+    def _op_state_save(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Snapshot cookies + web storage to a JSON file (reuse it to skip a login)."""
+        path = args.get("path")
+        state = self.context().storage_state(path=path)
+        return {
+            "path": str(Path(path).resolve()) if path else None,
+            "cookies": len(state.get("cookies", [])),
+            "origins": len(state.get("origins", [])),
+        }
+
+    def _op_state_load(self, args: dict[str, Any]) -> str:
+        """Apply a snapshot written by ``state_save``.
+
+        Cookies only apply to the currently-loaded domain and web storage is
+        per-origin, so navigate to the target origin BEFORE loading.
+        """
+        path = str(args["path"])
+        self.context().restore_storage_state(path)
+        return f"restored storage state from {path}"
 
     # --- javascript ------------------------------------------------------
     def _op_eval(self, args: dict[str, Any]) -> dict[str, Any]:

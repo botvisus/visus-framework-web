@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head><title>storage fixture</title></head>
+  <body>
+    <h1>Storage</h1>
+    <div id="ls"></div>
+    <div id="ss"></div>
+    <script>
+      // Seed both web storages so storage_state() has something to snapshot and
+      // the `visus storage` commands have something to read.
+      localStorage.setItem('token', 'seed-local');
+      sessionStorage.setItem('tab', 'seed-session');
+      document.getElementById('ls').textContent = localStorage.getItem('token');
+      document.getElementById('ss').textContent = sessionStorage.getItem('tab');
+    </script>
+  </body>
+</html>

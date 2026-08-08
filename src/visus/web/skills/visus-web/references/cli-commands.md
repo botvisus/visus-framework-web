@@ -89,6 +89,8 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus dialog --accept/--dismiss --prompt-text <t>` | Handle the next alert/confirm/prompt. |
 | `visus cookies [--json]` | List cookies. |
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
+| `visus state-save [FILE]` | Snapshot cookies **and** localStorage/sessionStorage to JSON (default `storage-state.json`). Paths resolve against the client's cwd. |
+| `visus state-load <FILE>` | Restore a `state-save` snapshot — the login-reuse flow. **Navigate to the target origin first** (`visus goto <url>`): cookies only apply to the loaded domain and web storage is per-origin. |
 | `visus eval "<fn>" [arg] [--json]` | Evaluate JS in the page (e.g. `'() => document.title'`). |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far. `LEVEL` filters case-insensitively on `SEVERE` / `WARNING` / `INFO`. Chromium engines only. |
 | `visus requests [--filter <s>] [-F <s>] [--json]` | Network responses captured so far, numbered. `--filter` is a plain substring test on the URL. Chromium only. |

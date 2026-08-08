@@ -54,6 +54,8 @@ commands:
   cookies              list cookies for the context
   add-cookies json     add cookies from a JSON list
   clear-cookies        clear every cookie in the context
+  state-save [file]    save cookies + web storage (default storage-state.json)
+  state-load file      restore a snapshot (navigate to the origin first)
   eval expr            evaluate a JS expression
   logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
   requests [FILTER]    captured network responses (substring URL filter)
@@ -411,6 +413,12 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             return _act("add_cookies", {"cookies": parsed})
         if cmd == "clear-cookies":
             return _act("clear_cookies", {})
+        if cmd == "state-save":
+            path = str(Path(rest[0] if rest else "storage-state.json").resolve())
+            r = send("state_save", {"path": path})
+            return f"saved {r['path']} ({r['cookies']} cookie(s), {r['origins']} origin(s))"
+        if cmd == "state-load":
+            return str(send("state_load", {"path": str(Path(rest[0]).resolve())}))
         if cmd == "eval":
             return _act(
                 "eval",

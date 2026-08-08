@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -110,3 +112,101 @@ def test_repl_tab_activate_and_tab_follow() -> None:
     assert calls[1] == ("tab_follow", {"enabled": False})
     assert calls[2] == ("tab_follow", {"enabled": True})
     assert "tab-follow" in console.dispatch("help", send)
+
+
+# ---------------------------------------------------------------------------
+# storage state save / load
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.browser
+def test_state_save_then_load_round_trips_local_storage(
+    base_url: str, tmp_path: Path
+) -> None:
+    """A saved snapshot restores localStorage into a fresh session — the login-reuse flow."""
+    state_file = tmp_path / "state.json"
+    first = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/storage.html"
+    )
+    try:
+        first.handle(
+            "eval", {"expression": "() => localStorage.setItem('token', 'saved-value')"}
+        )
+        saved = first.handle("state_save", {"path": str(state_file)})
+        assert saved["ok"] is True, saved
+        assert saved["result"]["path"] == str(state_file.resolve())
+        assert saved["result"]["origins"] >= 1
+    finally:
+        first.close()
+
+    doc = json.loads(state_file.read_text(encoding="utf-8"))
+    assert any(
+        any(item["name"] == "token" and item["value"] == "saved-value"
+            for item in origin.get("localStorage", []))
+        for origin in doc.get("origins", [])
+    ), doc
+
+    second = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/storage.html"
+    )
+    try:
+        # The fixture re-seeds 'seed-local' on every load; restoring overwrites it.
+        loaded = second.handle("state_load", {"path": str(state_file)})
+        assert loaded["ok"] is True, loaded
+        value = second.handle(
+            "eval", {"expression": "() => localStorage.getItem('token')"}
+        )["result"]["result"]
+        assert value == "saved-value"
+    finally:
+        second.close()
+
+
+def test_cli_state_save_and_load_resolve_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_send(op: str, args: dict[str, Any] | None = None) -> Any:
+        calls.append((op, args or {}))
+        if op == "state_save":
+            return {"path": (args or {}).get("path"), "cookies": 2, "origins": 1}
+        return "restored storage state"
+
+    monkeypatch.setattr(session_client, "send", fake_send)
+    target = tmp_path / "auth.json"
+    r1 = runner.invoke(app, ["state-save", str(target)])
+    assert r1.exit_code == 0, r1.output
+    r2 = runner.invoke(app, ["state-load", str(target)])
+    assert r2.exit_code == 0
+    assert calls[0] == ("state_save", {"path": str(target.resolve())})
+    assert calls[1] == ("state_load", {"path": str(target.resolve())})
+
+
+def test_cli_state_save_defaults_to_storage_state_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {}))
+        or {"path": (args or {}).get("path"), "cookies": 0, "origins": 0},
+    )
+    r = runner.invoke(app, ["state-save"])
+    assert r.exit_code == 0
+    assert calls[0][1]["path"].endswith("storage-state.json")
+
+
+def test_repl_state_commands() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return {"path": args.get("path"), "cookies": 1, "origins": 1}
+
+    console.dispatch("state-save auth.json", send)
+    console.dispatch("state-load auth.json", send)
+    assert calls[0][0] == "state_save"
+    assert calls[0][1]["path"] == str(Path("auth.json").resolve())
+    assert calls[1][0] == "state_load"
+    assert "state-save" in console.dispatch("help", send)

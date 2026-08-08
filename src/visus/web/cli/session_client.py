@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -20,6 +21,44 @@ from typing import Any
 
 class SessionError(RuntimeError):
     """Raised when no live session is found or a daemon op fails."""
+
+
+DEFAULT_SESSION_NAME = "default"
+
+# The name becomes a FILE name under .visus/sessions/, so path separators, `..`
+# and a leading dot are all refused rather than escaped.
+_SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+_session_name: str | None = None
+
+
+def validate_session_name(name: str) -> str:
+    """Return *name* when it is a safe session name, else raise :class:`SessionError`."""
+    if not _SESSION_NAME_RE.match(name or ""):
+        raise SessionError(
+            f"invalid session name {name!r} — start with a letter or digit and use only "
+            "letters, digits, '.', '_' or '-' (max 64 chars); the name becomes a file "
+            "name under .visus/sessions/"
+        )
+    return name
+
+
+def set_session_name(name: str | None) -> None:
+    """Pin the session name for this process (the CLI's ``--session`` / ``-S``)."""
+    global _session_name
+    _session_name = validate_session_name(name) if name else None
+
+
+def session_name(name: str | None = None) -> str:
+    """Resolve the session name: explicit arg > ``-S`` > ``VISUS_WEB_SESSION`` > default."""
+    if name:
+        return validate_session_name(name)
+    if _session_name:
+        return _session_name
+    env = os.environ.get("VISUS_WEB_SESSION")
+    if env:
+        return validate_session_name(env)
+    return DEFAULT_SESSION_NAME
 
 
 # How long a liveness answer may be reused. Short enough that a dying daemon is
@@ -80,24 +119,35 @@ def _socket_open(port: int, *, host: str = "127.0.0.1", timeout: float = 1.0) ->
         return False
 
 
-def _find_session_file(start_dir: str | Path | None = None) -> Path | None:
-    """Search upward from *start_dir* for ``.visus/session.json`` (git-style)."""
+def _find_session_file(
+    start_dir: str | Path | None = None, name: str | None = None
+) -> Path | None:
+    """Search upward from *start_dir* for ``.visus/sessions/<name>.json`` (git-style).
+
+    The upward walk is deliberate: a command run in ``repo/src`` must reach the
+    session started in ``repo``. It is also why every "already running" message
+    prints the file it resolved — the same walk used to bind a subfolder to its
+    parent's daemon without ever saying so.
+    """
     cur = Path(start_dir) if start_dir is not None else Path.cwd()
     cur = cur.resolve()
+    filename = f"{session_name(name)}.json"
     for d in [cur, *cur.parents]:
-        candidate = d / ".visus" / "session.json"
+        candidate = d / ".visus" / "sessions" / filename
         if candidate.is_file():
             return candidate
     return None
 
 
-def find_session(start_dir: str | Path | None = None) -> dict[str, Any] | None:
-    """Return the live session dict, or ``None``. Cleans up stale session files.
+def find_session(
+    start_dir: str | Path | None = None, name: str | None = None
+) -> dict[str, Any] | None:
+    """Return the live session dict for *name*, or ``None``. Cleans stale files.
 
     A session is live when its pid is alive AND its socket accepts. A session
     file that fails either check is treated as stale and deleted.
     """
-    sf = _find_session_file(start_dir)
+    sf = _find_session_file(start_dir, name)
     if sf is None:
         return None
     try:
@@ -172,9 +222,10 @@ def send_envelope(
     args: dict[str, Any] | None = None,
     *,
     start_dir: str | Path | None = None,
+    name: str | None = None,
     timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Send an op and return the daemon's FULL reply envelope.
+    """Send an op to the named session and return the daemon's FULL reply envelope.
 
     The envelope carries ``result`` plus, for a mutating op, ``page`` state, the
     generated ``code`` line, and the ``snapshot`` file path — everything the CLI
@@ -183,9 +234,12 @@ def send_envelope(
     The socket deadline defaults to :func:`socket_timeout_for` so a long
     ``--timeout`` on the op is not cut short by the transport.
     """
-    info = find_session(start_dir)
+    info = find_session(start_dir, name)
     if info is None:
-        raise SessionError("no live session — run `visus session start` first")
+        raise SessionError(
+            f"no live session {session_name(name)!r} — run `visus session start` first "
+            "(`visus session list` shows every session)"
+        )
     resp = _send_raw(
         int(info["port"]),
         {"token": info["token"], "op": op, "args": args or {}},
@@ -201,10 +255,13 @@ def send(
     args: dict[str, Any] | None = None,
     *,
     start_dir: str | Path | None = None,
+    name: str | None = None,
     timeout: float | None = None,
 ) -> Any:
-    """Send an op to the live daemon and return its ``result`` (raises on failure)."""
-    return send_envelope(op, args, start_dir=start_dir, timeout=timeout).get("result")
+    """Send an op to the named session and return its ``result`` (raises on failure)."""
+    return send_envelope(op, args, start_dir=start_dir, name=name, timeout=timeout).get(
+        "result"
+    )
 
 
 def _log_tail(base: Path, *, lines: int = 20) -> str:
@@ -222,6 +279,7 @@ def start_daemon(
     headless: bool = False,
     url: str | None = None,
     *,
+    name: str | None = None,
     user_data_dir: str | None = None,
     remote_url: str | None = None,
     slow_mo: int = 0,
@@ -229,25 +287,33 @@ def start_daemon(
     timeout: float = 20.0,
     idle_timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Spawn a detached daemon and block until its socket accepts.
+    """Spawn a detached daemon for session *name* and block until its socket accepts.
+
+    Sessions are namespaced: ``.visus/sessions/<name>.json``. Discovery walks
+    upward, so a second session in the same tree needs its own ``--session`` name.
 
     ``user_data_dir`` reuses a persistent browser profile (cookies/logins survive
     across runs), ``remote_url`` targets a Selenium Grid instead of a local
     browser, and ``slow_mo`` delays every action by that many milliseconds.
 
-    Returns the session dict. Raises :class:`SessionError` if an existing live
-    session is already present or the daemon does not come up in time.
+    Returns the session dict. Raises :class:`SessionError` if a live session of the
+    same name is already present or the daemon does not come up in time.
     """
+    resolved = session_name(name)
     base = Path(cwd) if cwd is not None else Path.cwd()
-    existing = find_session(base)
+    existing = find_session(base, resolved)
     if existing is not None:
         raise SessionError(
-            f"a session is already running (pid {existing['pid']}, port {existing['port']})"
+            f"session {resolved!r} is already running "
+            f"(pid {existing['pid']}, port {existing['port']}, "
+            f"state {existing.get('_file', '?')}) — stop it, or start another one "
+            "with `--session <name>`"
         )
 
     env = dict(os.environ)
     env["VISUS_WEB_ENGINE"] = engine
     env["VISUS_WEB_HEADLESS"] = "1" if headless else "0"
+    env["VISUS_WEB_SESSION"] = resolved
     if url:
         env["VISUS_WEB_URL"] = url
     if user_data_dir:
@@ -283,7 +349,7 @@ def start_daemon(
         close_fds=True,
     )
 
-    sf = base / ".visus" / "session.json"
+    sf = base / ".visus" / "sessions" / f"{resolved}.json"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if sf.is_file():
@@ -305,11 +371,11 @@ def start_daemon(
     raise SessionError(f"daemon did not come up within {timeout:.0f}s{detail}")
 
 
-def stop(*, start_dir: str | Path | None = None) -> str:
-    """Shut down the live daemon. Returns a status message."""
-    info = find_session(start_dir)
+def stop(*, start_dir: str | Path | None = None, name: str | None = None) -> str:
+    """Shut down the named session's daemon. Returns a status message."""
+    info = find_session(start_dir, name)
     if info is None:
-        return "no session running"
+        return f"no session {session_name(name)!r} running"
     try:
         _send_raw(int(info["port"]), {"token": info["token"], "op": "shutdown", "args": {}})
     except (OSError, SessionError):
@@ -325,14 +391,16 @@ def stop(*, start_dir: str | Path | None = None) -> str:
     return "session stopped"
 
 
-def status(*, start_dir: str | Path | None = None) -> dict[str, Any] | None:
-    """Return the live daemon's status dict, or ``None`` if no session is running.
+def status(
+    *, start_dir: str | Path | None = None, name: str | None = None
+) -> dict[str, Any] | None:
+    """Return the named session's status dict, or ``None`` when it is not running.
 
     Sends on the connection info from the SINGLE ``find_session`` call above —
     routing through :func:`send` would re-run discovery and pay a second liveness
     probe (on Windows: a second ``tasklist`` with a 5 s timeout).
     """
-    info = find_session(start_dir)
+    info = find_session(start_dir, name)
     if info is None:
         return None
     resp = _send_raw(int(info["port"]), {"token": info["token"], "op": "status", "args": {}})
@@ -340,6 +408,7 @@ def status(*, start_dir: str | Path | None = None) -> dict[str, Any] | None:
         raise SessionError(str(resp.get("error", "unknown error")))
     result = resp.get("result")
     merged: dict[str, Any] = {
+        "name": session_name(name),
         "pid": info["pid"],
         "port": info["port"],
         "engine": info.get("engine"),
@@ -350,16 +419,19 @@ def status(*, start_dir: str | Path | None = None) -> dict[str, Any] | None:
     return merged
 
 
-def _find_lock_file(start_dir: str | Path | None = None) -> Path | None:
-    """Search upward from *start_dir* for ``.visus/session.json.lock`` (git-style).
+def _find_lock_file(
+    start_dir: str | Path | None = None, name: str | None = None
+) -> Path | None:
+    """Search upward for ``.visus/sessions/<name>.json.lock`` (git-style).
 
     A wedged project has the LOCK but no session file, so the lock needs its own
     discovery walk — :func:`_find_session_file` would return ``None``.
     """
     cur = Path(start_dir) if start_dir is not None else Path.cwd()
     cur = cur.resolve()
+    filename = f"{session_name(name)}.json.lock"
     for d in [cur, *cur.parents]:
-        candidate = d / ".visus" / "session.json.lock"
+        candidate = d / ".visus" / "sessions" / filename
         if candidate.is_file():
             return candidate
     return None
@@ -381,7 +453,7 @@ def _terminate(pid: int) -> None:
         pass
 
 
-def kill(*, start_dir: str | Path | None = None) -> str:
+def kill(*, start_dir: str | Path | None = None, name: str | None = None) -> str:
     """Force-clear this project's session state. Returns a status message.
 
     The escape hatch for a wedged daemon: ``stop()`` needs a reachable socket and
@@ -392,7 +464,7 @@ def kill(*, start_dir: str | Path | None = None) -> str:
     removed: list[str] = []
     pid = -1
 
-    sf = _find_session_file(start_dir)
+    sf = _find_session_file(start_dir, name)
     if sf is not None:
         try:
             info: dict[str, Any] = json.loads(sf.read_text(encoding="utf-8"))
@@ -406,7 +478,7 @@ def kill(*, start_dir: str | Path | None = None) -> str:
         if had_lock:
             removed.append(lock_beside.name)
 
-    lock = _find_lock_file(start_dir)
+    lock = _find_lock_file(start_dir, name)
     if lock is not None:
         if pid <= 0:
             try:

@@ -54,6 +54,13 @@ def _root(
         envvar="VISUS_WEB_OUTPUT_DIR",
         help="Directory for screenshots/snapshots/scripts (default: the current directory).",
     ),
+    session: str = typer.Option(
+        None,
+        "--session",
+        "-S",
+        envvar="VISUS_WEB_SESSION",
+        help="Session name (default: 'default'). `-s` is --selector, so this is -S.",
+    ),
 ) -> None:
     """Global entry point for every `visus` subcommand.
 
@@ -72,6 +79,16 @@ def _root(
     output.set_mode(as_json=as_json, raw=raw)
     output.set_output_dir(output_dir)
     output.set_snapshot_sink(snapshot_sink)
+    # AFTER set_mode (PLAN 1's rule 3) so an invalid name leaves through
+    # emit_error formatted for the active mode, and BEFORE the skill check.
+    # The try/except is _root's only error funnel: without it a bad name would
+    # be a traceback rather than a clean exit 1 on stderr.
+    from visus.web.cli import session_client
+
+    try:
+        session_client.set_session_name(session)
+    except session_client.SessionError as exc:
+        output.emit_error(f"error: {exc}")
     # The guard tuple is PLAN 1's constant — never re-inline the literal, and never
     # shrink it: warning a user while they run the command that fixes the warning
     # is the bug it exists to prevent.

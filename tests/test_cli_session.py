@@ -1288,7 +1288,7 @@ def test_cli_list_fields_no_highlight_still_parses(monkeypatch: pytest.MonkeyPat
 
 def test_run_console_starts_session_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, Any] = {}
-    monkeypatch.setattr(console.session_client, "find_session", lambda d=None: None)
+    monkeypatch.setattr(console.session_client, "find_session", lambda d=None, name=None: None)
     monkeypatch.setattr(
         console.session_client,
         "start_daemon",
@@ -1310,7 +1310,7 @@ def test_run_console_starts_session_when_none(monkeypatch: pytest.MonkeyPatch) -
 def test_run_console_gotos_when_session_exists(monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr(
-        console.session_client, "find_session", lambda d=None: {"pid": 1, "port": 2}
+        console.session_client, "find_session", lambda d=None, name=None: {"pid": 1, "port": 2}
     )
     _patch_client(monkeypatch, lambda op, args=None, **kw: sent.append((op, args)) or None)
     console.run_console(
@@ -1323,7 +1323,7 @@ def test_run_console_gotos_when_session_exists(monkeypatch: pytest.MonkeyPatch) 
 
 def test_run_console_loop_dispatches_then_quits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        console.session_client, "find_session", lambda d=None: {"pid": 1, "port": 2}
+        console.session_client, "find_session", lambda d=None, name=None: {"pid": 1, "port": 2}
     )
     _patch_client(monkeypatch, lambda op, args=None, **kw: "ok")
     lines = iter(["help", "quit"])
@@ -1341,7 +1341,7 @@ def test_run_console_clean_break_on_eof_or_interrupt(
     monkeypatch: pytest.MonkeyPatch, exc: type[BaseException]
 ) -> None:
     monkeypatch.setattr(
-        console.session_client, "find_session", lambda d=None: {"pid": 1, "port": 2}
+        console.session_client, "find_session", lambda d=None, name=None: {"pid": 1, "port": 2}
     )
 
     def _raise(_prompt: str) -> str:
@@ -1368,10 +1368,10 @@ def test_cli_console_command_invokes_run_console(monkeypatch: pytest.MonkeyPatch
 # ---------------------------------------------------------------------------
 
 
-def _write_session(dir_: Path, info: dict[str, Any]) -> Path:
-    visus = dir_ / ".visus"
-    visus.mkdir(parents=True, exist_ok=True)
-    sf = visus / "session.json"
+def _write_session(dir_: Path, info: dict[str, Any], name: str = "default") -> Path:
+    sessions = dir_ / ".visus" / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    sf = sessions / f"{name}.json"
     sf.write_text(json.dumps(info), encoding="utf-8")
     return sf
 
@@ -1418,9 +1418,9 @@ def test_find_session_cleans_stale_socket_refused(
 
 
 def test_find_session_cleans_corrupt_file(tmp_path: Path) -> None:
-    visus = tmp_path / ".visus"
+    visus = tmp_path / ".visus" / "sessions"
     visus.mkdir(parents=True)
-    sf = visus / "session.json"
+    sf = visus / "default.json"
     sf.write_text("{not json", encoding="utf-8")
     assert session_client.find_session(tmp_path) is None
     assert not sf.exists()
@@ -1454,7 +1454,7 @@ def test_stop_on_a_wedged_daemon_removes_the_lock(
     lock = sf.with_name(sf.name + ".lock")
     lock.write_text("1", encoding="utf-8")
     info = {"pid": 1, "port": 9, "token": "t", "_file": str(sf)}
-    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None: info)
+    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None, name=None: info)
     monkeypatch.setattr(
         session_client,
         "_send_raw",
@@ -1474,7 +1474,7 @@ def test_status_none_without_session(tmp_path: Path) -> None:
 
 
 def test_stop_without_session(tmp_path: Path) -> None:
-    assert session_client.stop(start_dir=tmp_path) == "no session running"
+    assert session_client.stop(start_dir=tmp_path) == "no session 'default' running"
 
 
 def test_send_real_raises_on_daemon_error(
@@ -1598,7 +1598,9 @@ def test_cli_send_maps_a_corrupt_response_to_a_clean_exit(
 
 def test_start_daemon_refuses_when_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        session_client, "find_session", lambda d=None: {"pid": 7, "port": 8, "token": "t"}
+        session_client,
+        "find_session",
+        lambda d=None, name=None: {"pid": 7, "port": 8, "token": "t"},
     )
     with pytest.raises(session_client.SessionError, match="already running"):
         session_client.start_daemon("chrome", True, None, cwd=tmp_path)
@@ -1613,7 +1615,7 @@ def test_start_daemon_forwards_the_idle_timeout(
         def __init__(self, *a: Any, **kw: Any) -> None:
             captured["env"] = kw["env"]
 
-    monkeypatch.setattr(session_client, "find_session", lambda d=None: None)
+    monkeypatch.setattr(session_client, "find_session", lambda d=None, name=None: None)
     monkeypatch.setattr(session_client.subprocess, "Popen", _FakePopen)
     with pytest.raises(session_client.SessionError):
         session_client.start_daemon(
@@ -1631,9 +1633,9 @@ def test_start_daemon_timeout_reports_the_real_daemon_log(tmp_path: Path) -> Non
     """
     import os as _os
 
-    visus = tmp_path / ".visus"
+    visus = tmp_path / ".visus" / "sessions"
     visus.mkdir(parents=True)
-    (visus / "session.json.lock").write_text(str(_os.getpid()), encoding="utf-8")
+    (visus / "default.json.lock").write_text(str(_os.getpid()), encoding="utf-8")
 
     with pytest.raises(session_client.SessionError) as excinfo:
         session_client.start_daemon("chrome", True, None, cwd=tmp_path, timeout=8.0)
@@ -1649,6 +1651,7 @@ def test_log_tail_of_a_missing_log_is_empty(tmp_path: Path) -> None:
 
 
 def test_log_tail_returns_only_the_last_lines(tmp_path: Path) -> None:
+    # daemon.log stays at .visus/daemon.log — only session STATE is namespaced.
     visus = tmp_path / ".visus"
     visus.mkdir(parents=True)
     (visus / "daemon.log").write_text(
@@ -1666,7 +1669,7 @@ def test_start_daemon_retries_through_partial_session_file(
     Exercises start_daemon's not-yet-ready polling: JSONDecodeError retry, then a
     valid file whose socket accepts -> returns the info dict.
     """
-    monkeypatch.setattr(session_client, "find_session", lambda d=None: None)
+    monkeypatch.setattr(session_client, "find_session", lambda d=None, name=None: None)
 
     # A real listening socket so _socket_open() succeeds once the file is valid.
     srv = socket.socket()
@@ -1674,9 +1677,9 @@ def test_start_daemon_retries_through_partial_session_file(
     srv.listen(1)
     port = srv.getsockname()[1]
 
-    visus = tmp_path / ".visus"
+    visus = tmp_path / ".visus" / "sessions"
     visus.mkdir(parents=True, exist_ok=True)
-    sf = visus / "session.json"
+    sf = visus / "default.json"
 
     state = {"calls": 0}
 
@@ -1713,7 +1716,7 @@ def test_stop_swallows_send_failure_on_dead_socket(
     """stop() against a session whose port refuses must swallow the error and clean up."""
     sf = _write_session(tmp_path, {"pid": 1, "port": 9, "token": "t"})
     info = {"pid": 1, "port": 9, "token": "t", "_file": str(sf)}
-    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None: info)
+    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None, name=None: info)
     # _send_raw blows up (nothing listening); stop() must still finish cleanly.
     monkeypatch.setattr(
         session_client,
@@ -1946,10 +1949,10 @@ def test_serve_writes_session_file_atomically(tmp_path: Path) -> None:
     token = "tok"
     t, port = _serve_in_thread(handler, token, tmp_path)
     try:
-        visus = tmp_path / ".visus"
-        leftovers = list(visus.glob("session.json.*.tmp"))
+        visus = tmp_path / ".visus" / "sessions"
+        leftovers = list(visus.glob("default.json.*.tmp"))
         assert leftovers == []
-        assert (visus / "session.json").is_file()
+        assert (visus / "default.json").is_file()
     finally:
         _shutdown_thread(t, port, token)
 
@@ -2023,7 +2026,7 @@ def test_session_file_is_written_privately(tmp_path: Path) -> None:
     try:
         sf = session_server.session_file(tmp_path)
         assert json.loads(sf.read_text(encoding="utf-8"))["token"] == "tok"
-        assert list((tmp_path / ".visus").glob("session.json.*.tmp")) == []
+        assert list((tmp_path / ".visus" / "sessions").glob("default.json.*.tmp")) == []
         if hasattr(_os, "getuid"):
             assert _stat.S_IMODE(sf.stat().st_mode) == 0o600
     finally:
@@ -2043,7 +2046,7 @@ def test_serve_second_daemon_aborts_via_lock(tmp_path: Path) -> None:
     finally:
         _shutdown_thread(t, port, token)
     # Lock is released on shutdown so a fresh daemon can claim it again.
-    assert not (tmp_path / ".visus" / "session.json.lock").exists()
+    assert not (tmp_path / ".visus" / "sessions" / "default.json.lock").exists()
 
 
 def test_serve_reaps_itself_after_the_idle_timeout(tmp_path: Path) -> None:
@@ -2180,7 +2183,7 @@ def test_closing_the_last_tab_really_stops_the_daemon(tmp_path: Path) -> None:
         t.join(timeout=20)
         assert not t.is_alive(), "the daemon kept serving after the last tab closed"
         assert not session_server.session_file(tmp_path).is_file()
-        assert not (tmp_path / ".visus" / "session.json.lock").exists()
+        assert not (tmp_path / ".visus" / "sessions" / "default.json.lock").exists()
     finally:
         if t.is_alive():
             _shutdown_thread(t, port, token)
@@ -2318,18 +2321,18 @@ def test_kill_removes_json_and_lock_and_reports(tmp_path: Path) -> None:
     lock.write_text("999999", encoding="utf-8")
     msg = session_client.kill(start_dir=tmp_path)
     assert not sf.exists() and not lock.exists()
-    assert "session.json" in msg and "session.json.lock" in msg
+    assert "default.json" in msg and "default.json.lock" in msg
 
 
 def test_kill_removes_an_orphaned_lock_with_no_session_file(tmp_path: Path) -> None:
     """The wedge case: the json was cleaned, the lock was not."""
-    visus = tmp_path / ".visus"
+    visus = tmp_path / ".visus" / "sessions"
     visus.mkdir(parents=True)
-    lock = visus / "session.json.lock"
+    lock = visus / "default.json.lock"
     lock.write_text(str(_exited_pid()), encoding="utf-8")
     msg = session_client.kill(start_dir=tmp_path)
     assert not lock.exists()
-    assert "session.json.lock" in msg
+    assert "default.json.lock" in msg
 
 
 def test_kill_with_nothing_to_remove(tmp_path: Path) -> None:

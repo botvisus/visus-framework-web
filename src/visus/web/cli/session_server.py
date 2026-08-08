@@ -1643,10 +1643,20 @@ def render_snapshot_yaml(elements: list[dict[str, Any]], *, url: str, title: str
     return "\n".join(out) + "\n"
 
 
-def session_file(cwd: str | Path | None = None) -> Path:
-    """Path to ``.visus/session.json`` under *cwd* (default: process cwd)."""
+def sessions_dir(cwd: str | Path | None = None) -> Path:
+    """Directory holding this project's named session files."""
     base = Path(cwd) if cwd is not None else Path.cwd()
-    return base / ".visus" / "session.json"
+    return base / ".visus" / "sessions"
+
+
+def session_file(cwd: str | Path | None = None, name: str | None = None) -> Path:
+    """Path to ``.visus/sessions/<name>.json`` under *cwd* (default: process cwd).
+
+    ``.visus/`` is already the daemon's directory, so the namespace lives inside
+    it. The ownership lock is ``<name>.json.lock``, which :func:`_claim_lock`
+    derives from this path without any change.
+    """
+    return sessions_dir(cwd) / f"{name or 'default'}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -1786,13 +1796,17 @@ def serve(
     cwd: str | Path | None = None,
     host: str = "127.0.0.1",
     idle_timeout: float | None = None,
+    name: str | None = None,
 ) -> None:
     """Bind a JSON-lines TCP server, write the session file, serve until shutdown.
 
     *idle_timeout* (seconds, ``None`` = never) reaps a session nobody is using:
     an abandoned headed browser otherwise sits on the desktop forever.
+    *name* selects the ``.visus/sessions/<name>.json`` state file, so several
+    daemons can serve the same project directory at once.
     """
-    sf = session_file(cwd)
+    resolved_name = name or "default"
+    sf = session_file(cwd, resolved_name)
     sf.parent.mkdir(parents=True, exist_ok=True)
     # Claim ownership atomically BEFORE binding / writing session.json so a
     # concurrently-spawned duplicate daemon aborts here and never serves.
@@ -1809,6 +1823,8 @@ def serve(
     # find_session() can never read a half-written file and delete it as "stale".
     payload = json.dumps(
         {
+            "name": resolved_name,
+            "cwd": str((Path(cwd) if cwd is not None else Path.cwd()).resolve()),
             "pid": os.getpid(),
             "port": port,
             "token": token,
@@ -1928,6 +1944,7 @@ def main(argv: list[str] | None = None) -> None:
         headless = os.environ.get("VISUS_WEB_HEADLESS", "0") != "0"
     url = argv[2] if len(argv) > 2 and argv[2] else os.environ.get("VISUS_WEB_URL") or None
     token = os.environ.get("VISUS_WEB_TOKEN") or secrets.token_hex(16)
+    name = os.environ.get("VISUS_WEB_SESSION") or "default"
     user_data_dir = os.environ.get("VISUS_WEB_USER_DATA_DIR") or None
     remote_url = os.environ.get("VISUS_WEB_REMOTE_URL") or None
     try:
@@ -1943,8 +1960,8 @@ def main(argv: list[str] | None = None) -> None:
         logger.info(msg)
 
     _log(
-        f"daemon starting engine={engine} headless={headless} url={url!r} "
-        f"user_data_dir={user_data_dir!r} remote_url={remote_url!r} "
+        f"daemon starting session={name!r} engine={engine} headless={headless} "
+        f"url={url!r} user_data_dir={user_data_dir!r} remote_url={remote_url!r} "
         f"slow_mo={slow_mo} pid={os.getpid()}"
     )
     handler = SessionHandler(
@@ -1956,7 +1973,7 @@ def main(argv: list[str] | None = None) -> None:
         slow_mo=slow_mo,
     )
     try:
-        serve(handler, token=token, idle_timeout=_idle_timeout_from_env())
+        serve(handler, token=token, idle_timeout=_idle_timeout_from_env(), name=name)
     except SessionLockedError as exc:
         # A duplicate daemon lost the ownership race: exit cleanly (no browser
         # was launched, the winner owns session.json) instead of crashing.

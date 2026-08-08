@@ -48,7 +48,7 @@ def test_cross_process_daemon_full_cycle(tmp_path: Path) -> None:
     transcript.append(f"started daemon pid={pid} port={port} (this process pid={os.getpid()})")
     assert pid != os.getpid()  # genuinely a different process
     assert _pid_alive(pid)
-    sf = tmp_path / ".visus" / "session.json"
+    sf = tmp_path / ".visus" / "sessions" / "default.json"
     assert sf.is_file()
 
     try:
@@ -97,7 +97,7 @@ def test_cross_process_daemon_full_cycle(tmp_path: Path) -> None:
     print("\n--- CROSS-PROCESS TRANSCRIPT ---\n" + "\n".join(transcript))
 
     assert not _pid_alive(pid), "daemon process did not exit after stop"
-    assert not sf.is_file(), "session.json was not cleaned up after stop"
+    assert not sf.is_file(), "the session file was not cleaned up after stop"
 
 
 @pytest.mark.browser
@@ -134,7 +134,7 @@ def test_start_recovers_after_the_daemon_is_hard_killed(tmp_path: Path) -> None:
     """
     first = session_client.start_daemon("chrome", headless=True, url=_PAGE, cwd=tmp_path)
     first_pid = int(first["pid"])
-    lock = tmp_path / ".visus" / "session.json.lock"
+    lock = tmp_path / ".visus" / "sessions" / "default.json.lock"
     assert lock.is_file(), "the daemon should hold a lock while serving"
 
     _hard_kill(first_pid)

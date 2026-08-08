@@ -634,6 +634,24 @@ class SessionHandler:
         self.page().clear_highlights()
         return "cleared"
 
+    def _op_highlight(self, args: dict[str, Any]) -> str:
+        """Draw (or clear) the single-element debug highlight box.
+
+        Distinct from ``clear_highlights``, which removes the NUMBERED overlay
+        drawn by ``list_fields``. ``style`` replaces the default border;
+        ``hide=True`` removes the box.
+        """
+        page = self.page()
+        if args.get("hide"):
+            # A page that never ran a locator has no window.__visus yet; resolving
+            # one forces the bundle in (same trick as cli/codegen.py).
+            page.locator("html").count()
+            page.evaluate("() => window.__visus.unhighlight()")
+            return "highlight cleared"
+        style = args.get("style")
+        self._target(args).first().highlight(style=str(style) if style else None)
+        return "highlighted"
+
     # --- navigation ------------------------------------------------------
     def _op_back(self, args: dict[str, Any]) -> str:
         page = self.page()

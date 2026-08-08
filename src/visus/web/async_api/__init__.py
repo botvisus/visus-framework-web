@@ -911,8 +911,8 @@ class AsyncLocator:
     async def scroll_into_view_if_needed(self) -> None:
         await asyncio.to_thread(self._loc.scroll_into_view_if_needed)
 
-    async def highlight(self) -> None:
-        await asyncio.to_thread(self._loc.highlight)
+    async def highlight(self, *, style: str | None = None) -> None:
+        await asyncio.to_thread(lambda: self._loc.highlight(style=style))
 
     async def count(self) -> int:
         return await asyncio.to_thread(self._loc.count)

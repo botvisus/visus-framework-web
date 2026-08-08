@@ -476,10 +476,13 @@ class Locator:
         """Scroll the element to the center of the viewport."""
         self.evaluate("el => el.scrollIntoView({block: 'center', inline: 'center'})")
 
-    def highlight(self) -> None:
+    def highlight(self, *, style: str | None = None) -> None:
         """Draw the debug highlight box around the element (remove with the next
-        highlight, or via ``page.clear_highlights()`` for the numbered overlay)."""
-        self.evaluate("el => window.__visus.highlight(el)")
+        highlight, or via ``page.clear_highlights()`` for the numbered overlay).
+
+        ``style`` replaces the default border, e.g. ``"2px dashed #0a0"``.
+        """
+        self.evaluate("(el, style) => window.__visus.highlight(el, style)", style)
 
     def screenshot(self, *, path: str | None = None) -> bytes:
         from pathlib import Path

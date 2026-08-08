@@ -109,7 +109,8 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus session-screenshot [idx] -o <png> --full-page` | Screenshot the session's page or a single element. |
 | `visus pdf <URL> -o <pdf>` | Print a URL to a PDF (Chromium). |
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |
-| `visus clear` | Remove the numbered field-highlight overlay. |
+| `visus clear` | Remove the numbered field-highlight overlay drawn by `list-fields --highlight`. |
+| `visus highlight [idx] [target] [--style <css>] [--hide]` | Box **one** element on the live page — what a human needs to see which element the agent chose. `--style` replaces the default border (e.g. `"2px dashed #0a0"`), `--hide` removes the box. Distinct from `visus clear`, which erases the numbered overlay. |
 | `visus read-text [idx] [target]` *(`[vision]`)* | OCR an element's screenshot → recognized text. |
 | `visus solve-captcha [idx] [target]` *(`[vision]`)* | OCR-solve a text CAPTCHA. |
 | `visus find-image <template.png> [idx] [target] -c <conf> [--json]` *(`[vision]`)* | Find a template image inside the page/element. |

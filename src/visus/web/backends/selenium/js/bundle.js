@@ -434,15 +434,18 @@
     return out;
   }
 
-  function highlight(el) {
+  function highlight(el, style) {
     unhighlight();
     if (!el || !el.getBoundingClientRect) return null;
     var r = el.getBoundingClientRect();
+    // `style` (optional) replaces the default border + glow, e.g. "2px dashed #0a0".
+    var edge = style
+      ? "border:" + style + ";"
+      : "border:3px solid #cc785c;box-shadow:0 0 0 2px rgba(204,120,92,.35);";
     var box = document.createElement("div");
     box.setAttribute("data-visus-highlight", "1");
     box.style.cssText =
-      "position:fixed;z-index:2147483647;pointer-events:none;box-sizing:border-box;" +
-      "border:3px solid #cc785c;box-shadow:0 0 0 2px rgba(204,120,92,.35);" +
+      "position:fixed;z-index:2147483647;pointer-events:none;box-sizing:border-box;" + edge +
       "left:" + r.left + "px;top:" + r.top + "px;width:" + r.width + "px;height:" + r.height + "px;";
     var cx = document.createElement("div");
     cx.setAttribute("data-visus-highlight", "1");

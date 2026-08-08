@@ -74,6 +74,7 @@ commands:
   solve-captcha TARGET OCR-solve a text CAPTCHA in the target
   find-image f [T] [c] find template image `f` (optional target, confidence)
   clear                remove the field highlight overlay
+  highlight TGT [style] box one element (`highlight hide` removes it)
   highlight-all        redraw the numbered field overlay for every field
   tabs                 list open tabs/windows (active marked *)
   tab N                switch to tab/window N (omit N = newest)
@@ -534,6 +535,14 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             )
         if cmd == "clear":
             return str(send("clear_highlights", {}))
+        if cmd == "highlight":
+            if rest and rest[0].lower() in ("hide", "off", "--hide"):
+                return str(send("highlight", {"hide": True}))
+            hl_target, hl_tail = _target(rest)
+            hl_args: dict[str, Any] = dict(hl_target)
+            if hl_tail:
+                hl_args["style"] = " ".join(hl_tail)
+            return str(send("highlight", hl_args))
         if cmd == "highlight-all":
             send("list_fields", {"highlight": True})
             return "overlay drawn"

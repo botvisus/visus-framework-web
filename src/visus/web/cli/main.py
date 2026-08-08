@@ -834,6 +834,28 @@ def clear_highlights() -> None:
 
 
 @app.command()
+def highlight(
+    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    text: str = typer.Option(None, "--text"),
+    style: str = typer.Option(None, "--style", help='CSS border, e.g. "2px dashed #0a0".'),
+    hide: bool = typer.Option(False, "--hide", help="Remove the box instead of drawing it."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
+) -> None:
+    """Draw a highlight box around ONE element (`--hide` removes it)."""
+    if hide:
+        output.emit(_send("highlight", {"hide": True}))
+        return
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    if style:
+        args["style"] = style
+    output.emit(_send("highlight", args))
+
+
+@app.command()
 def tabs(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) -> None:
     """List open tabs/windows (the active one is marked with *)."""
     result = _send("tabs", {})

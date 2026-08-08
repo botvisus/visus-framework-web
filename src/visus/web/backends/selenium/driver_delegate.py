@@ -104,6 +104,18 @@ class SeleniumPageDelegate:
             self._driver.execute_cdp_cmd("Network.enable", {})
         except Exception:
             pass  # non-Chromium / remote without CDP — capture simply stays empty
+        # Report the page as focused. Headless Chrome leaves document.hasFocus()
+        # False, and in that state it SUPPRESSES the focus event: a JS
+        # HTMLElement.focus() moves document.activeElement without ever running
+        # the page's onfocus handler. Emulating focus erases that headless/headed
+        # difference, which is what lets `focus` dispatch a real focus() call
+        # instead of a mouse click — a click needs a clickable point, and `focus`
+        # declares no actionability states precisely so that it does not.
+        # A separate try from Network.enable: neither should cost the other.
+        try:
+            self._driver.execute_cdp_cmd("Emulation.setFocusEmulationEnabled", {"enabled": True})
+        except Exception:
+            pass  # non-Chromium / remote without CDP — Gecko focuses headless anyway
 
     def _activate(self) -> None:
         if self._closed:
@@ -420,15 +432,14 @@ class SeleniumPageDelegate:
             "focus",
             timeout_ms=timeout_ms,
             force=False,
-            # A real mouse click, NOT HTMLElement.focus(). Headless Chrome has
-            # document.hasFocus() == False, and in that state it suppresses the
-            # `focus` event: a JS focus() moves document.activeElement but never
-            # runs the page's onfocus handler. The click gives the window system
-            # focus first, so both happen. The cost is that focus needs a
-            # clickable point — an element with none (zero-height, fully covered)
-            # reports success without moving focus. See test_focus_and_blur and
-            # test_focus_does_not_depend_on_the_element_being_clickable.
-            dispatch=lambda el: ActionChains(self._driver).move_to_element(el).click().perform(),
+            # HTMLElement.focus(), mirroring locator_blur — NOT a mouse click.
+            # `focus` declares no actionability states on purpose, so it must
+            # reach an element with no clickable point (zero-height, scrolled out
+            # of view, covered): a click there lands on whatever is underneath
+            # and focus silently never moves while the op reports success.
+            # Focus emulation is enabled per tab in __init__ so the focus event
+            # still fires headless, which a bare JS focus() would otherwise skip.
+            dispatch=lambda el: self._driver.execute_script("arguments[0].focus();", el),
             ensure_bundle=self._ensure_bundle,
         )
 

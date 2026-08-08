@@ -5,12 +5,10 @@
   onwheel="w.textContent='wheel'"></div>
 <div id="m"></div><div id="c"></div><div id="dc"></div><div id="w"></div>
 <input id="k" onkeydown="if(event.key==='Enter')k2.textContent='enter'"/><div id="k2"></div>
-<!-- tabindex makes the div focusable and the size gives it a clickable point:
-     `focus` dispatches a real click (headless Chrome will not fire onfocus for a
-     JS focus()), so a zero-height div would never actually take focus and the
-     keydown would land on <body> instead of this handler. -->
-<div id="shift" tabindex="0" style="width:200px;height:40px;background:#ddd"
-  onkeydown="if(event.shiftKey)k3.textContent='shift-held'"></div><div id="k3"></div>
+<!-- tabindex is required for a div to take focus at all. Deliberately left with
+     no size: it has no clickable point, so it also proves `focus` does not go
+     through a mouse click. -->
+<div id="shift" tabindex="0" onkeydown="if(event.shiftKey)k3.textContent='shift-held'"></div><div id="k3"></div>
 <script>
 var m=document.getElementById('m'),c=document.getElementById('c'),
     dc=document.getElementById('dc'),w=document.getElementById('w'),

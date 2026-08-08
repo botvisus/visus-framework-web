@@ -73,27 +73,35 @@ def test_focus_and_blur(page):
 
 
 @pytest.mark.browser
-def test_focus_needs_a_clickable_point_and_says_so(page):
-    """Documents a real limitation of `focus`, so a future change is a decision.
+def test_focus_reaches_an_element_with_no_clickable_point(page):
+    """`focus` declares no actionability states, so it must not need a click.
 
-    `focus` dispatches a mouse click (the only way to make headless Chrome fire
-    the page's onfocus handler — with document.hasFocus() False a JS
-    HTMLElement.focus() moves activeElement silently). The cost: an element with
-    no clickable point is reported focused without focus moving. Swapping the
-    dispatch to JS trades this for a worse bug; the real fix is CDP focus
-    emulation (Emulation.setFocusEmulationEnabled), which is Chromium-only.
+    A zero-height focusable element has no clickable point: a mouse dispatch
+    lands on whatever is underneath, so focus never moves while the op still
+    reports success. This is the case that forced `focus` off ActionChains.
     """
     page.evaluate(
         "() => { const d = document.createElement('div');"
         " d.id = 'flatfocus'; d.tabIndex = 0; d.style.height = '0px';"
+        " d.addEventListener('focus', () => { d.dataset.hit = '1'; });"
         " document.body.appendChild(d); }"
     )
     page.locator("#flatfocus").focus()
-    assert page.evaluate("() => document.activeElement.id") != "flatfocus"
-    # …while a JS focus() would move it — proving the element itself is focusable
-    # and the limitation is in the dispatch, not the page.
-    page.evaluate("() => document.getElementById('flatfocus').focus()")
     assert page.evaluate("() => document.activeElement.id") == "flatfocus"
+    # …and the page's own focus handler ran: headless Chrome suppresses the
+    # focus event unless the document reports itself focused, which is why the
+    # delegate enables CDP focus emulation per tab.
+    assert page.evaluate("() => document.getElementById('flatfocus').dataset.hit") == "1"
+
+
+@pytest.mark.browser
+def test_focus_emulation_makes_the_document_report_focus(page):
+    """The premise the JS focus dispatch rests on — pinned so it cannot rot.
+
+    Without Emulation.setFocusEmulationEnabled a headless page has
+    document.hasFocus() False and fires no focus events at all.
+    """
+    assert page.evaluate("() => document.hasFocus()") is True
 
 
 @pytest.mark.browser

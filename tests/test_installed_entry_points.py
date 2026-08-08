@@ -30,7 +30,13 @@ pytestmark = [pytest.mark.packaging, pytest.mark.timeout(900)]
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, check=False)
+    # Decode as UTF-8 explicitly: `text=True` alone picks the locale encoding, and on
+    # Windows that is cp1252, which cannot decode the box-drawing characters Rich puts
+    # in `visus --help`. The decode then fails inside subprocess' reader thread and
+    # `stdout` silently arrives as None.
+    return subprocess.run(
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+    )
 
 
 def _venv_executables(env_dir: Path) -> tuple[Path, Path]:

@@ -395,20 +395,48 @@ def _render_value(result: Any) -> str:
     return render_value(result)
 
 
+# Module-level singletons (B008: a typer.Option() call cannot be an inline
+# default when it is shared across commands; reading it from a module variable
+# is the fix — same pattern as _UPLOAD_PATHS_ARG).
+_EXACT_OPT = typer.Option(False, "--exact", help="Match --role/--text exactly, not by substring.")
+_FRAME_OPT = typer.Option(None, "--frame", help="CSS selector of the iframe holding the target.")
+
+
 def _target_args(
     index: int | None,
     selector: str | None,
     role: str | None,
     name: str | None,
     text: str | None,
+    *,
+    exact: bool = False,
+    frame: str | None = None,
 ) -> dict[str, Any]:
-    """Build the {index|selector|role|name|text} target dict for an action op."""
+    """Build the {index|selector|role|name|text} target dict for an action op.
+
+    ``exact`` and ``frame`` are only sent when set: the daemon reads them in
+    ``session_server.make_locator`` and the defaults would otherwise pad every
+    payload.
+    """
     if index is not None:
-        return {"index": index}
-    if not (selector or role or text):
-        typer.echo("error: provide an index, or --selector / --role / --text")
-        raise typer.Exit(1)
-    return {"selector": selector, "role": role, "name": name, "target_text": text}
+        args: dict[str, Any] = {"index": index}
+    elif not (selector or role or text):
+        output.emit_error(
+            "error: no target. Use one of:\n"
+            "  visus <cmd> <INDEX>              a number from `visus list-fields`\n"
+            "  visus <cmd> --selector '#id'     a CSS or XPath selector\n"
+            "  visus <cmd> --role button        an ARIA role (--name refines it)\n"
+            "  visus <cmd> --text 'Sign in'     the element's visible text\n"
+            "--name alone is NOT a target; it only qualifies --role.\n"
+            "Run `visus list-fields` to see what is on the page."
+        )
+    else:
+        args = {"selector": selector, "role": role, "name": name, "target_text": text}
+    if exact:
+        args["exact"] = True
+    if frame is not None:
+        args["frame"] = frame
+    return args
 
 
 @session_app.command("start")
@@ -526,9 +554,12 @@ def click(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Click a field by index or by --selector/--role/--text."""
-    output.emit_envelope(_send_env("click", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("click", args))
 
 
 @app.command()
@@ -542,9 +573,11 @@ def fill(
     value: str = typer.Option(
         None, "--value", help="Text to fill when targeting by --selector/--role/--text."
     ),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Fill a field. By index: `visus fill 7 hello`. By selector: `-s "#u" --value hello`."""
-    args = _target_args(index, selector, role, name, by_text)
+    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
     fill_value = text if text is not None else value
     if fill_value is None:
         output.emit_error("error: no text to fill — use `visus fill <index> <text>` or `--value`")
@@ -558,9 +591,12 @@ def check(
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Check a checkbox/radio field."""
-    output.emit_envelope(_send_env("check", _target_args(index, selector, role, name, None)))
+    args = _target_args(index, selector, role, name, None, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("check", args))
 
 
 @app.command()
@@ -569,9 +605,12 @@ def uncheck(
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Uncheck a checkbox field."""
-    output.emit_envelope(_send_env("uncheck", _target_args(index, selector, role, name, None)))
+    args = _target_args(index, selector, role, name, None, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("uncheck", args))
 
 
 @app.command()
@@ -585,9 +624,11 @@ def select(
     option_value: str = typer.Option(
         None, "--value", help="Option value when targeting by --selector/--role/--text."
     ),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Select an option on a <select> field. By index: `visus select 5 US`."""
-    args = _target_args(index, selector, role, name, by_text)
+    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
     val = value if value is not None else option_value
     if val is None:
         output.emit_error(
@@ -608,9 +649,11 @@ def press(
     key_value: str = typer.Option(
         None, "--key", help="Key when targeting by --selector/--role/--text."
     ),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Press a key on a field (e.g. Enter, Tab, Control+a). By index: `visus press 7 Enter`."""
-    args = _target_args(index, selector, role, name, by_text)
+    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
     k = key if key is not None else key_value
     if k is None:
         output.emit_error("error: no key — use `visus press <index> <key>` or `--key`")
@@ -632,9 +675,12 @@ def get_text(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Print a field's text content."""
-    result = _send("get_text", _target_args(index, selector, role, name, text))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    result = _send("get_text", args)
     output.emit(result, table=_render_value(result))
 
 
@@ -649,6 +695,8 @@ def session_screenshot(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text", help="Target an element by its visible text."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Screenshot the session's page (or a single element) to a PNG file.
 
@@ -661,7 +709,7 @@ def session_screenshot(
     abs_output = output.resolve_out(input_path)
     args: dict[str, Any] = {"path": abs_output, "full_page": full_page}
     if index is not None or selector or role or text:
-        args.update(_target_args(index, selector, role, name, text))
+        args.update(_target_args(index, selector, role, name, text, exact=exact, frame=frame))
     saved = _send("screenshot", args)
     output.emit(saved, table=f"saved {saved}")
 
@@ -839,9 +887,11 @@ def get_attribute(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Print an element's attribute value."""
-    args = _target_args(index, selector, role, name, text)
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     args["attr_name"] = attr_name
     result = _send("get_attribute", args)
     output.emit(result, table=_render_value(result))
@@ -854,9 +904,12 @@ def count(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Print how many elements match the target."""
-    output.emit(_send("count", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit(_send("count", args))
 
 
 # ---------------------------------------------------------------------------
@@ -871,9 +924,12 @@ def hover(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Hover over a field by index or by --selector/--role/--text."""
-    output.emit_envelope(_send_env("hover", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("hover", args))
 
 
 @app.command()
@@ -883,9 +939,12 @@ def dblclick(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Double-click a field by index or by --selector/--role/--text."""
-    output.emit_envelope(_send_env("dblclick", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("dblclick", args))
 
 
 @app.command()
@@ -895,9 +954,12 @@ def focus(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Focus a field by index or by --selector/--role/--text."""
-    output.emit_envelope(_send_env("focus", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("focus", args))
 
 
 @app.command("clear-input")
@@ -907,9 +969,12 @@ def clear_input(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Clear an input field's value (distinct from `clear`, which removes highlights)."""
-    output.emit_envelope(_send_env("clear_input", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit_envelope(_send_env("clear_input", args))
 
 
 @app.command()
@@ -922,9 +987,11 @@ def drag(
     text: str = typer.Option(None, "--text"),
     to_selector: str = typer.Option(None, "--to-selector", help="Target CSS/XPath selector."),
     to_index: int = typer.Option(None, "--to-index", help="Target field index."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Drag a source element onto a target. By index: `visus drag 3 7`."""
-    args = _target_args(index, selector, role, name, text)
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     if to_selector is not None:
         args["target_selector"] = to_selector
     elif to_index is not None:
@@ -951,11 +1018,13 @@ def upload(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Set file(s) on a file input. By index: `visus upload 4 a.png b.png`."""
     if not paths:
         output.emit_error("error: provide at least one file path to upload")
-    args = _target_args(index, selector, role, name, text)
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     # Resolve paths against the CLIENT's cwd so the daemon receives absolute paths.
     args["paths"] = [str(Path(p).resolve()) for p in paths]
     output.emit_envelope(_send_env("upload", args))
@@ -975,9 +1044,11 @@ def wait(
     text: str = typer.Option(None, "--text"),
     state: str = typer.Option("visible", "--state", help="visible|hidden|attached|detached."),
     timeout: int = typer.Option(None, "--timeout", help="Timeout in milliseconds."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Wait for an element to reach a state (visible/hidden)."""
-    args = _target_args(index, selector, role, name, text)
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     args["state"] = state
     if timeout is not None:
         args["timeout"] = timeout
@@ -996,9 +1067,11 @@ def expect_text(
         None, "--expected", help="Expected text when targeting by --selector/--role/--text."
     ),
     timeout: int = typer.Option(None, "--timeout", help="Timeout in milliseconds."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """Assert an element contains text (prints PASSED/FAILED). By index: `expect-text 0 Hi`."""
-    args = _target_args(index, selector, role, name, text)
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     want = expected if expected is not None else expected_text
     if want is None:
         output.emit_error(
@@ -1141,9 +1214,12 @@ def read_text(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """OCR the targeted element's screenshot and print the recognized text."""
-    output.emit(_send("read_text", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit(_send("read_text", args))
 
 
 @app.command("solve-captcha")
@@ -1153,9 +1229,12 @@ def solve_captcha(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
 ) -> None:
     """OCR-solve a text CAPTCHA in the targeted element and print the solution."""
-    output.emit(_send("solve_captcha", _target_args(index, selector, role, name, text)))
+    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    output.emit(_send("solve_captcha", args))
 
 
 @app.command("find-image")

@@ -1030,6 +1030,47 @@ def test_cli_list_fields_full_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "XPATH" in runner.invoke(app, ["list-fields", "--full"]).output
 
 
+def test_cli_target_flags_reach_the_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return "clicked"
+
+    _patch_client(monkeypatch, fake)
+    r = runner.invoke(
+        app, ["click", "--role", "button", "--name", "Pay", "--exact", "--frame", "#checkout"]
+    )
+    assert r.exit_code == 0
+    assert captured["args"]["exact"] is True
+    assert captured["args"]["frame"] == "#checkout"
+
+
+def test_cli_target_flags_are_absent_when_unused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Defaults stay off the wire so the daemon payload does not grow."""
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return "3"
+
+    _patch_client(monkeypatch, fake)
+    assert runner.invoke(app, ["count", "--selector", ".item"]).exit_code == 0
+    assert "exact" not in captured["args"] and "frame" not in captured["args"]
+
+
+def test_cli_frame_flag_works_with_an_index_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake(op: str, args: dict[str, Any] | None = None) -> Any:
+        captured["args"] = args or {}
+        return "ok"
+
+    _patch_client(monkeypatch, fake)
+    assert runner.invoke(app, ["get-text", "2", "--frame", "#f"]).exit_code == 0
+    assert captured["args"] == {"index": 2, "frame": "#f"}
+
+
 def test_cli_list_fields_does_not_draw_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """A read must not mutate the DOM: the overlay pollutes screenshots/OCR."""
     captured: dict[str, Any] = {}
@@ -2259,7 +2300,8 @@ def test_cli_click_requires_target(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_client(monkeypatch, lambda op, args=None: "x")
     r = runner.invoke(app, ["click"])
     assert r.exit_code == 1
-    assert "provide an index" in r.output
+    assert "no target" in r.output
+    assert "--selector" in r.output
 
 
 def test_cli_click_by_role_and_name(monkeypatch: pytest.MonkeyPatch) -> None:

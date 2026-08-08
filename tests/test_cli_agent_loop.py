@@ -299,6 +299,22 @@ def test_export_script_raw_prints_the_script(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.browser
+def test_frame_flag_targets_an_element_inside_an_iframe(
+    base_url: str, tmp_path: Path
+) -> None:
+    session_client.start_daemon(
+        "chrome", headless=True, url=f"{base_url}/frames.html", cwd=tmp_path
+    )
+    try:
+        env = session_client.send_envelope(
+            "count", {"selector": "body", "frame": "iframe"}, start_dir=tmp_path
+        )
+        assert env["ok"] is True and env["result"] >= 1
+    finally:
+        session_client.stop(start_dir=tmp_path)
+
+
+@pytest.mark.browser
 def test_snapshot_ref_is_a_usable_field_index(base_url: str, tmp_path: Path) -> None:
     session_client.start_daemon(
         "chrome", headless=True, url=f"{base_url}/snapshot_tree.html", cwd=tmp_path

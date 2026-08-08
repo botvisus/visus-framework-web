@@ -64,14 +64,30 @@ visus fill  -s "#username" --value student         # note: --value, not a positi
 | `--role` | ARIA role: `button`, `link`, `heading`, `textbox`, `checkbox`, … |
 | `--name` | Accessible name — **a qualifier for `--role`, not a target on its own** |
 | `--text` | Visible text (substring, case-insensitive) |
+| `--exact` | Match `--role`/`--text` exactly instead of by substring |
+| `--frame` | CSS selector of the iframe holding the target |
+
+`--exact` and `--frame` are modifiers, not targets — they refine whichever of
+the four forms above you used, and they work with an index target too
+(`visus get-text 2 --frame "#checkout"`). Both are accepted by every targeted
+command: `click`, `fill`, `check`, `uncheck`, `select`, `press`, `get-text`,
+`get-attribute`, `count`, `hover`, `dblclick`, `focus`, `clear-input`, `drag`,
+`upload`, `wait`, `expect-text`, `read-text`, `solve-captcha` and
+`session-screenshot`.
 
 **`--name` alone is not a target.** The guard in `_target_args`
 (`src/visus/web/cli/main.py`) only accepts an index, `--selector`, `--role` or
 `--text` — `--name` is not in that check, so a command carrying just `--name`
-exits 1 with:
+exits 1 (on **stderr**) with:
 
 ```
-error: provide an index, or --selector / --role / --text
+error: no target. Use one of:
+  visus <cmd> <INDEX>              a number from `visus list-fields`
+  visus <cmd> --selector '#id'     a CSS or XPath selector
+  visus <cmd> --role button        an ARIA role (--name refines it)
+  visus <cmd> --text 'Sign in'     the element's visible text
+--name alone is NOT a target; it only qualifies --role.
+Run `visus list-fields` to see what is on the page.
 ```
 
 So `visus click --name Submit` fails, while `visus click --role button --name Submit`

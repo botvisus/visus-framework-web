@@ -297,7 +297,9 @@ interactive REPL attached to the session.
 <summary><b>Full command reference</b> (click to expand)</summary>
 
 Targeting: most commands accept a positional **field index** (from the last `list-fields`) **or**
-`--selector/-s`, `--role`, `--name`, `--text`. Nearly every read command accepts `--json`.
+`--selector/-s`, `--role`, `--name`, `--text`, plus the modifiers `--exact` (match `--role`/`--text`
+exactly, not by substring) and `--frame <css>` (the iframe holding the target). Nearly every read
+command accepts `--json`.
 
 ### Session & lifecycle
 

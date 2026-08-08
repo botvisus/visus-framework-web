@@ -4,9 +4,10 @@ Every command below drives the **live session daemon** unless it is marked
 *one-off browser*. Start the daemon first: `visus session start [URL]`.
 
 Targeting: most commands accept a positional **field index** (from the last
-`list-fields`) **or** `--selector` / `-s`, `--role`, `--name`, `--text`.
-`--name` on its own is not a target — see
-[cli-targeting.md](cli-targeting.md). Exactly eight commands accept their own
+`list-fields`) **or** `--selector` / `-s`, `--role`, `--name`, `--text`, plus the
+two modifiers `--exact` (match `--role`/`--text` exactly, not by substring) and
+`--frame <css>` (the iframe holding the target). `--name` on its own is not a
+target — see [cli-targeting.md](cli-targeting.md). Exactly eight commands accept their own
 `--json`: `translate`, `session status`, `list-fields`, `tabs`, `snapshot`,
 `cookies`, `eval` and `find-image` — see
 [cli-json-and-piping.md](cli-json-and-piping.md).

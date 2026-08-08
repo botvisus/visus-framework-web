@@ -27,6 +27,33 @@ _ERROR_SCRIPT = (
     "sys.argv = ['visus', 'title']; app()"
 )
 
+_NO_TARGET_SCRIPT = (
+    "import sys; from visus.web.cli.main import app; "
+    "sys.argv = ['visus', 'click', '--name', 'Sign in']; app()"
+)
+
+
+def test_no_target_error_names_every_valid_form(tmp_path: Path) -> None:
+    """--name alone is not a target (main.py's guard checks selector/role/text)."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _NO_TARGET_SCRIPT],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 1
+    assert proc.stdout.strip() == ""
+    for fragment in (
+        "<INDEX>",
+        "--selector",
+        "--role",
+        "--text",
+        "--name alone is NOT a target",
+        "visus list-fields",
+    ):
+        assert fragment in proc.stderr, f"missing {fragment!r} from the guidance"
+
 
 def test_daemon_error_never_touches_stdout(tmp_path: Path) -> None:
     """`TOKEN=$(visus ...)` must never capture an error message."""

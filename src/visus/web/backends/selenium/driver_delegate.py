@@ -27,6 +27,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 from visus.web import errors
 from visus.web.backends.base import ContextDelegate, PageDelegate
 from visus.web.backends.selenium.actionability import run_action
+from visus.web.backends.selenium.cdp_fetch import FetchInterceptor, devtools_ws_url
 from visus.web.backends.selenium.expect_engine import run_expect
 from visus.web.backends.selenium.js import BUNDLE_JS
 
@@ -110,6 +111,10 @@ class SeleniumPageDelegate:
         # CDP log capture (Chromium): filled lazily by _drain_logs()
         self._net_buffer: list[dict[str, object]] = []
         self._console_buffer: list[dict[str, object]] = []
+        # Request interception is per-tab and lazy: no DevTools socket is opened
+        # until the first route is added.
+        self._routes: list[dict[str, object]] = []
+        self._interceptor: FetchInterceptor | None = None
         # Enable the Network domain on THIS tab's CDP session right away so
         # response bodies are retained from the first navigation on —
         # wait_for_response(...).body() needs the domain active when the
@@ -222,6 +227,7 @@ class SeleniumPageDelegate:
     def close(self) -> None:
         if self._closed:
             return
+        self._stop_interceptor()
         try:
             self._driver.switch_to.window(self._handle)
             self._driver.close()
@@ -1015,6 +1021,48 @@ class SeleniumPageDelegate:
                 "uploadThroughput": -1,
             },
         )
+
+    # ------------------------------------------------------------------
+    # Request interception (Chromium CDP Fetch)
+    # ------------------------------------------------------------------
+
+    def _stop_interceptor(self) -> None:
+        """Tear down the DevTools connection, if one was ever opened."""
+        if self._interceptor is not None:
+            self._interceptor.stop()
+            self._interceptor = None
+
+    def route_add(self, rule: dict[str, object]) -> None:
+        """Install (or replace) one interception rule on this tab."""
+        self._activate()
+        if self._interceptor is None:
+            self._interceptor = FetchInterceptor(devtools_ws_url(self._driver, self._handle))
+            self._interceptor.start()
+        pattern = rule.get("pattern")
+        self._routes = [r for r in self._routes if r.get("pattern") != pattern]
+        self._routes.append(dict(rule))
+        self._interceptor.set_rules(list(self._routes))
+
+    def route_remove(self, pattern: str | None) -> int:
+        """Remove one rule (or every rule when *pattern* is ``None``). Returns the count."""
+        before = len(self._routes)
+        if pattern is None:
+            self._routes = []
+        else:
+            self._routes = [r for r in self._routes if r.get("pattern") != pattern]
+        removed = before - len(self._routes)
+        if self._interceptor is not None:
+            if self._routes:
+                self._interceptor.set_rules(list(self._routes))
+            else:
+                # No rules left: drop the DevTools connection entirely so nothing
+                # is paused and the tab is exactly as it was before any routing.
+                self._stop_interceptor()
+        return removed
+
+    def route_list(self) -> list[dict[str, object]]:
+        """The rules installed on this tab, in insertion order."""
+        return [dict(r) for r in self._routes]
 
     # ------------------------------------------------------------------
     # Network / console capture (Chromium performance + browser logs)

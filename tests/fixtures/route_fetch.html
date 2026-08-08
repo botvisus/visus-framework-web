@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head><title>route fixture</title></head>
+  <body>
+    <!-- Each button issues ONE request and writes the outcome into #out, so a
+         test can tell "fulfilled by the mock" from "hit the real server" from
+         "aborted" by reading text — no CDP inspection needed. -->
+    <button id="go">Load items</button>
+    <button id="img">Load image</button>
+    <pre id="out">idle</pre>
+    <img id="pic" alt="" width="8" height="8" />
+    <script>
+      var out = document.getElementById('out');
+      document.getElementById('go').addEventListener('click', function () {
+        out.textContent = 'loading';
+        fetch('/api/items')
+          .then(function (r) {
+            return r.text().then(function (body) {
+              out.textContent = 'status=' + r.status + ' body=' + body;
+            });
+          })
+          .catch(function (e) { out.textContent = 'failed:' + e.message; });
+      });
+      document.getElementById('img').addEventListener('click', function () {
+        var pic = document.getElementById('pic');
+        pic.onload = function () { out.textContent = 'image-ok'; };
+        pic.onerror = function () { out.textContent = 'image-blocked'; };
+        pic.src = '/pixel.png?t=' + Date.now();
+      });
+    </script>
+  </body>
+</html>

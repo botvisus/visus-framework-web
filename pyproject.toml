@@ -39,7 +39,12 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Browsers",
     "Typing :: Typed",
 ]
-dependencies = ["selenium>=4.38,<5"]
+# websocket-client drives the DevTools connection request interception needs:
+# chromedriver's execute_cdp_cmd is command-only and delivers no CDP events, so
+# Fetch.requestPaused has to arrive over a socket of our own. It is already a
+# hard dependency of selenium>=4.28; declared explicitly so it is never a
+# transitive accident.
+dependencies = ["selenium>=4.38,<5", "websocket-client>=1.8,<2"]
 
 [project.urls]
 Homepage = "https://github.com/botvisus/visus-framework-web"
@@ -175,6 +180,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["mcp.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["websocket.*"]
 ignore_missing_imports = true
 
 # Imported lazily and optionally by rpa.py: the import is guarded by

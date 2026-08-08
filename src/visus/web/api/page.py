@@ -13,6 +13,7 @@ from visus.web import errors
 from visus.web.api._steps import run_step
 from visus.web.api.events import ConsoleMessage, Dialog, Download, NetworkResponse, _ValueHolder
 from visus.web.api.locator import Locator, TextArg
+from visus.web.api.route import RouteRule
 from visus.web.backends.base import PageDelegate
 from visus.web.config import Defaults
 
@@ -371,6 +372,47 @@ class Page:
     def set_offline(self, offline: bool) -> None:
         """Toggle offline mode (Chromium only, via CDP). Restores with ``set_offline(False)``."""
         self._delegate.set_offline(offline)
+
+    # --- request interception (Chromium CDP Fetch) ---
+
+    def route(
+        self,
+        pattern: str,
+        *,
+        status: int | None = None,
+        body: str | None = None,
+        content_type: str | None = None,
+        headers: dict[str, str] | None = None,
+        abort: bool = False,
+    ) -> RouteRule:
+        """Answer requests matching *pattern* locally instead of hitting the network.
+
+        Chromium only (chrome/edge). *pattern* is a Playwright-style URL glob:
+        ``**`` crosses ``/``, ``*`` does not, ``{a,b}`` is an alternation.
+        ``abort=True`` fails the request instead of answering it. Adding a rule
+        for a pattern that already has one replaces it::
+
+            page.route("**/api/users", body='[]', content_type="application/json")
+            page.route("**/*.{png,jpg}", abort=True)
+        """
+        rule = RouteRule(
+            pattern=pattern,
+            status=status,
+            body=body,
+            content_type=content_type,
+            headers=dict(headers or {}),
+            abort=abort,
+        )
+        self._delegate.route_add(rule.to_dict())
+        return rule
+
+    def unroute(self, pattern: str | None = None) -> int:
+        """Remove the rule for *pattern* (or every rule). Returns how many went."""
+        return self._delegate.route_remove(pattern)
+
+    def routes(self) -> list[RouteRule]:
+        """The interception rules installed on this page, in insertion order."""
+        return [RouteRule.from_dict(r) for r in self._delegate.route_list()]
 
     # --- network/console capture (Chromium) ---
 

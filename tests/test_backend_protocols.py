@@ -122,6 +122,14 @@ class _FakePage:
     def set_extra_http_headers(self, headers): ...
     def set_offline(self, offline): ...
 
+    def route_add(self, rule): ...
+
+    def route_remove(self, pattern):
+        return 0
+
+    def route_list(self):
+        return []
+
     def network_requests(self):
         return []
 

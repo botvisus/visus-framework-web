@@ -46,6 +46,7 @@ from visus.web.api.fields import Field
 from visus.web.api.frame_locator import FrameLocator
 from visus.web.api.locator import Locator, TextArg
 from visus.web.api.page import Page
+from visus.web.api.route import RouteRule
 from visus.web.rpa import _print_summary, _slug
 
 if TYPE_CHECKING:
@@ -653,6 +654,38 @@ class AsyncPage:
 
     async def set_offline(self, offline: bool) -> None:
         await asyncio.to_thread(lambda: self._p.set_offline(offline))
+
+    # --- request interception (Chromium CDP Fetch) ---
+
+    async def route(
+        self,
+        pattern: str,
+        *,
+        status: int | None = None,
+        body: str | None = None,
+        content_type: str | None = None,
+        headers: dict[str, str] | None = None,
+        abort: bool = False,
+    ) -> RouteRule:
+        """Async mirror of :meth:`visus.web.Page.route`."""
+        return await asyncio.to_thread(
+            lambda: self._p.route(
+                pattern,
+                status=status,
+                body=body,
+                content_type=content_type,
+                headers=headers,
+                abort=abort,
+            )
+        )
+
+    async def unroute(self, pattern: str | None = None) -> int:
+        """Async mirror of :meth:`visus.web.Page.unroute`."""
+        return await asyncio.to_thread(lambda: self._p.unroute(pattern))
+
+    async def routes(self) -> list[RouteRule]:
+        """Async mirror of :meth:`visus.web.Page.routes`."""
+        return await asyncio.to_thread(self._p.routes)
 
     # --- sync locator builders (return AsyncLocator / AsyncFrameLocator) ---
 

@@ -252,6 +252,7 @@ def test_handler_forwards_launch_options(monkeypatch: pytest.MonkeyPatch) -> Non
         "slow_mo": 250,
         "user_data_dir": "/profiles/p1",
         "remote_url": "http://grid:4444/wd/hub",
+        "debugger_address": None,
     }
     assert seen["goto"] == "http://x"
 

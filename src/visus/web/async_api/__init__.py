@@ -259,6 +259,10 @@ class AsyncBrowser:
     async def close(self) -> None:
         await asyncio.to_thread(self._b.close)
 
+    async def detach(self) -> None:
+        """Async mirror of :meth:`visus.web.Browser.detach`."""
+        await asyncio.to_thread(self._b.detach)
+
     async def __aenter__(self) -> AsyncBrowser:
         return self
 

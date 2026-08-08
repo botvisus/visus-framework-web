@@ -137,7 +137,14 @@ def test_targeting_reference_states_the_name_only_rule() -> None:
     """`--name` alone is rejected by main.py's `_target_args` — the README never says so."""
     text = (SKILL_DIR / "references" / "cli-targeting.md").read_text(encoding="utf-8")
     assert "`--name` alone is not a target" in text
-    assert "error: provide an index, or --selector / --role / --text" in text
+    # The doc must quote the message the CLI really prints, line for line — an
+    # agent that hits it looks the literal up here.
+    for line in (
+        "error: no target. Use one of:",
+        "--name alone is NOT a target; it only qualifies --role.",
+        "Run `visus list-fields` to see what is on the page.",
+    ):
+        assert line in text, f"cli-targeting.md no longer quotes {line!r}"
 
 
 def test_troubleshooting_reference_carries_the_literal_daemon_errors() -> None:

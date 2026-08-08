@@ -322,6 +322,7 @@ Targeting: most commands accept a positional **field index** (from the last `lis
 | Command | What it does |
 |---|---|
 | `visus snapshot [SELECTOR] [--depth N] [--filename F] [--no-refs] [--json]` | List interactive elements as a REF/ROLE/NAME table, where REF is the `list-fields` index that acts on that row. Scope with `SELECTOR`, cap with `--depth`, save as YAML with `--filename`. |
+| `visus find <QUERY> [--regex] [-C N] [-s SEL] [--depth N] [--json]` | Grep the snapshot: matching rows plus `-C` rows of context, each with its REF. |
 | `visus list-fields --kind <k> --all --no-highlight [--json]` | Enumerate interactive fields, numbered + highlighted. |
 | `visus get-text [idx] [target]` | Print an element's text content. |
 | `visus get-attribute <attr> [idx] [target]` | Print an element's attribute value. |

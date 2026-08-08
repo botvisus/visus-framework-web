@@ -18,6 +18,7 @@ import datetime as _dt
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import sys
@@ -613,6 +614,46 @@ class SessionHandler:
         refs = self._snapshot_refs(rows)
         elements = [{**row, "ref": refs[i]} for i, row in enumerate(rows)]
         return {"elements": elements, "url": page.url, "title": page.title()}
+
+    def _op_find(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Grep the page snapshot instead of printing all of it.
+
+        Each row is matched as ``"<role> <name>"``. Substring matching is
+        case-insensitive; ``regex`` switches to a Python regular expression.
+        ``context`` rows around each hit are returned too, like ``grep -C``.
+        """
+        query = str(args.get("query") or "")
+        use_regex = bool(args.get("regex", False))
+        context = max(0, int(args.get("context") or 0))
+        page = self.page()
+        depth = args.get("depth")
+        rows = page.snapshot(args.get("selector"), depth=None if depth is None else int(depth))
+
+        def _line(row: dict[str, Any]) -> str:
+            return f"{row.get('role') or ''} {row.get('name') or ''}"
+
+        if use_regex:
+            pattern = re.compile(query)
+            hits = [i for i, row in enumerate(rows) if pattern.search(_line(row))]
+        else:
+            needle = query.casefold()
+            hits = [i for i, row in enumerate(rows) if needle in _line(row).casefold()]
+
+        hit_set = set(hits)
+        keep: set[int] = set()
+        for i in hits:
+            keep.update(range(max(0, i - context), min(len(rows), i + context + 1)))
+        refs = self._snapshot_refs(rows)
+        out: list[dict[str, Any]] = []
+        for i in sorted(keep):
+            out.append({**rows[i], "line": i, "ref": refs[i], "match": i in hit_set})
+        return {
+            "query": query,
+            "regex": use_regex,
+            "total": len(rows),
+            "matched": len(hits),
+            "rows": out,
+        }
 
     def _op_get_attribute(self, args: dict[str, Any]) -> dict[str, Any]:
         """Attribute value of the target, keeping "absent" distinct from ``""``."""

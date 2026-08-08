@@ -235,6 +235,45 @@ def test_snapshot_filename_writes_yaml(
     assert str(dest) in r.output
 
 
+def test_find_renders_matches_with_a_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {
+            "query": "cart",
+            "regex": False,
+            "total": 40,
+            "matched": 1,
+            "rows": [
+                {"line": 6, "role": "link", "name": "Blue widget", "ref": 2, "match": False},
+                {"line": 7, "role": "button", "name": "Add to cart", "ref": 3, "match": True},
+            ],
+        },
+    )
+    r = runner.invoke(app, ["find", "cart"])
+    assert r.exit_code == 0
+    assert "1 of 40 rows match 'cart'" in r.output
+    assert "> " in r.output and "Add to cart" in r.output
+
+
+def test_find_forwards_its_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args))
+        or {"query": "x", "regex": True, "total": 0, "matched": 0, "rows": []},
+    )
+    r = runner.invoke(
+        app, ["find", r"\$[0-9]+", "--regex", "-C", "1", "-s", "#main", "--depth", "4"]
+    )
+    assert r.exit_code == 0
+    assert calls[-1] == (
+        "find",
+        {"query": r"\$[0-9]+", "regex": True, "context": 1, "selector": "#main", "depth": 4},
+    )
+
+
 def test_export_script_writes_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

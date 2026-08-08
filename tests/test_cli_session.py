@@ -699,6 +699,51 @@ def test_handle_writes_the_sink_only_when_asked(tmp_path: Path, monkeypatch) -> 
     assert (tmp_path / resp["snapshot"]).is_file()
 
 
+class _FindPage(_FakePage):
+    """A page with enough rows to make grep-style context observable."""
+
+    def snapshot(
+        self, selector: str | None = None, *, depth: int | None = None
+    ) -> list[dict[str, Any]]:
+        self.log.append(f"snapshot:selector={selector}:depth={depth}")
+        names = ["Home", "Products", "Blue widget", "Add to cart", "Red widget", "About", "Legal"]
+        return [{"role": "link", "name": n, "depth": 1} for n in names]
+
+
+def test_handle_find_returns_matches_with_context() -> None:
+    h = _handler_with_fake_page(_FindPage())
+    result = h.handle("find", {"query": "Add to cart", "context": 1})["result"]
+    assert result["total"] == 7
+    assert result["matched"] == 1
+    assert [r["name"] for r in result["rows"]] == ["Blue widget", "Add to cart", "Red widget"]
+    assert [r["match"] for r in result["rows"]] == [False, True, False]
+
+
+def test_handle_find_is_case_insensitive_by_default() -> None:
+    h = _handler_with_fake_page(_FindPage())
+    result = h.handle("find", {"query": "WIDGET", "context": 0})["result"]
+    assert result["matched"] == 2
+
+
+def test_handle_find_regex_mode() -> None:
+    h = _handler_with_fake_page(_FindPage())
+    result = h.handle("find", {"query": r"^link (Blue|Red)", "regex": True, "context": 0})
+    assert result["result"]["matched"] == 2
+
+
+def test_handle_find_no_match_returns_no_rows() -> None:
+    h = _handler_with_fake_page(_FindPage())
+    result = h.handle("find", {"query": "nothing here"})["result"]
+    assert result["matched"] == 0 and result["rows"] == []
+
+
+def test_handle_find_forwards_scope_and_depth() -> None:
+    page = _FindPage()
+    h = _handler_with_fake_page(page)
+    h.handle("find", {"query": "Home", "selector": "#main", "depth": 2})
+    assert "snapshot:selector=#main:depth=2" in page.log
+
+
 def test_handle_export_script_wraps_the_recorded_lines() -> None:
     page = _FakePage()
     h = _handler_with_fake_page(page)

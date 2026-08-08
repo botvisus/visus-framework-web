@@ -371,6 +371,24 @@ def _format_snapshot(elements: list[dict[str, Any]]) -> str:
     return cap.get().rstrip("\n")
 
 
+def _format_find(result: dict[str, Any]) -> str:
+    """Render `find` output grep-style: `>` marks a hit, `--` separates groups."""
+    rows = result.get("rows", [])
+    if not rows:
+        return f"no match for {result.get('query', '')!r} in {result.get('total', 0)} rows"
+    lines = [f"{result.get('matched', 0)} of {result.get('total', 0)} rows "
+             f"match {result.get('query', '')!r}"]
+    prev: int | None = None
+    for r in rows:
+        if prev is not None and r["line"] != prev + 1:
+            lines.append("--")
+        prev = r["line"]
+        mark = ">" if r.get("match") else " "
+        ref = "-" if r.get("ref") is None else str(r["ref"])
+        lines.append(f"{mark} {ref:>4}  {str(r.get('role', '')):<12} {r.get('name', '')}")
+    return "\n".join(lines)
+
+
 def _render_value(result: Any) -> str:
     from visus.web.cli.console import render_value
 
@@ -719,6 +737,41 @@ def title() -> None:
 def url() -> None:
     """Print the session page's current URL."""
     output.emit(_send("url", {}))
+
+
+@app.command()
+def find(
+    query: str = typer.Argument(..., help="Text to look for in the page snapshot."),
+    regex: bool = typer.Option(
+        False, "--regex", help="Treat QUERY as a Python regular expression."
+    ),
+    context: int = typer.Option(3, "--context", "-C", help="Rows of context around each hit."),
+    selector: str = typer.Option(
+        None, "--selector", "-s", help="Scope the search to a CSS selector."
+    ),
+    depth: int = typer.Option(
+        None, "--depth", help="Keep only elements at most N levels below the scope root."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Search the page instead of snapshotting it — matching rows plus context.
+
+    `visus find "Add to cart"` on a 400-element page returns a handful of rows
+    with their REFs, so the next command is `visus click <REF>`.
+    """
+    result = _send(
+        "find",
+        {
+            "query": query,
+            "regex": regex,
+            "context": context,
+            "selector": selector,
+            "depth": depth,
+        },
+    )
+    if as_json:
+        output.set_mode(as_json=True)
+    output.emit(result, table=_format_find(result))
 
 
 @app.command()

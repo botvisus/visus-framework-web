@@ -837,6 +837,19 @@ class SessionHandler:
         arg = args.get("arg")
         return {"result": self.page().evaluate(expression, arg)}
 
+    # --- devtools: console / network -------------------------------------
+    def _op_console_messages(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Browser console messages captured so far (mirrors browser_console_messages).
+
+        ``level`` filters case-insensitively on the WebDriver level
+        (SEVERE / WARNING / INFO). Chromium engines only.
+        """
+        level = str(args.get("level") or "")
+        out = [{"level": m.level, "text": m.text} for m in self.page().console_messages()]
+        if level:
+            out = [m for m in out if m["level"] == level.upper()]
+        return {"messages": out}
+
     # --- vision (requires the [vision] extra) ----------------------------
     def _op_read_text(self, args: dict[str, Any]) -> str:
         return self._target(args).ocr_text()

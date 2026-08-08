@@ -1206,6 +1206,31 @@ def eval_js(
 
 
 # ---------------------------------------------------------------------------
+# DevTools: console messages
+# ---------------------------------------------------------------------------
+
+
+def _logs_text(messages: list[dict[str, Any]]) -> str:
+    """Render console messages one per line: LEVEL then text."""
+    if not messages:
+        return "(no console messages)"
+    return "\n".join(f"{str(m.get('level', '')):8} {m.get('text', '')}" for m in messages)
+
+
+@app.command()
+def logs(
+    level: str = typer.Argument(None, help="Filter by level: SEVERE, WARNING or INFO."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Print the browser console messages captured so far (Chromium)."""
+    result = _send("console_messages", {"level": level})
+    messages = result.get("messages", [])
+    if as_json:
+        output.set_mode(as_json=True)
+    output.emit(messages, table=_logs_text(messages))
+
+
+# ---------------------------------------------------------------------------
 # Vision (requires the [vision] extra)
 # ---------------------------------------------------------------------------
 

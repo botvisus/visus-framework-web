@@ -55,6 +55,7 @@ commands:
   add-cookies json     add cookies from a JSON list
   clear-cookies        clear every cookie in the context
   eval expr            evaluate a JS expression
+  logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
   dialog [dismiss]     handle the next dialog (accept by default)
   screenshot [path]    save a screenshot (default screenshot.png)
   export-script [path] print (or save) this session as a runnable visus.web script
@@ -411,6 +412,15 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 "eval",
                 {"expression": " ".join(rest)},
                 lambda r: str((r or {}).get("result")),
+            )
+        if cmd == "logs":
+            messages = send("console_messages", {"level": rest[0] if rest else None}).get(
+                "messages", []
+            )
+            if not messages:
+                return "(no console messages)"
+            return "\n".join(
+                f"{str(m.get('level', '')):8} {m.get('text', '')}" for m in messages
             )
         if cmd == "dialog":
             accept = not (rest and rest[0].lower() in ("dismiss", "cancel", "no"))

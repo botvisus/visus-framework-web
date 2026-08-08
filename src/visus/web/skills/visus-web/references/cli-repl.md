@@ -67,6 +67,7 @@ cookies              list cookies for the context
 add-cookies json     add cookies from a JSON list
 clear-cookies        clear every cookie in the context
 eval expr            evaluate a JS expression
+logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
 dialog [dismiss]     handle the next dialog (accept by default)
 screenshot [path]    save a screenshot (default screenshot.png)
 export-script [path] print (or save) this session as a runnable visus.web script

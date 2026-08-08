@@ -88,6 +88,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus cookies [--json]` | List cookies. |
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus eval "<fn>" [arg] [--json]` | Evaluate JS in the page (e.g. `'() => document.title'`). |
+| `visus logs [LEVEL] [--json]` | Browser console messages captured so far. `LEVEL` filters case-insensitively on `SEVERE` / `WARNING` / `INFO`. Chromium engines only. |
 
 ### Capture / vision / utilities
 

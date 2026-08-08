@@ -71,6 +71,9 @@ commands:
   state-save [file]    save cookies + web storage (default storage-state.json)
   state-load file      restore a snapshot (navigate to the origin first)
   eval expr            evaluate a JS expression
+  route pat [st] [body] mock requests matching pat (Chromium only)
+  unroute [pat]        remove one route (omit pat = all)
+  routes               list the installed routes
   eval-on TGT expr     evaluate `(el, arg) => …` on one element
   tracing-start [zip]  record every action (default run.zip)
   tracing-stop [html]  stop; write the zip (+ an HTML report if given)
@@ -559,6 +562,28 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 "eval",
                 {"expression": " ".join(rest)},
                 lambda r: str((r or {}).get("result")),
+            )
+        if cmd == "route":
+            route_args: dict[str, Any] = {"pattern": rest[0]}
+            if len(rest) > 1:
+                route_args["status"] = int(rest[1])
+            if len(rest) > 2:
+                route_args["body"] = " ".join(rest[2:])
+            r = send("route", route_args)
+            rule = r.get("route", {})
+            verb = "aborting" if rule.get("abort") else f"mocking with {rule.get('status') or 200}"
+            return f"routed {rule.get('pattern', rest[0])} — {verb}"
+        if cmd == "unroute":
+            r = send("unroute", {"pattern": rest[0] if rest else None})
+            return f"removed {r.get('removed', 0)} route(s)"
+        if cmd == "routes":
+            items = send("route_list", {}).get("routes", [])
+            if not items:
+                return "(no routes)"
+            return "\n".join(
+                f"{r.get('pattern', ''):32} "
+                f"{'abort' if r.get('abort') else 'fulfill'} {r.get('status') or ''}"
+                for r in items
             )
         if cmd == "eval-on":
             ev_target, ev_tail = _target(rest)

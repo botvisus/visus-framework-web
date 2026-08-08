@@ -1811,6 +1811,113 @@ def eval_js(
 
 
 # ---------------------------------------------------------------------------
+# Network mocking (Chromium)
+# ---------------------------------------------------------------------------
+
+# Module-level singleton defaults (B008: a call cannot be an inline default).
+_ROUTE_HEADER_OPT = typer.Option(
+    None, "--header", "-H", help="Response header 'K: V' (repeatable)."
+)
+
+
+def _parse_headers(raw: list[str] | None) -> dict[str, str]:
+    """Parse repeated ``--header 'K: V'`` values into a dict."""
+    from visus.web.cli import output
+
+    headers: dict[str, str] = {}
+    for item in raw or []:
+        key, sep, value = item.partition(":")
+        if not sep or not key.strip():
+            output.emit_error(f"bad --header {item!r} — use the form 'K: V'")
+        headers[key.strip()] = value.strip()
+    return headers
+
+
+@app.command()
+def route(
+    pattern: str = typer.Argument(..., help="URL glob, e.g. '**/api/users' or '**/*.png'."),
+    status: int = typer.Option(None, "--status", help="Response status for the mock."),
+    body: str = typer.Option(None, "--body", help="Response body text."),
+    body_file: str = typer.Option(None, "--body-file", help="Read the body from a file."),
+    content_type: str = typer.Option(
+        None, "--content-type", help="Response Content-Type, e.g. application/json."
+    ),
+    header: list[str] = _ROUTE_HEADER_OPT,
+    abort: bool = typer.Option(False, "--abort", help="Fail the request instead of mocking it."),
+) -> None:
+    """Mock or block requests matching a URL glob (Chromium only).
+
+    `**` crosses `/`, `*` does not, `{a,b}` is an alternation, and `?` is literal.
+    Re-routing the same pattern replaces the rule.
+    """
+    from visus.web.cli import output
+
+    if abort and (status is not None or body is not None or body_file is not None):
+        output.emit_error("--abort fails the request — it cannot also carry a status or body")
+    if body is not None and body_file is not None:
+        output.emit_error("pass --body or --body-file, not both")
+    payload_body = body
+    if body_file is not None:
+        # Read on the CLIENT side so the path resolves against the user's cwd.
+        payload_body = Path(body_file).read_text(encoding="utf-8")
+    args: dict[str, Any] = {
+        "pattern": pattern,
+        "status": status,
+        "body": payload_body,
+        "content_type": content_type,
+        "headers": _parse_headers(header),
+        "abort": abort,
+    }
+    result = _send("route", args)
+    rule = result.get("route", {})
+    verb = "aborting" if rule.get("abort") else f"mocking with {rule.get('status') or 200}"
+    output.emit(rule, table=f"routed {rule.get('pattern', pattern)} — {verb}")
+
+
+@app.command()
+def unroute(
+    pattern: str = typer.Argument(None, help="Pattern to remove (omit = remove every rule)."),
+) -> None:
+    """Remove an interception rule, or all of them."""
+    from visus.web.cli import output
+
+    result = _send("unroute", {"pattern": pattern})
+    removed = result.get("removed", 0)
+    output.emit(removed, table=f"removed {removed} route(s)")
+
+
+@app.command("route-list")
+def route_list() -> None:
+    """List the interception rules installed on the session's page."""
+    from visus.web.cli import output
+
+    rules = _send("route_list", {}).get("routes", [])
+    if not rules:
+        output.emit([], table="no routes")
+        return
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
+    for column in ("PATTERN", "ACTION", "STATUS", "CONTENT-TYPE", "BODY"):
+        table.add_column(column, overflow="fold", no_wrap=column == "ACTION")
+    for rule in rules:
+        body_text = str(rule.get("body") or "")
+        table.add_row(
+            str(rule.get("pattern", "")),
+            "abort" if rule.get("abort") else "fulfill",
+            str(rule.get("status") or ""),
+            str(rule.get("content_type") or ""),
+            body_text if len(body_text) <= 120 else body_text[:117] + "...",
+        )
+    console_obj = Console()
+    with console_obj.capture() as cap:
+        console_obj.print(table)
+    output.emit(rules, table=cap.get().rstrip("\n"))
+
+
+# ---------------------------------------------------------------------------
 # DevTools: console messages
 # ---------------------------------------------------------------------------
 

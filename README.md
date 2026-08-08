@@ -392,6 +392,20 @@ command accepts `--json`.
 | `visus request <N> [--json]` | One captured response in full, including its body. |
 | `visus network start` / `stop` / `export -o <json>` | Capture what the page itself sends — request bodies, JSONP, `sendBeacon`, pixel pings — and export it scrubbed. Complements `visus requests`, which reads the CDP response log. |
 
+### Network mocking *(Chromium only)*
+
+| Command | What it does |
+|---|---|
+| `visus route <PATTERN> --status <N> --body <T> --body-file <F> --content-type <CT> --header 'K: V' --abort` | Answer matching requests locally, or fail them with `--abort`. |
+| `visus unroute [PATTERN]` | Remove one rule, or every rule. |
+| `visus route-list [--json]` | List the installed rules (secret headers are redacted). |
+
+Patterns are Playwright-style globs: `**` crosses `/`, `*` does not, `{png,jpg}` is an
+alternation, and `?` is literal (URLs use it for the query string). Interception runs on the
+CDP `Fetch` domain, so it needs **chrome** or **edge**; on Firefox, stub the API from the page
+with `page.add_init_script(...)` instead. `--header` sets *response* headers on the mock — the
+real request never leaves the browser, so there is nothing to strip from it.
+
 ### Capture / vision / utilities
 
 | Command | What it does |

@@ -138,7 +138,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "click", "dblclick", "fill", "check", "uncheck", "select", "press",
         "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
-        "add_cookies", "clear_cookies", "eval", "state_load",
+        "add_cookies", "clear_cookies", "eval", "route", "unroute", "state_load",
         "type", "key_down", "key_up",
         "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
         "storage_set", "storage_delete", "storage_clear",
@@ -1222,6 +1222,34 @@ class SessionHandler:
         if self._has_target(args):
             return {"result": self._target(args).first().evaluate(expression, arg)}
         return {"result": self.page().evaluate(expression, arg)}
+
+    # --- request interception (Chromium) ---------------------------------
+    def _op_route(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Install one interception rule on the session's page."""
+        pattern = args.get("pattern")
+        if not pattern:
+            raise ValueError("route: provide a URL pattern, e.g. '**/api/*'")
+        headers = args.get("headers") or {}
+        rule = self.page().route(
+            str(pattern),
+            status=None if args.get("status") is None else int(args["status"]),
+            body=None if args.get("body") is None else str(args["body"]),
+            content_type=(
+                None if args.get("content_type") is None else str(args["content_type"])
+            ),
+            headers={str(k): str(v) for k, v in dict(headers).items()},
+            abort=bool(args.get("abort", False)),
+        )
+        return {"route": rule.redacted().to_dict()}
+
+    def _op_unroute(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Remove one rule (or every rule when no pattern is given)."""
+        pattern = args.get("pattern")
+        return {"removed": self.page().unroute(None if pattern is None else str(pattern))}
+
+    def _op_route_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The installed rules, with secret headers redacted before they leave."""
+        return {"routes": [r.redacted().to_dict() for r in self.page().routes()]}
 
     # --- tracing ---------------------------------------------------------
     def _op_tracing_start(self, args: dict[str, Any]) -> dict[str, Any]:

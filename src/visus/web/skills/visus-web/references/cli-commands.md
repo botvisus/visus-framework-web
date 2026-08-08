@@ -119,6 +119,19 @@ through `visus eval`, whose quotes PowerShell mangles.
 | `visus request <N> [--json]` | One captured response in full — method, URL, status, resource type and the response **body**, which the MCP surface does not expose. `N` is the index from `visus requests`. A body evicted after a navigation prints `(body unavailable)` rather than failing. |
 | `visus network start` / `visus network stop` / `visus network export [-o <json>]` | A **second, complementary** capture. `visus requests` reads the CDP response log: every response, including assets and redirect legs. `network` installs a JS hook and records what the **page itself sent** — `fetch`/`XHR` **request bodies**, JSONP `<script>`, `sendBeacon` and `<img>` pings — none of which a response log can show. `export` writes `{target_url, entries}` with auth headers redacted. The two never starve each other: the hook capture runs with `use_cdp=False`, because `driver.get_log("performance")` is destructive and two drainers would split it. |
 
+### Network mocking (Chromium only)
+
+Make a flow deterministic — a 500, an empty list, a blocked asset — without touching the app.
+Patterns are Playwright-style globs: `**` crosses `/`, `*` does not, `{png,jpg}` alternates,
+and `?` is **literal** (URLs use it for the query string). Runs on the CDP `Fetch` domain, so
+it needs chrome or edge; on Firefox, stub the API from the page with `page.add_init_script(...)`.
+
+| Command | What it does |
+|---|---|
+| `visus route <PATTERN> [--status N] [--body T] [--body-file F] [--content-type CT] [--header 'K: V'] [--abort]` | Answer matching requests locally instead of letting them reach the network; `--abort` fails them instead (an asset blocked this way behaves like a network error, not a 404). Re-routing the same pattern REPLACES the rule. `--body-file` is read on the client, so its path resolves against your cwd. `--abort` with a status or body is refused rather than silently dropping them. `--header` sets *response* headers on the mock. |
+| `visus unroute [PATTERN]` | Remove that rule, or every rule when the pattern is omitted. Removing the last one drops the DevTools connection, leaving the tab exactly as it was. |
+| `visus route-list [--json]` | The installed rules in insertion order. Secret headers come back `REDACTED`, so an `Authorization` handed to a mock never leaves through this command. |
+
 ### Capture / vision / utilities
 
 | Command | What it does |

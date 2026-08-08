@@ -395,3 +395,227 @@ def test_cli_session_list_table_shows_scope_and_state(
     assert r.exit_code == 0, r.output
     for token in ("auth", "ghost", "local", "other", "live", "dead"):
         assert token in r.output, f"{token!r} missing from the session table"
+
+
+def test_profile_dir_is_inside_the_project(tmp_path: Path) -> None:
+    assert (
+        session_client.profile_dir(tmp_path, "auth")
+        == tmp_path / ".visus" / "profiles" / "auth"
+    )
+
+
+def test_close_all_shuts_down_every_live_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[tuple[int, str, str]] = []
+
+    rows = [
+        {
+            "name": "auth",
+            "cwd": str(tmp_path / "a"),
+            "file": str(tmp_path / "a" / ".visus" / "sessions" / "auth.json"),
+            "pid": 1,
+            "port": 5001,
+            "live": True,
+            "scope": "local",
+        },
+        {
+            "name": "ghost",
+            "cwd": str(tmp_path / "b"),
+            "file": str(tmp_path / "b" / ".visus" / "sessions" / "ghost.json"),
+            "pid": 2,
+            "port": 5002,
+            "live": False,
+            "scope": "other",
+        },
+    ]
+    sf = Path(rows[0]["file"])
+    sf.parent.mkdir(parents=True)
+    sf.write_text(json.dumps({"pid": 1, "port": 5001, "token": "tok-a"}), encoding="utf-8")
+
+    monkeypatch.setattr(session_client, "list_sessions", lambda start_dir=None: rows)
+    monkeypatch.setattr(
+        session_client,
+        "_send_raw",
+        lambda port, payload, **kw: sent.append((port, payload["token"], payload["op"]))
+        or {"ok": True, "result": "shutdown"},
+    )
+    msg = session_client.close_all(start_dir=tmp_path)
+    assert sent == [(5001, "tok-a", "shutdown")], sent
+    assert "closed 1" in msg
+    assert "ghost" not in msg  # a dead session is not "closed"
+
+
+def test_close_all_reports_a_session_it_cannot_authenticate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No readable session file means no token — say so, don't pretend it closed."""
+    rows = [
+        {
+            "name": "locked",
+            "cwd": str(tmp_path / "x"),
+            "file": str(tmp_path / "x" / ".visus" / "sessions" / "locked.json"),
+            "pid": 3,
+            "port": 5003,
+            "live": True,
+            "scope": "other",
+        }
+    ]
+    monkeypatch.setattr(session_client, "list_sessions", lambda start_dir=None: rows)
+    msg = session_client.close_all(start_dir=tmp_path)
+    assert "locked" in msg and "kill-all" in msg
+
+
+def test_close_all_with_nothing_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_client, "list_sessions", lambda start_dir=None: [])
+    assert session_client.close_all(start_dir=tmp_path) == "no live sessions"
+
+
+def test_kill_all_terminates_and_removes_every_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    killed: list[int] = []
+    proj = tmp_path / "proj"
+    sessions = proj / ".visus" / "sessions"
+    sessions.mkdir(parents=True)
+    sf = sessions / "auth.json"
+    sf.write_text(json.dumps({"pid": 42, "port": 1, "token": "t"}), encoding="utf-8")
+    lock = sessions / "auth.json.lock"
+    lock.write_text("42", encoding="utf-8")
+    reg = session_server.registry_file(proj, "auth")
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text(
+        json.dumps({"name": "auth", "cwd": str(proj), "file": str(sf), "pid": 42, "port": 1}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        session_client,
+        "list_sessions",
+        lambda start_dir=None: [
+            {
+                "name": "auth",
+                "cwd": str(proj),
+                "file": str(sf),
+                "pid": 42,
+                "port": 1,
+                "live": True,
+                "scope": "local",
+            }
+        ],
+    )
+    monkeypatch.setattr(session_client, "_probe_pid", lambda pid: True)
+    monkeypatch.setattr(session_client, "_terminate", killed.append)
+
+    msg = session_client.kill_all(start_dir=tmp_path)
+    assert killed == [42]
+    assert not sf.exists() and not lock.exists() and not reg.exists()
+    assert "auth" in msg and "42" in msg
+
+
+def test_kill_all_sweeps_a_pre_namespace_session_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A daemon started before named sessions writes .visus/session.json.
+
+    Neither the new client nor `session stop` can find it, so kill-all is the
+    only command that can reach it.
+    """
+    killed: list[int] = []
+    visus = tmp_path / ".visus"
+    visus.mkdir(parents=True)
+    legacy = visus / "session.json"
+    legacy.write_text(json.dumps({"pid": 77, "port": 1, "token": "t"}), encoding="utf-8")
+    (visus / "session.json.lock").write_text("77", encoding="utf-8")
+
+    monkeypatch.setattr(session_client, "list_sessions", lambda start_dir=None: [])
+    monkeypatch.setattr(session_client, "_probe_pid", lambda pid: True)
+    monkeypatch.setattr(session_client, "_terminate", killed.append)
+
+    msg = session_client.kill_all(start_dir=tmp_path)
+    assert killed == [77]
+    assert not legacy.exists()
+    assert not (visus / "session.json.lock").exists()
+    assert "session.json" in msg
+
+
+def test_kill_all_with_nothing_to_do(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_client, "list_sessions", lambda start_dir=None: [])
+    assert session_client.kill_all(start_dir=tmp_path) == "no session state to remove"
+
+
+def test_delete_data_removes_the_managed_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = session_client.profile_dir(tmp_path, "auth")
+    profile.mkdir(parents=True)
+    (profile / "Cookies").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None, name=None: None)
+    msg = session_client.delete_data(start_dir=tmp_path, name="auth")
+    assert not profile.exists()
+    assert str(profile) in msg
+
+
+def test_delete_data_refuses_while_the_session_is_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = session_client.profile_dir(tmp_path, "auth")
+    profile.mkdir(parents=True)
+    monkeypatch.setattr(
+        session_client,
+        "find_session",
+        lambda start_dir=None, name=None: {"pid": 9, "port": 8, "token": "t"},
+    )
+    with pytest.raises(session_client.SessionError, match="still running"):
+        session_client.delete_data(start_dir=tmp_path, name="auth")
+    assert profile.exists(), "a live session's profile must not be deleted"
+
+
+def test_delete_data_never_touches_a_user_chosen_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--profile <dir> points at a directory the USER owns; never rmtree it."""
+    outside = tmp_path / "my-chrome-profile"
+    outside.mkdir()
+    sessions = tmp_path / ".visus" / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "auth.json").write_text(
+        json.dumps({"pid": 1, "port": 1, "user_data_dir": str(outside)}), encoding="utf-8"
+    )
+    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None, name=None: None)
+    msg = session_client.delete_data(start_dir=tmp_path, name="auth")
+    assert outside.is_dir(), "delete-data deleted a directory it does not manage"
+    assert str(outside) in msg and "not managed by visus" in msg
+
+
+def test_delete_data_with_nothing_to_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_client, "find_session", lambda start_dir=None, name=None: None)
+    msg = session_client.delete_data(start_dir=tmp_path, name="auth")
+    assert "no profile data" in msg
+
+
+def test_cli_fleet_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All three commands call their client function with NO arguments.
+
+    `delete_data` resolves the session name itself (via `session_name()`), so the
+    fake must too — asserting `deleted auth` proves the root callback's `-S auth`
+    reached `set_session_name` before the subcommand ran.
+    """
+    monkeypatch.setattr(session_client, "close_all", lambda **kw: "closed 2 session(s)")
+    monkeypatch.setattr(session_client, "kill_all", lambda **kw: "killed pid 1")
+    monkeypatch.setattr(
+        session_client,
+        "delete_data",
+        lambda **kw: f"deleted {session_client.session_name(kw.get('name'))}",
+    )
+
+    assert "closed 2" in runner.invoke(app, ["session", "close-all"]).output
+    assert "killed pid 1" in runner.invoke(app, ["session", "kill-all"]).output
+    r = runner.invoke(app, ["-S", "auth", "session", "delete-data"])
+    assert r.exit_code == 0 and "deleted auth" in r.output

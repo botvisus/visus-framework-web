@@ -709,6 +709,37 @@ def session_list() -> None:
     output.emit(rows, table=cap.get().rstrip("\n"))
 
 
+@session_app.command("close-all")
+def session_close_all() -> None:
+    """Shut down every live session, in this project and in any other."""
+    from visus.web.cli import output, session_client
+
+    output.emit(session_client.close_all())
+
+
+@session_app.command("kill-all")
+def session_kill_all() -> None:
+    """Force-kill every session daemon and delete all session state.
+
+    The escape hatch when `close-all` cannot authenticate: it needs no token and
+    also sweeps state left by a visus older than named sessions.
+    """
+    from visus.web.cli import output, session_client
+
+    output.emit(session_client.kill_all())
+
+
+@session_app.command("delete-data")
+def session_delete_data() -> None:
+    """Delete this session's persistent browser profile (`--persistent`)."""
+    from visus.web.cli import output, session_client
+
+    try:
+        output.emit(session_client.delete_data())
+    except session_client.SessionError as exc:
+        output.emit_error(str(exc))
+
+
 @session_app.command("export-script")
 def session_export_script(
     output_path: str = typer.Option(

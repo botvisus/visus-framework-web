@@ -310,6 +310,9 @@ command accepts `--json`.
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
 | `visus session list [--json]` | List every session — this project's and any daemon left running in another project. |
+| `visus session close-all` | Shut down every live session (this project's and other projects'). |
+| `visus session kill-all` | Force-kill every session daemon and delete all session state. |
+| `visus session delete-data` | Delete this session's persistent profile (`--persistent` only). |
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file. |
 | `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 | `visus console [URL]` | Deprecated alias for `visus repl` (prints a notice on stderr). |

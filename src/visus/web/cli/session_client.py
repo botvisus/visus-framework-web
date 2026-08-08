@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -575,3 +576,151 @@ def list_sessions(start_dir: str | Path | None = None) -> list[dict[str, Any]]:
     return sorted(
         merged.values(), key=lambda r: (r["scope"] != "local", r["name"], r["cwd"])
     )
+
+
+def profile_dir(cwd: str | Path | None = None, name: str | None = None) -> Path:
+    """The persistent profile ``--persistent`` creates for session *name*.
+
+    Inside the project (``.visus/profiles/<name>``) so it is git-ignored with the
+    rest of ``.visus/`` and so :func:`delete_data` has exactly one directory it is
+    entitled to remove.
+    """
+    base = Path(cwd) if cwd is not None else Path.cwd()
+    return base / ".visus" / "profiles" / session_name(name)
+
+
+def _legacy_paths(start_dir: str | Path | None = None) -> list[Path]:
+    """Pre-namespace ``.visus/session.json`` (+ lock), searched upward.
+
+    A daemon started before sessions were namespaced writes that path. The new
+    client cannot discover it and ``session stop`` cannot reach it, so
+    :func:`kill_all` is the only command that can clean it up.
+    """
+    cur = Path(start_dir) if start_dir is not None else Path.cwd()
+    cur = cur.resolve()
+    found: list[Path] = []
+    for d in [cur, *cur.parents]:
+        for candidate in (d / ".visus" / "session.json", d / ".visus" / "session.json.lock"):
+            if candidate.is_file():
+                found.append(candidate)
+    return found
+
+
+def close_all(*, start_dir: str | Path | None = None) -> str:
+    """Politely shut down every live session. Returns a status message.
+
+    Shutdown needs the session token, which lives only in the owner-only session
+    file — so a session whose file this user cannot read is reported rather than
+    silently skipped, with the command that CAN stop it.
+    """
+    closed: list[str] = []
+    unreachable: list[str] = []
+    for row in list_sessions(start_dir):
+        if not row.get("live"):
+            continue
+        info = _read_json(Path(str(row.get("file") or "")))
+        token = None if info is None else info.get("token")
+        if not isinstance(token, str):
+            unreachable.append(str(row["name"]))
+            continue
+        try:
+            _send_raw(int(row["port"]), {"token": token, "op": "shutdown", "args": {}})
+        except (OSError, SessionError, json.JSONDecodeError):
+            unreachable.append(str(row["name"]))
+            continue
+        closed.append(str(row["name"]))
+    if not closed and not unreachable:
+        return "no live sessions"
+    parts = [f"closed {len(closed)} session(s): {', '.join(closed)}"] if closed else []
+    if unreachable:
+        parts.append(
+            f"could not reach {', '.join(unreachable)} "
+            "(session file unreadable) — use `visus session kill-all`"
+        )
+    return "; ".join(parts)
+
+
+def kill_all(*, start_dir: str | Path | None = None) -> str:
+    """Force-clear every session: terminate live daemons and delete all state.
+
+    The no-token escape hatch behind :func:`close_all`. Sweeps three places: each
+    project session file (+ its lock), the cross-project registry entry, and any
+    pre-namespace ``.visus/session.json`` nothing else can reach.
+    """
+    from visus.web.cli import session_server
+
+    killed: list[int] = []
+    removed: list[str] = []
+
+    for row in list_sessions(start_dir):
+        pid = int(row.get("pid", -1) or -1)
+        if pid > 0 and _probe_pid(pid):
+            _terminate(pid)
+            killed.append(pid)
+        sf = Path(str(row.get("file") or ""))
+        if sf.is_file():
+            _cleanup(sf)  # removes the session file AND the lock beside it
+            removed.append(sf.name)
+        try:
+            entry = session_server.registry_file(str(row["cwd"]), str(row["name"]))
+            if entry.is_file():
+                entry.unlink()
+                removed.append(entry.name)
+        except OSError:
+            pass
+
+    for legacy in _legacy_paths(start_dir):
+        if legacy.name == "session.json":
+            info = _read_json(legacy)
+            pid = -1 if info is None else int(info.get("pid", -1) or -1)
+        else:
+            pid = session_server._read_lock_pid(legacy)
+        if pid > 0 and pid not in killed and _probe_pid(pid):
+            _terminate(pid)
+            killed.append(pid)
+        try:
+            legacy.unlink()
+            removed.append(legacy.name)
+        except OSError:
+            pass
+
+    if not killed and not removed:
+        return "no session state to remove"
+    parts: list[str] = []
+    if killed:
+        parts.append("killed pid " + ", ".join(str(p) for p in killed))
+    if removed:
+        parts.append("removed " + ", ".join(removed))
+    return "; ".join(parts)
+
+
+def delete_data(*, start_dir: str | Path | None = None, name: str | None = None) -> str:
+    """Delete session *name*'s persistent browser profile. Returns a message.
+
+    Only the directory visus itself creates (:func:`profile_dir`) is removed. A
+    profile the user pointed at with ``--profile`` / ``--user-data-dir`` is
+    reported but never deleted: it is their directory, it may hold their real
+    Chrome data, and an rmtree there is unrecoverable.
+    """
+    resolved = session_name(name)
+    if find_session(start_dir, resolved) is not None:
+        raise SessionError(
+            f"session {resolved!r} is still running — stop it first "
+            "(`visus session stop`), then delete its data"
+        )
+
+    managed = profile_dir(start_dir, resolved)
+    notes: list[str] = []
+    if managed.is_dir():
+        shutil.rmtree(managed, ignore_errors=True)
+        notes.append(f"deleted {managed}")
+
+    sf = _find_session_file(start_dir, resolved)
+    info = None if sf is None else _read_json(sf)
+    external = None if info is None else info.get("user_data_dir")
+    if isinstance(external, str) and external and Path(external) != managed:
+        notes.append(f"left {external} alone (not managed by visus — delete it yourself)")
+
+    if not notes:
+        return f"no profile data for session {resolved!r}"
+    return "; ".join(notes)

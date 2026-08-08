@@ -102,6 +102,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
         "add_cookies", "clear_cookies", "eval", "state_load",
+        "type", "key_down", "key_up",
     }
 )
 
@@ -536,7 +537,11 @@ class SessionHandler:
 
     def _op_fill(self, args: dict[str, Any]) -> str:
         text = args.get("text", "")
-        self._target(args).fill(text)
+        loc = self._target(args)
+        loc.fill(text)
+        if args.get("submit"):
+            loc.press("Enter")
+            return f"filled with {text!r} and pressed Enter"
         return f"filled with {text!r}"
 
     def _op_check(self, args: dict[str, Any]) -> str:
@@ -553,9 +558,34 @@ class SessionHandler:
         return f"selected {value!r}"
 
     def _op_press(self, args: dict[str, Any]) -> str:
+        """Press a key on a target, or on the page itself when no target is given."""
         key = args.get("key", "")
-        self._target(args).press(key)
+        if self._has_target(args):
+            self._target(args).press(key)
+        else:
+            self.page().keyboard.press(key)
         return f"pressed {key!r}"
+
+    def _op_type(self, args: dict[str, Any]) -> str:
+        """Type text with real key events. With a target, focus it first."""
+        text = str(args.get("text", ""))
+        page = self.page()
+        if self._has_target(args):
+            self._target(args).first().focus()
+        page.keyboard.type(text)
+        return f"typed {text!r}"
+
+    def _op_key_down(self, args: dict[str, Any]) -> str:
+        """Hold a key down (e.g. Shift, Control) until ``key_up``."""
+        key = str(args.get("key", ""))
+        self.page().keyboard.down(key)
+        return f"key down {key!r}"
+
+    def _op_key_up(self, args: dict[str, Any]) -> str:
+        """Release a key held by ``key_down``."""
+        key = str(args.get("key", ""))
+        self.page().keyboard.up(key)
+        return f"key up {key!r}"
 
     def _op_get_text(self, args: dict[str, Any]) -> dict[str, Any]:
         """Text content of the target, keeping "absent" distinct from "empty".

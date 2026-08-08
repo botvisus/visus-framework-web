@@ -339,11 +339,13 @@ command accepts `--json`.
 |---|---|
 | `visus click [idx] [target]` | Click a field. |
 | `visus dblclick [idx] [target]` | Double-click a field. |
-| `visus fill [idx] <text>` / `… -s <sel> --value <v>` | Fill an input. |
+| `visus fill [idx] <text> [--submit]` / `… -s <sel> --value <v>` | Fill an input; `--submit` presses Enter afterwards. |
 | `visus clear-input [idx] [target]` | Clear an input's value. |
 | `visus check` / `visus uncheck [idx] [target]` | Check / uncheck a checkbox or radio. |
 | `visus select [idx] <value>` | Select an option on a `<select>`. |
-| `visus press [idx] <key>` | Press a key/chord (e.g. `Enter`, `Control+a`). |
+| `visus press [idx] <key>` / `visus press <key>` | Press a key/chord on a field, or on the page with no target. |
+| `visus type <text> [target]` | Type with real key events (focuses the target first, if given). |
+| `visus keydown <key>` / `visus keyup <key>` | Hold / release a modifier across several actions. |
 | `visus hover` / `visus focus [idx] [target]` | Hover / focus a field. |
 | `visus drag <src> <dst>` / `… --to-selector` | Drag a source element onto a target. |
 | `visus upload [idx] <paths…>` | Set file(s) on a file input. |

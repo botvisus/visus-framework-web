@@ -32,6 +32,9 @@ commands:
   uncheck TARGET       uncheck the target
   select TARGET value  select option `value` on the target
   press [TARGET] key   press a key on the target, or on the page with no target
+  type text...         type into the focused element (real key events)
+  keydown key          hold a key down (e.g. Shift)
+  keyup key            release a held key
   hover TARGET         hover over the target
   dblclick TARGET      double-click the target
   focus TARGET         focus the target
@@ -303,6 +306,12 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 return _act("press", {"key": rest[0]})
             tgt, tail = _target(rest)
             return _act("press", {**tgt, "key": " ".join(tail)})
+        if cmd == "type":
+            return _act("type", {"text": " ".join(rest)})
+        if cmd == "keydown":
+            return _act("key_down", {"key": rest[0]})
+        if cmd == "keyup":
+            return _act("key_up", {"key": rest[0]})
         if cmd == "hover":
             tgt, _ = _target(rest)
             return _act("hover", tgt)

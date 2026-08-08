@@ -597,6 +597,9 @@ def fill(
     value: str = typer.Option(
         None, "--value", help="Text to fill when targeting by --selector/--role/--text."
     ),
+    submit: bool = typer.Option(
+        False, "--submit", help="Press Enter after filling (submits most forms)."
+    ),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
@@ -606,6 +609,8 @@ def fill(
     if fill_value is None:
         output.emit_error("error: no text to fill — use `visus fill <index> <text>` or `--value`")
     args["text"] = fill_value
+    if submit:
+        args["submit"] = True  # only sent when asked, so the payload stays minimal
     output.emit_envelope(_send_env("fill", args))
 
 
@@ -664,8 +669,10 @@ def select(
 
 @app.command()
 def press(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
-    key: str = typer.Argument(None, help="Key to press, e.g. `visus press 7 Enter`."),
+    target: str = typer.Argument(
+        None, help="Field index, OR the key itself for a page-level press."
+    ),
+    key: str = typer.Argument(None, help="Key to press when the first argument is an index."),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -676,13 +683,54 @@ def press(
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
-    """Press a key on a field (e.g. Enter, Tab, Control+a). By index: `visus press 7 Enter`."""
-    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
+    """Press a key. On a field: `visus press 7 Enter`. On the page: `visus press Enter`."""
+    has_option_target = bool(selector or role or by_text)
+    index = int(target) if target is not None and target.isdigit() else None
     k = key if key is not None else key_value
+    if k is None and index is None and target is not None and not has_option_target:
+        k = target  # `visus press Enter` — the whole argument was the key
     if k is None:
-        output.emit_error("error: no key — use `visus press <index> <key>` or `--key`")
+        output.emit_error(
+            "error: no key — use `visus press <index> <key>`, `--key`, or `visus press <key>`"
+        )
+    if index is None and not has_option_target:
+        output.emit_envelope(_send_env("press", {"key": k}))
+        return
+    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
     args["key"] = k
     output.emit_envelope(_send_env("press", args))
+
+
+@app.command("type")
+def type_text(
+    text: str = typer.Argument(..., help="Text to type with real key events."),
+    index: int = typer.Option(None, "--index", "-i", help="Focus this field first."),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    by_text: str = typer.Option(None, "--text", help="Target a field by its visible text."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
+) -> None:
+    """Type text into the focused element (or focus a target first)."""
+    args: dict[str, Any] = {"text": text}
+    if index is not None or selector or role or by_text:
+        args.update(
+            _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
+        )
+    output.emit(_send("type", args))
+
+
+@app.command()
+def keydown(key: str = typer.Argument(..., help="Key to hold, e.g. Shift or Control.")) -> None:
+    """Hold a key down until `visus keyup` releases it."""
+    output.emit(_send("key_down", {"key": key}))
+
+
+@app.command()
+def keyup(key: str = typer.Argument(..., help="Key to release.")) -> None:
+    """Release a key held by `visus keydown`."""
+    output.emit(_send("key_up", {"key": key}))
 
 
 @app.command()

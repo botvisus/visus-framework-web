@@ -55,11 +55,13 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 |---|---|
 | `visus click [idx] [target]` | Click a field. |
 | `visus dblclick [idx] [target]` | Double-click a field. |
-| `visus fill [idx] <text>` / `… -s <sel> --value <v>` | Fill an input. |
+| `visus fill [idx] <text> [--submit]` / `… -s <sel> --value <v>` | Fill an input. `--submit` presses Enter on the same element afterwards, which submits most forms in one command instead of two. |
 | `visus clear-input [idx] [target]` | Clear an input's value. |
 | `visus check` / `visus uncheck [idx] [target]` | Check / uncheck a checkbox or radio. |
 | `visus select [idx] <value>` | Select an option on a `<select>`. |
-| `visus press [idx] <key>` | Press a key/chord (e.g. `Enter`, `Control+a`). |
+| `visus press [idx] <key>` / `visus press <key>` | Press a key/chord (e.g. `Enter`, `Control+a`). With **no** target the key goes to the page's keyboard — `visus press Enter` works on whatever is focused. A bare first argument that is not a number is read as the key. |
+| `visus type <text> [--index N] [-s <sel>] [--role r] [--text t]` | Type with real key events (unlike `fill`, which sets the value in one step — use `type` when the page listens for keystrokes). With a target it focuses it first; without one it types into whatever is focused. |
+| `visus keydown <key>` / `visus keyup <key>` | Hold a modifier down across several commands and release it — e.g. `keydown Shift`, some clicks, `keyup Shift`. |
 | `visus hover` / `visus focus [idx] [target]` | Hover / focus a field. |
 | `visus drag <src> <dst>` / `… --to-selector` | Drag a source element onto a target. |
 | `visus upload [idx] <paths…>` | Set file(s) on a file input. |

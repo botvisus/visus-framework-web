@@ -420,6 +420,14 @@ class SeleniumPageDelegate:
             "focus",
             timeout_ms=timeout_ms,
             force=False,
+            # A real mouse click, NOT HTMLElement.focus(). Headless Chrome has
+            # document.hasFocus() == False, and in that state it suppresses the
+            # `focus` event: a JS focus() moves document.activeElement but never
+            # runs the page's onfocus handler. The click gives the window system
+            # focus first, so both happen. The cost is that focus needs a
+            # clickable point — an element with none (zero-height, fully covered)
+            # reports success without moving focus. See test_focus_and_blur and
+            # test_focus_does_not_depend_on_the_element_being_clickable.
             dispatch=lambda el: ActionChains(self._driver).move_to_element(el).click().perform(),
             ensure_bundle=self._ensure_bundle,
         )

@@ -73,6 +73,30 @@ def test_focus_and_blur(page):
 
 
 @pytest.mark.browser
+def test_focus_needs_a_clickable_point_and_says_so(page):
+    """Documents a real limitation of `focus`, so a future change is a decision.
+
+    `focus` dispatches a mouse click (the only way to make headless Chrome fire
+    the page's onfocus handler — with document.hasFocus() False a JS
+    HTMLElement.focus() moves activeElement silently). The cost: an element with
+    no clickable point is reported focused without focus moving. Swapping the
+    dispatch to JS trades this for a worse bug; the real fix is CDP focus
+    emulation (Emulation.setFocusEmulationEnabled), which is Chromium-only.
+    """
+    page.evaluate(
+        "() => { const d = document.createElement('div');"
+        " d.id = 'flatfocus'; d.tabIndex = 0; d.style.height = '0px';"
+        " document.body.appendChild(d); }"
+    )
+    page.locator("#flatfocus").focus()
+    assert page.evaluate("() => document.activeElement.id") != "flatfocus"
+    # …while a JS focus() would move it — proving the element itself is focusable
+    # and the limitation is in the dispatch, not the page.
+    page.evaluate("() => document.getElementById('flatfocus').focus()")
+    assert page.evaluate("() => document.activeElement.id") == "flatfocus"
+
+
+@pytest.mark.browser
 def test_drag_to(page):
     page.locator("#src").drag_to(page.locator("#dst"))
     assert page.locator("#dragres").text_content() == "dropped"

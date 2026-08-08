@@ -47,6 +47,9 @@ check TARGET         check the target
 uncheck TARGET       uncheck the target
 select TARGET value  select option `value` on the target
 press [TARGET] key   press a key on the target, or on the page with no target
+type text...         type into the focused element (real key events)
+keydown key          hold a key down (e.g. Shift)
+keyup key            release a held key
 hover TARGET         hover over the target
 dblclick TARGET      double-click the target
 focus TARGET         focus the target

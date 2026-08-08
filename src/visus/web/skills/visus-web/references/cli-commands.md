@@ -89,6 +89,8 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus eval "<fn>" [arg] [--json]` | Evaluate JS in the page (e.g. `'() => document.title'`). |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far. `LEVEL` filters case-insensitively on `SEVERE` / `WARNING` / `INFO`. Chromium engines only. |
+| `visus requests [--filter <s>] [-F <s>] [--json]` | Network responses captured so far, numbered. `--filter` is a plain substring test on the URL. Chromium only. |
+| `visus request <N> [--json]` | One captured response in full — method, URL, status, resource type and the response **body**, which the MCP surface does not expose. `N` is the index from `visus requests`. A body evicted after a navigation prints `(body unavailable)` rather than failing. |
 
 ### Capture / vision / utilities
 

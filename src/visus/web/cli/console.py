@@ -56,6 +56,8 @@ commands:
   clear-cookies        clear every cookie in the context
   eval expr            evaluate a JS expression
   logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
+  requests [FILTER]    captured network responses (substring URL filter)
+  request N            one captured response, with its body
   dialog [dismiss]     handle the next dialog (accept by default)
   screenshot [path]    save a screenshot (default screenshot.png)
   export-script [path] print (or save) this session as a runnable visus.web script
@@ -421,6 +423,25 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 return "(no console messages)"
             return "\n".join(
                 f"{str(m.get('level', '')):8} {m.get('text', '')}" for m in messages
+            )
+        if cmd == "requests":
+            rows = send("network_requests", {"url_filter": rest[0] if rest else None}).get(
+                "requests", []
+            )
+            if not rows:
+                return "(no requests captured)"
+            return "\n".join(
+                f"[{r.get('index', i)}] {r.get('status', '')!s:>4} "
+                f"{str(r.get('method', '')):6} {r.get('url', '')}"
+                for i, r in enumerate(rows)
+            )
+        if cmd == "request":
+            r = send("network_request", {"index": int(rest[0])})
+            body = r.get("body")
+            return (
+                f"{r.get('method', '')} {r.get('url', '')}\n"
+                f"status : {r.get('status', '')}\n\n"
+                + (body if body is not None else "(body unavailable)")
             )
         if cmd == "dialog":
             accept = not (rest and rest[0].lower() in ("dismiss", "cancel", "no"))

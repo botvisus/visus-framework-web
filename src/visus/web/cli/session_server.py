@@ -850,6 +850,53 @@ class SessionHandler:
             out = [m for m in out if m["level"] == level.upper()]
         return {"messages": out}
 
+    def _op_network_requests(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Network responses captured so far (mirrors browser_network_requests).
+
+        ``url_filter`` is a plain substring test on the URL. Chromium only.
+        """
+        url_filter = str(args.get("url_filter") or "")
+        out = [
+            {
+                "index": i,
+                "url": r.url,
+                "method": r.method,
+                "status": r.status,
+                "resource_type": r.resource_type,
+            }
+            for i, r in enumerate(self.page().network_requests())
+        ]
+        if url_filter:
+            out = [r for r in out if url_filter in str(r["url"])]
+        return {"requests": out}
+
+    def _op_network_request(self, args: dict[str, Any]) -> dict[str, Any]:
+        """One captured response by index, including its body.
+
+        The body is fetched lazily over CDP and can be evicted after a
+        navigation; an unavailable body is reported as ``None``, never raised.
+        """
+        index = int(args.get("index", 0))
+        responses = self.page().network_requests()
+        if index < 0 or index >= len(responses):
+            raise IndexError(
+                f"request index {index} out of range "
+                f"(have {len(responses)}; run `visus requests` first)"
+            )
+        r = responses[index]
+        try:
+            body: str | None = r.body()
+        except Exception:  # noqa: BLE001 — an evicted body is data, not a failure
+            body = None
+        return {
+            "index": index,
+            "url": r.url,
+            "method": r.method,
+            "status": r.status,
+            "resource_type": r.resource_type,
+            "body": body,
+        }
+
     # --- vision (requires the [vision] extra) ----------------------------
     def _op_read_text(self, args: dict[str, Any]) -> str:
         return self._target(args).ocr_text()

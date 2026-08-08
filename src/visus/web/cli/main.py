@@ -1230,6 +1230,52 @@ def logs(
     output.emit(messages, table=_logs_text(messages))
 
 
+def _requests_text(rows: list[dict[str, Any]]) -> str:
+    """Render captured responses as `# STATUS METHOD URL` lines."""
+    if not rows:
+        return "(no requests captured)"
+    return "\n".join(
+        f"[{r.get('index', i)}] {r.get('status', '')!s:>4} "
+        f"{str(r.get('method', '')):6} {r.get('url', '')}"
+        for i, r in enumerate(rows)
+    )
+
+
+@app.command()
+def requests(
+    url_filter: str = typer.Option(
+        None, "--filter", "-F", help="Keep only URLs containing this substring."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List the network responses captured so far (Chromium)."""
+    rows = _send("network_requests", {"url_filter": url_filter}).get("requests", [])
+    if as_json:
+        output.set_mode(as_json=True)
+    output.emit(rows, table=_requests_text(rows))
+
+
+@app.command()
+def request(
+    index: int = typer.Argument(..., help="Index from `visus requests`."),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Show one captured response in full, including its body."""
+    r = _send("network_request", {"index": index})
+    if as_json:
+        output.set_mode(as_json=True)
+    text = "\n".join(
+        [
+            f"{r.get('method', '')} {r.get('url', '')}",
+            f"status : {r.get('status', '')}",
+            f"type   : {r.get('resource_type', '')}",
+            "",
+            r.get("body") if r.get("body") is not None else "(body unavailable)",
+        ]
+    )
+    output.emit(r, table=text)
+
+
 # ---------------------------------------------------------------------------
 # Vision (requires the [vision] extra)
 # ---------------------------------------------------------------------------

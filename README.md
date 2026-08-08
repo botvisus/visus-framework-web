@@ -373,6 +373,8 @@ command accepts `--json`.
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus eval "<fn>" [arg] [--json]` | Evaluate JS in the page (e.g. `'() => document.title'`). |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far (Chromium). |
+| `visus requests [--filter <s>] [--json]` | Network responses captured so far (Chromium). |
+| `visus request <N> [--json]` | One captured response in full, including its body. |
 
 ### Capture / vision / utilities
 

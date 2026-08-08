@@ -992,6 +992,164 @@ def test_format_fields_table_shows_visus_css_xpath() -> None:
     assert "frame" in out and "#f1" in out  # the frame_locator(...) wrapping
     assert "#submit" in out  # css value
 
+def test_repl_click_shows_page_and_code_when_an_envelope_sender_is_given() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        raise AssertionError("mutating REPL commands must use the envelope sender")
+
+    def send_env(op: str, args: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "result": "clicked",
+            "code": 'page.locator("#go").click()',
+            "page": {"url": "http://x/next", "title": "Next", "fields_stale": False},
+        }
+
+    out = console.dispatch("click 3", send, send_env)
+    assert out.splitlines() == [
+        "clicked",
+        "",
+        "### Code",
+        'page.locator("#go").click()',
+        "",
+        "### Page",
+        "- URL: http://x/next",
+        "- Title: Next",
+    ]
+
+
+def test_repl_without_an_envelope_sender_prints_the_bare_result() -> None:
+    out = console.dispatch("click 3", lambda op, args: "clicked")
+    assert out == "clicked"
+
+
+def test_repl_read_command_is_unchanged_by_the_envelope_sender() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        assert op == "get_text"
+        return "hello"
+
+    def send_env(op: str, args: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("reads must not go through the envelope sender")
+
+    assert console.dispatch("text 3", send, send_env) == "hello"
+
+
+def test_repl_snapshot_shows_refs() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        return {
+            "elements": [
+                {"ref": 4, "role": "button", "name": "Go", "depth": 0},
+                {"ref": None, "role": "heading", "name": "Title", "depth": 0},
+            ],
+            "url": "u",
+            "title": "t",
+        }
+
+    out = console.dispatch("snapshot", send)
+    assert out.splitlines() == ["   4  button           Go", "   -  heading          Title"]
+
+
+def test_repl_find_renders_matches() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        assert args == {"query": "cart", "regex": False, "context": 3,
+                        "selector": None, "depth": None}
+        return {
+            "query": "cart",
+            "regex": False,
+            "total": 9,
+            "matched": 1,
+            "rows": [{"line": 2, "role": "button", "name": "Add to cart", "ref": 1,
+                      "match": True}],
+        }
+
+    out = console.dispatch("find cart", send)
+    assert "1 of 9 rows match 'cart'" in out
+    assert "Add to cart" in out
+
+
+def test_repl_screenshot_path_resolves_against_the_client_cwd(tmp_path: Path) -> None:
+    """Regression lock on PLAN 3 Task 13 (B9): the dispatch rewrite must keep the
+    client-cwd resolution — a raw string lands the PNG in the DAEMON's cwd."""
+    captured: dict[str, Any] = {}
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        captured["args"] = args
+        return args["path"]
+
+    console.dispatch("screenshot shot.png", send)
+    assert Path(captured["args"]["path"]).is_absolute()
+    assert Path(captured["args"]["path"]).name == "shot.png"
+
+
+def test_repl_help_lists_the_new_commands() -> None:
+    out = console.dispatch("help", lambda op, args: None)
+    assert "find " in out
+    assert "export-script" in out
+
+
+def test_repl_goto_keeps_its_sentence_and_gains_the_footer() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        raise AssertionError("goto is mutating: it must use the envelope sender")
+
+    def send_env(op: str, args: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "result": "http://dest",
+            "page": {"url": "http://dest", "title": "Dest", "fields_stale": False},
+        }
+
+    out = console.dispatch("goto http://dest", send, send_env)
+    assert out.startswith("navigated to http://dest")
+    assert "### Page" in out and "- Title: Dest" in out
+
+
+def test_repl_tab_commands_keep_their_sentences() -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        if op == "tab":
+            return {"active": 0, "title": "A"}
+        if op == "tab_new":
+            return {"index": 1, "title": "B"}
+        return {"closed": 1, "remaining": 1, "active": 0}
+
+    assert "switched to tab 0" in console.dispatch("tab 0", send)
+    assert "opened tab 1" in console.dispatch("tab-new http://x", send)
+    assert "closed tab 1" in console.dispatch("tab-close 1", send)
+
+
+def test_repl_export_script_prints_and_saves(tmp_path: Path) -> None:
+    def send(op: str, args: dict[str, Any]) -> Any:
+        assert op == "export_script"
+        return {"script": "from visus.web import launch\n", "lines": 1}
+
+    assert console.dispatch("export-script", send) == "from visus.web import launch\n"
+    dest = tmp_path / "flow.py"
+    out = console.dispatch(f"export-script {dest}", send)
+    assert dest.read_text(encoding="utf-8") == "from visus.web import launch\n"
+    assert "saved" in out and "1 action(s)" in out
+
+
+def test_repl_highlight_all_opts_into_the_overlay() -> None:
+    captured: dict[str, Any] = {}
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        captured[op] = args
+        return {"fields": []}
+
+    assert console.dispatch("highlight-all", send) == "overlay drawn"
+    assert captured["list_fields"]["highlight"] is True
+
+
+def test_repl_list_does_not_draw_the_overlay() -> None:
+    """`list` is a read — same rule Task 12 applied to `visus list-fields`."""
+    captured: dict[str, Any] = {}
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        captured[op] = args
+        return {"fields": []}
+
+    console.dispatch("list", send)
+    assert captured["list_fields"]["highlight"] is False
+
+
 _ONE_FIELD = [
     {
         "index": 0,

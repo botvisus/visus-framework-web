@@ -17,8 +17,11 @@ from visus.web.cli import session_client
 # A send callable: (op, args) -> result (the daemon's `result` payload).
 SendFn = Callable[[str, dict[str, Any]], Any]
 
+# An envelope send callable: (op, args) -> the daemon's full reply dict.
+SendEnvFn = Callable[[str, dict[str, Any]], dict[str, Any]]
+
 _HELP = """commands:
-  list                 enumerate + highlight interactive fields
+  list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
   click N              click field N (or a previous list index)
   fill N text          fill field N with text
   check N              check field N
@@ -35,7 +38,8 @@ _HELP = """commands:
   reload               reload the current page
   title                print the page title
   url                  print the current URL
-  snapshot             list interactive elements (role/name)
+  snapshot [sel]       list interactive elements (REF/role/name), optionally scoped
+  find text            grep the snapshot, with 3 rows of context around each hit
   text N               print field N's text content
   attr name N          print field N's `name` attribute
   count N              count elements matching field N
@@ -45,7 +49,9 @@ _HELP = """commands:
   eval expr            evaluate a JS expression
   dialog [dismiss]     handle the next dialog (accept by default)
   screenshot [path]    save a screenshot (default screenshot.png)
+  export-script [path] print (or save) this session as a runnable visus.web script
   clear                remove the field highlight overlay
+  highlight-all        redraw the numbered field overlay for every field
   tabs                 list open tabs/windows (active marked *)
   tab N                switch to tab/window N (omit N = newest)
   tab-new [url]        open a new tab (optionally at url)
@@ -115,10 +121,38 @@ def render_value(result: Any) -> str:
     return value if value != "" else "(empty)"
 
 
-def dispatch(line: str, send: SendFn) -> str:
+def _footer(env: dict[str, Any]) -> str:
+    """The ### Code / ### Page sections for one envelope, ready to append.
+
+    Returns "" when the envelope carries neither, otherwise a string that STARTS
+    with a newline so ``result + _footer(env)`` leaves a blank line between the
+    value and the first section — the same shape ``output.emit_envelope`` prints.
+    """
+    parts: list[str] = []
+    code = env.get("code")
+    if code:
+        parts.extend(["", "### Code", str(code)])
+    page = env.get("page") or {}
+    if page:
+        parts.extend(["", "### Page", f"- URL: {page.get('url', '')}",
+                      f"- Title: {page.get('title', '')}"])
+        snap = env.get("snapshot")
+        if snap:
+            parts.append(f"- Snapshot: {snap}")
+        if page.get("fields_stale"):
+            parts.append("- Fields: stale — run `list` again before using an index")
+    if not parts:
+        return ""
+    return "\n" + "\n".join(parts)
+
+
+def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
     """Parse one REPL line, run it via *send*, and return printable output.
 
-    Pure aside from the injected *send* callable -- the unit of testing.
+    Pure aside from the injected callables — the unit of testing. ``send_env``
+    returns the full daemon envelope so a mutating command can print the same
+    ``### Code`` / ``### Page`` footer the non-interactive CLI prints; when it is
+    omitted the REPL falls back to the bare result.
     """
     line = line.strip()
     if not line:
@@ -130,53 +164,113 @@ def dispatch(line: str, send: SendFn) -> str:
     def _idx(token: str) -> dict[str, Any]:
         return {"index": int(token)}
 
+    def _act(op: str, args: dict[str, Any], fmt: Callable[[Any], str] = str) -> str:
+        """Run a mutating op: render its result with *fmt*, then the ### footer.
+
+        *fmt* keeps each command's existing human sentence ("navigated to …")
+        while the footer is added uniformly — exactly how ``emit_envelope(env,
+        table=…)`` works on the non-interactive side.
+        """
+        if send_env is None:
+            return fmt(send(op, args))
+        env = send_env(op, args)
+        return fmt(env.get("result")) + _footer(env)
+
+    def _tab_line(r: Any) -> str:
+        return f"switched to tab {r['active']}: {str(r.get('title', ''))!r}"
+
+    def _tab_new_line(r: Any) -> str:
+        return f"opened tab {r['index']}: {str(r.get('title', ''))!r}"
+
+    def _tab_close_line(r: Any) -> str:
+        # PLAN 3 Task 7 (B4) — two honest branches, not one lie. Reproduced
+        # here so this rewrite of `dispatch` cannot silently revert it.
+        if r.get("remaining", 0) == 0:
+            if r.get("session_stopped"):
+                return "closed the last tab — session stopped"
+            return "closed the last tab — the browser is closed"
+        return f"closed tab {r['closed']} ({r['remaining']} remaining)"
+
     try:
         if cmd in ("help", "?"):
             return _HELP
         if cmd in ("quit", "exit", "q"):
             return "__QUIT__"
         if cmd in ("list", "ls"):
-            result = send("list_fields", {})
-            return format_fields(result.get("fields", []))
+            want_full = bool(rest and rest[0].lower() == "full")
+            result = send("list_fields", {"highlight": False})
+            return format_fields(result.get("fields", []), full=want_full)
         if cmd == "click":
-            return str(send("click", _idx(rest[0])))
+            return _act("click", _idx(rest[0]))
         if cmd == "fill":
-            return str(send("fill", {**_idx(rest[0]), "text": " ".join(rest[1:])}))
+            return _act("fill", {**_idx(rest[0]), "text": " ".join(rest[1:])})
         if cmd == "check":
-            return str(send("check", _idx(rest[0])))
+            return _act("check", _idx(rest[0]))
         if cmd == "uncheck":
-            return str(send("uncheck", _idx(rest[0])))
+            return _act("uncheck", _idx(rest[0]))
         if cmd == "select":
-            return str(send("select", {**_idx(rest[0]), "value": " ".join(rest[1:])}))
+            return _act("select", {**_idx(rest[0]), "value": " ".join(rest[1:])})
         if cmd == "press":
-            return str(send("press", {**_idx(rest[0]), "key": " ".join(rest[1:])}))
+            return _act("press", {**_idx(rest[0]), "key": " ".join(rest[1:])})
         if cmd == "hover":
-            return str(send("hover", _idx(rest[0])))
+            return _act("hover", _idx(rest[0]))
         if cmd == "dblclick":
-            return str(send("dblclick", _idx(rest[0])))
+            return _act("dblclick", _idx(rest[0]))
         if cmd == "focus":
-            return str(send("focus", _idx(rest[0])))
+            return _act("focus", _idx(rest[0]))
         if cmd == "clear-input":
-            return str(send("clear_input", _idx(rest[0])))
+            return _act("clear_input", _idx(rest[0]))
         if cmd == "goto":
-            return f"navigated to {send('goto', {'url': rest[0]})}"
+            return _act("goto", {"url": rest[0]}, lambda r: f"navigated to {r}")
         if cmd == "back":
-            return f"went back to {send('back', {})}"
+            return _act("back", {}, lambda r: f"went back to {r}")
         if cmd == "forward":
-            return f"went forward to {send('forward', {})}"
+            return _act("forward", {}, lambda r: f"went forward to {r}")
         if cmd == "reload":
-            return f"reloaded {send('reload', {})}"
+            return _act("reload", {}, lambda r: f"reloaded {r}")
         if cmd == "title":
             return str(send("title", {}))
         if cmd == "url":
             return str(send("url", {}))
         if cmd == "snapshot":
-            elements = send("snapshot", {}).get("elements", [])
+            snap_args: dict[str, Any] = {
+                "selector": rest[0] if rest else None,
+                "depth": None,
+                "refs": True,
+            }
+            elements = send("snapshot", snap_args).get("elements", [])
             if not elements:
                 return "(no elements)"
             return "\n".join(
-                f"{str(e.get('role', '')):16} {e.get('name', '')}" for e in elements
+                f"{('-' if e.get('ref') is None else str(e['ref'])):>4}  "
+                f"{str(e.get('role', '')):<16} {e.get('name', '')}"
+                for e in elements
             )
+        if cmd == "find":
+            result = send(
+                "find",
+                {
+                    "query": " ".join(rest),
+                    "regex": False,
+                    "context": 3,
+                    "selector": None,
+                    "depth": None,
+                },
+            )
+            rows = result.get("rows", [])
+            if not rows:
+                return f"no match for {result.get('query', '')!r} in {result.get('total', 0)} rows"
+            lines = [
+                f"{result.get('matched', 0)} of {result.get('total', 0)} rows "
+                f"match {result.get('query', '')!r}"
+            ]
+            for r in rows:
+                ref = "-" if r.get("ref") is None else str(r["ref"])
+                lines.append(
+                    f"{'>' if r.get('match') else ' '} {ref:>4}  "
+                    f"{str(r.get('role', '')):<12} {r.get('name', '')}"
+                )
+            return "\n".join(lines)
         if cmd in ("text", "get-text"):
             return render_value(send("get_text", _idx(rest[0])))
         if cmd in ("attr", "get-attribute"):
@@ -203,17 +297,34 @@ def dispatch(line: str, send: SendFn) -> str:
                 for c in items
             )
         if cmd == "eval":
-            return str(send("eval", {"expression": " ".join(rest)}).get("result"))
+            return _act(
+                "eval",
+                {"expression": " ".join(rest)},
+                lambda r: str((r or {}).get("result")),
+            )
         if cmd == "dialog":
             accept = not (rest and rest[0].lower() in ("dismiss", "cancel", "no"))
-            return str(send("dialog", {"accept": accept, "prompt_text": None}))
+            return _act("dialog", {"accept": accept, "prompt_text": None})
         if cmd == "screenshot":
-            # Resolve the path against the CLIENT's cwd (not the daemon's) so the
-            # PNG lands where the user is, mirroring `visus session-screenshot`.
-            args = {"path": str(Path(rest[0]).resolve())} if rest else {}
-            return f"saved {send('screenshot', args)}"
+            # PLAN 3 Task 13 (B9) — resolve against the CLIENT's cwd (not the
+            # daemon's) so the PNG lands where the user is, same fix as
+            # main.py's session-screenshot. Reproduced here so this rewrite of
+            # `dispatch` cannot silently revert it.
+            shot_args: dict[str, Any] = {"path": str(Path(rest[0]).resolve())} if rest else {}
+            return f"saved {send('screenshot', shot_args)}"
+        if cmd == "export-script":
+            result = send("export_script", {})
+            code = str(result.get("script", ""))
+            if rest:
+                dest = Path(rest[0]).resolve()
+                dest.write_text(code, encoding="utf-8")
+                return f"saved {dest} ({result.get('lines', 0)} action(s))"
+            return code
         if cmd == "clear":
             return str(send("clear_highlights", {}))
+        if cmd == "highlight-all":
+            send("list_fields", {"highlight": True})
+            return "overlay drawn"
         if cmd == "tabs":
             items = send("tabs", {}).get("tabs", [])
             if not items:
@@ -224,18 +335,11 @@ def dispatch(line: str, send: SendFn) -> str:
                 for t in items
             )
         if cmd == "tab":
-            r = send("tab", {"index": int(rest[0]) if rest else None})
-            return f"switched to tab {r['active']}: {str(r.get('title', ''))!r}"
+            return _act("tab", {"index": int(rest[0]) if rest else None}, _tab_line)
         if cmd == "tab-new":
-            r = send("tab_new", {"url": rest[0] if rest else None})
-            return f"opened tab {r['index']}: {str(r.get('title', ''))!r}"
+            return _act("tab_new", {"url": rest[0] if rest else None}, _tab_new_line)
         if cmd == "tab-close":
-            r = send("tab_close", {"index": int(rest[0]) if rest else None})
-            if r.get("remaining", 0) == 0:
-                if r.get("session_stopped"):
-                    return "closed the last tab — session stopped"
-                return "closed the last tab — the browser is closed"
-            return f"closed tab {r['closed']} ({r['remaining']} remaining)"
+            return _act("tab_close", {"index": int(rest[0]) if rest else None}, _tab_close_line)
         return f"unknown command {cmd!r} (try `help`)"
     except IndexError:
         return f"missing argument for `{cmd}` (try `help`)"
@@ -263,6 +367,9 @@ def run_console(
     def _send(op: str, args: dict[str, Any]) -> Any:
         return session_client.send(op, args, start_dir=start_dir)
 
+    def _send_env(op: str, args: dict[str, Any]) -> dict[str, Any]:
+        return session_client.send_envelope(op, args, start_dir=start_dir)
+
     output_fn("visus console — type `help` for commands, `quit` to exit.")
     while True:
         try:
@@ -270,7 +377,7 @@ def run_console(
         except (EOFError, KeyboardInterrupt):
             output_fn("")
             break
-        out = dispatch(line, _send)
+        out = dispatch(line, _send, _send_env)
         if out == "__QUIT__":
             break
         if out:

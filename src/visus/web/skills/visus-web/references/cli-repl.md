@@ -8,7 +8,7 @@ visus console https://example.com --headless
 If no session is running, `visus console` **starts one** — headed unless you
 pass `--headless`. `quit` exits the REPL and leaves the session alive.
 
-The REPL is a shorter dialect of the CLI, not a different tool. Five names
+The REPL is a shorter dialect of the CLI, not a different tool. Six names
 differ:
 
 | REPL | CLI |
@@ -18,14 +18,20 @@ differ:
 | `attr href N` | `visus get-attribute href N` |
 | `expect N some words` | `visus expect-text N "some words"` |
 | `screenshot [path]` | `visus session-screenshot -o path` |
+| `highlight-all` | `visus list-fields --highlight` |
 
 The REPL targets **only by integer index** — `click #submit` is not accepted.
 Use the CLI when you need `--selector` / `--role` / `--text`.
 
+Every command that changes the page (`click`, `fill`, `goto`, `tab`, …) prints
+the same `### Code` / `### Page` footer the non-interactive CLI prints, so you
+see the URL and title the action produced without a separate `url` / `title`
+round trip.
+
 ## Full vocabulary
 
 ```
-list                 enumerate + highlight interactive fields
+list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
 click N              click field N
 fill N text          fill field N with text
 check N              check field N
@@ -39,7 +45,8 @@ clear-input N        clear field N's value
 goto url             navigate to url
 back / forward / reload
 title / url          print the page title / current URL
-snapshot             list interactive elements (role/name)
+snapshot [sel]       list interactive elements (REF/role/name), optionally scoped
+find text            grep the snapshot, with 3 rows of context around each hit
 text N               print field N's text content
 attr name N          print field N's attribute value
 count N              count elements matching field N
@@ -49,7 +56,9 @@ cookies              list cookies for the context
 eval expr            evaluate a JS expression
 dialog [dismiss]     handle the next dialog (accept by default)
 screenshot [path]    save a screenshot (default screenshot.png)
+export-script [path] print (or save) this session as a runnable visus.web script
 clear                remove the field highlight overlay
+highlight-all        redraw the numbered field overlay for every field
 tabs                 list open tabs/windows (active marked *)
 tab N                switch to tab/window N (omit N = newest)
 tab-new [url]        open a new tab (optionally at url)

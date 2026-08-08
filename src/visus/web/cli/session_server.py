@@ -142,12 +142,18 @@ class SessionHandler:
         engine: str | None = None,
         headless: bool | None = None,
         url: str | None = None,
+        user_data_dir: str | None = None,
+        remote_url: str | None = None,
+        slow_mo: int = 0,
     ) -> None:
         self._engine = engine or os.environ.get("VISUS_WEB_ENGINE", "chrome")
         if headless is None:
             headless = os.environ.get("VISUS_WEB_HEADLESS", "0") != "0"
         self._headless = headless
         self._url = url
+        self._user_data_dir = user_data_dir
+        self._remote_url = remote_url
+        self._slow_mo = slow_mo
         self._browser: Browser | None = None
         self._context: Context | None = None
         self._page: Page | None = None
@@ -188,7 +194,13 @@ class SessionHandler:
     # --- lifecycle -------------------------------------------------------
     def _ensure(self) -> None:
         if self._browser is None:
-            self._browser = launch(Engine.from_str(self._engine), headless=self._headless)
+            self._browser = launch(
+                Engine.from_str(self._engine),
+                headless=self._headless,
+                slow_mo=self._slow_mo,
+                user_data_dir=self._user_data_dir,
+                remote_url=self._remote_url,
+            )
             # Failure-atomic: if any step after launch raises (bad URL, etc.),
             # tear the partial browser down so the next op retries from scratch
             # instead of wedging on a non-None browser with a None page.
@@ -1061,6 +1073,9 @@ class SessionHandler:
             "engine": self._engine,
             "headless": self._headless,
             "follow": self._follow,
+            "user_data_dir": self._user_data_dir,
+            "remote_url": self._remote_url,
+            "slow_mo": self._slow_mo,
             "fields_cached": len(self._fields),
         }
         if running:
@@ -1312,6 +1327,9 @@ def serve(
             "engine": handler._engine,
             "headless": handler._headless,
             "url": handler._url,
+            "user_data_dir": handler._user_data_dir,
+            "remote_url": handler._remote_url,
+            "slow_mo": handler._slow_mo,
             "started_at": time.time(),
         }
     )
@@ -1422,6 +1440,12 @@ def main(argv: list[str] | None = None) -> None:
         headless = os.environ.get("VISUS_WEB_HEADLESS", "0") != "0"
     url = argv[2] if len(argv) > 2 and argv[2] else os.environ.get("VISUS_WEB_URL") or None
     token = os.environ.get("VISUS_WEB_TOKEN") or secrets.token_hex(16)
+    user_data_dir = os.environ.get("VISUS_WEB_USER_DATA_DIR") or None
+    remote_url = os.environ.get("VISUS_WEB_REMOTE_URL") or None
+    try:
+        slow_mo = int(os.environ.get("VISUS_WEB_SLOW_MO") or 0)
+    except ValueError:
+        slow_mo = 0
 
     log_dir = Path.cwd() / ".visus"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -1430,8 +1454,19 @@ def main(argv: list[str] | None = None) -> None:
     def _log(msg: str) -> None:
         logger.info(msg)
 
-    _log(f"daemon starting engine={engine} headless={headless} url={url!r} pid={os.getpid()}")
-    handler = SessionHandler(engine=engine, headless=headless, url=url)
+    _log(
+        f"daemon starting engine={engine} headless={headless} url={url!r} "
+        f"user_data_dir={user_data_dir!r} remote_url={remote_url!r} "
+        f"slow_mo={slow_mo} pid={os.getpid()}"
+    )
+    handler = SessionHandler(
+        engine=engine,
+        headless=headless,
+        url=url,
+        user_data_dir=user_data_dir,
+        remote_url=remote_url,
+        slow_mo=slow_mo,
+    )
     try:
         serve(handler, token=token, idle_timeout=_idle_timeout_from_env())
     except SessionLockedError as exc:

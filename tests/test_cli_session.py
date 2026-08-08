@@ -818,7 +818,11 @@ def test_ensure_partial_launch_failure_is_atomic_and_retries(
 
     browsers = [_PageBoomBrowser(), _GoodBrowser()]
 
-    def fake_launch(engine, *, headless):  # type: ignore[no-untyped-def]
+    # Mirrors the real launch() call in _ensure(): a fake that drops a keyword
+    # would fail with a TypeError and hide the teardown behaviour under test.
+    def fake_launch(  # type: ignore[no-untyped-def]
+        engine, *, headless, slow_mo=0, user_data_dir=None, remote_url=None
+    ):
         b = browsers.pop(0)
         launched.append(b)
         return b

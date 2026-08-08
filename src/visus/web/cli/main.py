@@ -447,6 +447,19 @@ def session_start(
     url: str = typer.Argument(None, help="URL to open once the browser starts."),
     engine: str = typer.Option("chrome", "--engine", "-e"),
     headless: bool = typer.Option(False, "--headless", help="Run headless (default: headed)."),
+    user_data_dir: str = typer.Option(
+        None,
+        "--user-data-dir",
+        help="Reuse a persistent browser profile — cookies and logins survive runs.",
+    ),
+    remote_url: str = typer.Option(
+        None,
+        "--remote-url",
+        help="Drive a Selenium Grid / Remote WebDriver, e.g. http://grid:4444/wd/hub.",
+    ),
+    slow_mo: int = typer.Option(
+        0, "--slow-mo", help="Delay every action by this many milliseconds."
+    ),
     idle_timeout: float = typer.Option(
         None,
         "--idle-timeout",
@@ -457,7 +470,15 @@ def session_start(
     from visus.web.cli import session_client
 
     try:
-        info = session_client.start_daemon(engine, headless, url, idle_timeout=idle_timeout)
+        info = session_client.start_daemon(
+            engine,
+            headless,
+            url,
+            user_data_dir=user_data_dir,
+            remote_url=remote_url,
+            slow_mo=slow_mo,
+            idle_timeout=idle_timeout,
+        )
     except session_client.SessionError as exc:
         output.emit_error(f"error: {exc}")
     output.emit(

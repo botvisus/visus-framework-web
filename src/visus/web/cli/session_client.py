@@ -222,11 +222,18 @@ def start_daemon(
     headless: bool = False,
     url: str | None = None,
     *,
+    user_data_dir: str | None = None,
+    remote_url: str | None = None,
+    slow_mo: int = 0,
     cwd: str | Path | None = None,
     timeout: float = 20.0,
     idle_timeout: float | None = None,
 ) -> dict[str, Any]:
     """Spawn a detached daemon and block until its socket accepts.
+
+    ``user_data_dir`` reuses a persistent browser profile (cookies/logins survive
+    across runs), ``remote_url`` targets a Selenium Grid instead of a local
+    browser, and ``slow_mo`` delays every action by that many milliseconds.
 
     Returns the session dict. Raises :class:`SessionError` if an existing live
     session is already present or the daemon does not come up in time.
@@ -243,6 +250,13 @@ def start_daemon(
     env["VISUS_WEB_HEADLESS"] = "1" if headless else "0"
     if url:
         env["VISUS_WEB_URL"] = url
+    if user_data_dir:
+        # Resolve against the CLIENT's cwd — the daemon is spawned elsewhere.
+        env["VISUS_WEB_USER_DATA_DIR"] = str(Path(user_data_dir).resolve())
+    if remote_url:
+        env["VISUS_WEB_REMOTE_URL"] = remote_url
+    if slow_mo:
+        env["VISUS_WEB_SLOW_MO"] = str(slow_mo)
     if idle_timeout is not None:
         env["VISUS_WEB_IDLE_TIMEOUT"] = str(idle_timeout)
 

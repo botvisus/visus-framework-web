@@ -210,3 +210,125 @@ def test_repl_state_commands() -> None:
     assert calls[0][1]["path"] == str(Path("auth.json").resolve())
     assert calls[1][0] == "state_load"
     assert "state-save" in console.dispatch("help", send)
+
+
+# ---------------------------------------------------------------------------
+# session start options: --user-data-dir / --remote-url / --slow-mo
+# ---------------------------------------------------------------------------
+
+
+def test_handler_forwards_launch_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_ensure must pass every launch option through, not drop them."""
+    seen: dict[str, Any] = {}
+
+    class _Page:
+        def goto(self, url: str) -> None:
+            seen["goto"] = url
+
+    class _Browser:
+        def new_page(self) -> _Page:
+            return _Page()
+
+        def close(self) -> None:
+            pass
+
+    def fake_launch(engine: Any, **kwargs: Any) -> _Browser:
+        seen["engine"] = engine
+        seen["kwargs"] = kwargs
+        return _Browser()
+
+    monkeypatch.setattr(session_server, "launch", fake_launch)
+    h = session_server.SessionHandler(
+        engine="chrome",
+        headless=True,
+        url="http://x",
+        user_data_dir="/profiles/p1",
+        remote_url="http://grid:4444/wd/hub",
+        slow_mo=250,
+    )
+    h._ensure()
+    assert seen["kwargs"] == {
+        "headless": True,
+        "slow_mo": 250,
+        "user_data_dir": "/profiles/p1",
+        "remote_url": "http://grid:4444/wd/hub",
+    }
+    assert seen["goto"] == "http://x"
+
+
+def test_daemon_main_reads_launch_options_from_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    built: dict[str, Any] = {}
+
+    class _Handler:
+        def __init__(self, **kwargs: Any) -> None:
+            built.update(kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VISUS_WEB_USER_DATA_DIR", "/profiles/p2")
+    monkeypatch.setenv("VISUS_WEB_REMOTE_URL", "http://grid:4444")
+    monkeypatch.setenv("VISUS_WEB_SLOW_MO", "120")
+    monkeypatch.setattr(session_server, "SessionHandler", _Handler)
+    monkeypatch.setattr(session_server, "serve", lambda handler, **kwargs: None)
+
+    session_server.main(["chrome", "1", ""])
+    assert built["user_data_dir"] == "/profiles/p2"
+    assert built["remote_url"] == "http://grid:4444"
+    assert built["slow_mo"] == 120
+
+
+def test_start_daemon_exports_launch_options(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Popen:
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
+            captured["argv"] = argv
+            captured["env"] = kwargs["env"]
+
+    monkeypatch.setattr(session_client.subprocess, "Popen", _Popen)
+    monkeypatch.setattr(session_client, "find_session", lambda base: None)
+    monkeypatch.setattr(session_client, "_socket_open", lambda port: False)
+    try:
+        session_client.start_daemon(
+            "chrome",
+            True,
+            None,
+            cwd=tmp_path,
+            timeout=0.2,
+            user_data_dir="/profiles/p3",
+            remote_url="http://grid:4444",
+            slow_mo=75,
+        )
+    except session_client.SessionError:
+        pass  # the fake daemon never comes up -- we only assert on the spawn
+    env = captured["env"]
+    assert env["VISUS_WEB_USER_DATA_DIR"].endswith("p3")
+    assert env["VISUS_WEB_REMOTE_URL"] == "http://grid:4444"
+    assert env["VISUS_WEB_SLOW_MO"] == "75"
+
+
+def test_cli_session_start_passes_the_new_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_start(engine: str, headless: bool, url: str | None, **kwargs: Any) -> dict[str, Any]:
+        captured["engine"], captured["headless"], captured["url"] = engine, headless, url
+        captured["kwargs"] = kwargs
+        return {"pid": 1, "port": 2}
+
+    monkeypatch.setattr(session_client, "start_daemon", fake_start)
+    r = runner.invoke(
+        app,
+        [
+            "session", "start", "http://x",
+            "--user-data-dir", "/profiles/p4",
+            "--remote-url", "http://grid:4444",
+            "--slow-mo", "50",
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert captured["kwargs"]["user_data_dir"] == "/profiles/p4"
+    assert captured["kwargs"]["remote_url"] == "http://grid:4444"
+    assert captured["kwargs"]["slow_mo"] == 50

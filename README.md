@@ -305,7 +305,7 @@ command accepts `--json`.
 
 | Command | What it does |
 |---|---|
-| `visus session start [URL] --engine <e> --headless --idle-timeout <seconds>` | Start the persistent browser daemon (headed by default). `--idle-timeout` (omit = never) stops the daemon after that many idle seconds; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
+| `visus session start [URL] --engine <e> --headless --user-data-dir <dir> --remote-url <url> --slow-mo <ms> --idle-timeout <seconds>` | Start the persistent browser daemon (headed by default); optionally on a persistent profile, a Selenium Grid, slowed down, or self-reaping when idle. `--idle-timeout` (omit = never) stops the daemon after that many idle seconds; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
@@ -890,6 +890,9 @@ Default timeouts (`visus.web.config.Defaults`, all in ms): `action_timeout_ms = 
 | `VISUS_WEB_ENGINE` | MCP & CLI session | `chrome` | Browser engine for the daemon/MCP session. |
 | `VISUS_WEB_HEADLESS` | MCP & CLI session | `1` (MCP) | `"0"` to run headed. |
 | `VISUS_WEB_URL` | CLI session | — | Initial URL opened when the daemon starts. |
+| `VISUS_WEB_USER_DATA_DIR` | CLI session | — | Persistent browser profile directory for the daemon. |
+| `VISUS_WEB_REMOTE_URL` | CLI session | — | Selenium Grid / Remote WebDriver URL for the daemon. |
+| `VISUS_WEB_SLOW_MO` | CLI session | `0` | Delay every daemon action by this many milliseconds. |
 | `VISUS_WEB_TOKEN` | CLI session | auto | Auth token for the local daemon socket. |
 | `VISUS_WEB_TRACING` | tracing | off | Enable tracing globally without code. |
 | `VISUS_WEB_EDGE_BINARY` | `edge_ie` | default install path | Path to `msedge.exe`. |

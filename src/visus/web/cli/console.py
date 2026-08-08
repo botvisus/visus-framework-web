@@ -8,6 +8,7 @@ none is running) and the stdin read loop.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,18 +21,23 @@ SendFn = Callable[[str, dict[str, Any]], Any]
 # An envelope send callable: (op, args) -> the daemon's full reply dict.
 SendEnvFn = Callable[[str, dict[str, Any]], dict[str, Any]]
 
-_HELP = """commands:
+_HELP = """targets: a field index (`3`), a bare selector (`#submit`, `//button[1]`),
+         or flags (`--selector #go`, `--role button --name Save`, `--text Save [--exact]`).
+
+commands:
   list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
-  click N              click field N (or a previous list index)
-  fill N text          fill field N with text
-  check N              check field N
-  uncheck N            uncheck field N
-  select N value       select option `value` on field N
-  press N key          press key on field N
-  hover N              hover over field N
-  dblclick N           double-click field N
-  focus N              focus field N
-  clear-input N        clear field N's value
+  click TARGET         click the target
+  fill TARGET text     fill the target with text
+  check TARGET         check the target
+  uncheck TARGET       uncheck the target
+  select TARGET value  select option `value` on the target
+  press [TARGET] key   press a key on the target, or on the page with no target
+  hover TARGET         hover over the target
+  dblclick TARGET      double-click the target
+  focus TARGET         focus the target
+  clear-input TARGET   clear the target's value
+  upload TARGET p...   set file(s) on a file input (paths resolved locally)
+  drag TARGET TARGET   drag the first target onto the second
   goto url             navigate to url
   back                 navigate back in history
   forward              navigate forward in history
@@ -40,16 +46,21 @@ _HELP = """commands:
   url                  print the current URL
   snapshot [sel]       list interactive elements (REF/role/name), optionally scoped
   find text            grep the snapshot, with 3 rows of context around each hit
-  text N               print field N's text content
-  attr name N          print field N's `name` attribute
-  count N              count elements matching field N
-  wait N [state]       wait until field N is visible/hidden
-  expect N text...     assert field N contains text (PASSED/FAILED)
+  text TARGET          print the target's text content
+  attr name TARGET     print the target's `name` attribute
+  count TARGET         count elements matching the target
+  wait TARGET [state]  wait until the target is visible/hidden
+  expect TARGET text   assert the target contains text (PASSED/FAILED)
   cookies              list cookies for the context
+  add-cookies json     add cookies from a JSON list
+  clear-cookies        clear every cookie in the context
   eval expr            evaluate a JS expression
   dialog [dismiss]     handle the next dialog (accept by default)
   screenshot [path]    save a screenshot (default screenshot.png)
   export-script [path] print (or save) this session as a runnable visus.web script
+  read-text TARGET     OCR the target and print the text
+  solve-captcha TARGET OCR-solve a text CAPTCHA in the target
+  find-image f [T] [c] find template image `f` (optional target, confidence)
   clear                remove the field highlight overlay
   highlight-all        redraw the numbered field overlay for every field
   tabs                 list open tabs/windows (active marked *)
@@ -58,6 +69,74 @@ _HELP = """commands:
   tab-close [N]        close tab N (omit N = active)
   help                 show this help
   quit                 exit the console (the session stays alive)"""
+
+
+_TARGET_FLAGS = {
+    "--selector": "selector",
+    "-s": "selector",
+    "--role": "role",
+    "--name": "name",
+    "--text": "target_text",
+}
+
+
+def _target(tokens: list[str]) -> tuple[dict[str, Any], list[str]]:
+    """Split a leading target off *tokens*; return ``(target_args, remaining)``.
+
+    Accepted forms, checked in this order:
+
+    * flags      -- ``--selector #go`` / ``--role button --name Save``
+                    / ``--text Save`` / ``-s #go`` / ``--exact``
+    * an index   -- ``3`` (a field index from the last ``list``)
+    * a selector -- anything else (``#submit``, ``.btn``, ``//button[1]``)
+
+    ``--name`` alone is not a target (it only qualifies ``--role``), matching the
+    non-interactive CLI's guard in ``main._target_args``.
+    Raises :class:`ValueError` with an actionable message when no target is given.
+    """
+    if not tokens:
+        raise ValueError("provide a field index, a selector, or --selector/--role/--text")
+    if tokens[0].startswith("-"):
+        args: dict[str, Any] = {}
+        i = 0
+        while i < len(tokens) and tokens[i].startswith("-"):
+            flag = tokens[i]
+            if flag == "--exact":
+                args["exact"] = True
+                i += 1
+                continue
+            key = _TARGET_FLAGS.get(flag)
+            if key is None:
+                raise ValueError(f"unknown target flag {flag!r}")
+            if i + 1 >= len(tokens):
+                raise ValueError(f"{flag} needs a value")
+            args[key] = tokens[i + 1]
+            i += 2
+        if not any(args.get(k) for k in ("selector", "role", "target_text")):
+            raise ValueError("--name alone is not a target — add --role")
+        return args, tokens[i:]
+    token = tokens[0]
+    if token.isdigit():
+        return {"index": int(token)}, tokens[1:]
+    return {"selector": token}, tokens[1:]
+
+
+def _drag_target(tokens: list[str]) -> dict[str, Any]:
+    """Turn a parsed target into drag's *destination* keys."""
+    args, _ = _target(tokens)
+    if "index" in args:
+        return {"target_index": args["index"]}
+    if "selector" in args:
+        return {"target_selector": args["selector"]}
+    raise ValueError("drag's destination must be an index or a selector")
+
+
+def _is_confidence(token: str) -> bool:
+    """True when *token* looks like a 0-1 match threshold (``find-image``'s last arg)."""
+    try:
+        return 0.0 <= float(token) <= 1.0 and ("." in token or token in ("0", "1"))
+    except ValueError:
+        return False
 
 
 def format_fields(
@@ -161,9 +240,6 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
     cmd = parts[0].lower()
     rest = parts[1:]
 
-    def _idx(token: str) -> dict[str, Any]:
-        return {"index": int(token)}
-
     def _act(op: str, args: dict[str, Any], fmt: Callable[[Any], str] = str) -> str:
         """Run a mutating op: render its result with *fmt*, then the ### footer.
 
@@ -201,25 +277,46 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             result = send("list_fields", {"highlight": False})
             return format_fields(result.get("fields", []), full=want_full)
         if cmd == "click":
-            return _act("click", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("click", tgt)
         if cmd == "fill":
-            return _act("fill", {**_idx(rest[0]), "text": " ".join(rest[1:])})
+            tgt, tail = _target(rest)
+            return _act("fill", {**tgt, "text": " ".join(tail)})
         if cmd == "check":
-            return _act("check", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("check", tgt)
         if cmd == "uncheck":
-            return _act("uncheck", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("uncheck", tgt)
         if cmd == "select":
-            return _act("select", {**_idx(rest[0]), "value": " ".join(rest[1:])})
+            tgt, tail = _target(rest)
+            return _act("select", {**tgt, "value": " ".join(tail)})
         if cmd == "press":
-            return _act("press", {**_idx(rest[0]), "key": " ".join(rest[1:])})
+            if len(rest) == 1 and not rest[0].isdigit():
+                return _act("press", {"key": rest[0]})
+            tgt, tail = _target(rest)
+            return _act("press", {**tgt, "key": " ".join(tail)})
         if cmd == "hover":
-            return _act("hover", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("hover", tgt)
         if cmd == "dblclick":
-            return _act("dblclick", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("dblclick", tgt)
         if cmd == "focus":
-            return _act("focus", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("focus", tgt)
         if cmd == "clear-input":
-            return _act("clear_input", _idx(rest[0]))
+            tgt, _ = _target(rest)
+            return _act("clear_input", tgt)
+        if cmd == "upload":
+            tgt, tail = _target(rest)
+            if not tail:
+                return "missing file path(s) for `upload` (try `help`)"
+            paths = [str(Path(p).resolve()) for p in tail]
+            return _act("upload", {**tgt, "paths": paths})
+        if cmd == "drag":
+            tgt, tail = _target(rest)
+            return _act("drag", {**tgt, **_drag_target(tail)})
         if cmd == "goto":
             return _act("goto", {"url": rest[0]}, lambda r: f"navigated to {r}")
         if cmd == "back":
@@ -272,22 +369,25 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 )
             return "\n".join(lines)
         if cmd in ("text", "get-text"):
-            return render_value(send("get_text", _idx(rest[0])))
+            tgt, _ = _target(rest)
+            # PLAN 3 Task 12: the op returns {"value", "present"}, so a stored ""
+            # and a missing element must not both print an empty line.
+            return render_value(send("get_text", tgt))
         if cmd in ("attr", "get-attribute"):
-            return render_value(
-                send("get_attribute", {**_idx(rest[1]), "attr_name": rest[0]})
-            )
+            tgt, _ = _target(rest[1:])
+            return render_value(send("get_attribute", {**tgt, "attr_name": rest[0]}))
         if cmd == "count":
-            return str(send("count", _idx(rest[0])))
+            tgt, _ = _target(rest)
+            return str(send("count", tgt))
         if cmd == "wait":
-            args: dict[str, Any] = _idx(rest[0])
-            if len(rest) > 1:
-                args["state"] = rest[1]
-            return str(send("wait", args))
+            tgt, tail = _target(rest)
+            wait_args: dict[str, Any] = dict(tgt)
+            if tail:
+                wait_args["state"] = tail[0]
+            return str(send("wait", wait_args))
         if cmd in ("expect", "expect-text"):
-            return str(
-                send("expect_text", {**_idx(rest[0]), "expected_text": " ".join(rest[1:])})
-            )
+            tgt, tail = _target(rest)
+            return str(send("expect_text", {**tgt, "expected_text": " ".join(tail)}))
         if cmd == "cookies":
             items = send("cookies", {}).get("cookies", [])
             if not items:
@@ -296,6 +396,16 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 f"{c.get('name', '')}={c.get('value', '')}  ({c.get('domain', '')})"
                 for c in items
             )
+        if cmd == "add-cookies":
+            try:
+                parsed = json.loads(" ".join(rest))
+            except json.JSONDecodeError as exc:
+                return f"invalid JSON for `add-cookies`: {exc}"
+            if not isinstance(parsed, list):
+                return "invalid JSON for `add-cookies`: expected a list of cookie objects"
+            return _act("add_cookies", {"cookies": parsed})
+        if cmd == "clear-cookies":
+            return _act("clear_cookies", {})
         if cmd == "eval":
             return _act(
                 "eval",
@@ -320,6 +430,29 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 dest.write_text(code, encoding="utf-8")
                 return f"saved {dest} ({result.get('lines', 0)} action(s))"
             return code
+        if cmd == "read-text":
+            tgt, _ = _target(rest)
+            return str(send("read_text", tgt))
+        if cmd == "solve-captcha":
+            tgt, _ = _target(rest)
+            return str(send("solve_captcha", tgt))
+        if cmd == "find-image":
+            if not rest:
+                return "missing template path for `find-image` (try `help`)"
+            img_args: dict[str, Any] = {"template_path": str(Path(rest[0]).resolve())}
+            tail = rest[1:]
+            if tail and _is_confidence(tail[-1]):
+                img_args["confidence"] = float(tail[-1])
+                tail = tail[:-1]
+            if tail:
+                tgt, _ = _target(tail)
+                img_args.update(tgt)
+            found = send("find_image", img_args)
+            if not found.get("found"):
+                return "not found"
+            return (
+                f"found at ({found['x']}, {found['y']}) confidence={found['confidence']:.3f}"
+            )
         if cmd == "clear":
             return str(send("clear_highlights", {}))
         if cmd == "highlight-all":
@@ -343,6 +476,10 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         return f"unknown command {cmd!r} (try `help`)"
     except IndexError:
         return f"missing argument for `{cmd}` (try `help`)"
+    except ValueError as exc:
+        # `_target` raises this for a bad/absent target, and int() for a
+        # non-numeric tab index — both are user typos, not tracebacks.
+        return f"bad argument for `{cmd}`: {exc}"
     except session_client.SessionError as exc:
         return f"error: {exc}"
 

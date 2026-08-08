@@ -952,7 +952,12 @@ def test_dispatch_text_and_attr_render_the_distinction() -> None:
 def test_dispatch_unknown_and_missing_arg() -> None:
     _, send = _recording_send()
     assert "unknown command" in console.dispatch("frobnicate", send)
-    assert "missing argument" in console.dispatch("click", send)
+    # A targeted verb with no target names the forms it accepts (the `_target`
+    # guard), while a verb whose missing argument is not a target still reports
+    # the generic miss — both paths must stay clean, neither may traceback.
+    out = console.dispatch("click", send)
+    assert "bad argument" in out and "--selector" in out
+    assert "missing argument" in console.dispatch("goto", send)
 
 
 def test_dispatch_surfaces_session_error() -> None:

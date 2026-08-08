@@ -79,6 +79,8 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus tab [idx]` | Switch to a tab by index (newest if omitted). |
 | `visus tab-new [URL]` | Open a new tab and switch to it. |
 | `visus tab-close [idx]` | Close a tab (active if omitted). |
+| `visus tab-activate <handle>` | Focus a tab by its **stable window handle** (the `handle` field of `visus tabs --json`). Handles survive a reorder or a close; the positional index `visus tab N` uses does not. |
+| `visus tab-follow --on/--off` | `--on` (the default) makes every later op target the most recently opened tab/popup. `--off` pins the context where it is, so a click that spawns a popup cannot silently steal it — steer manually with `tabs` + `tab`/`tab-activate`. The current mode shows up as `follow` in `visus session status --json`. |
 
 ### Dialogs / cookies / JS
 

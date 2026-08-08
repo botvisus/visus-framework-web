@@ -1123,6 +1123,33 @@ def tab_close(
     )
 
 
+@app.command("tab-activate")
+def tab_activate(
+    handle: str = typer.Argument(..., help="Stable window handle from `visus tabs --json`."),
+) -> None:
+    """Focus a tab by its stable handle (survives reordering, unlike an index)."""
+    result = _send("tab_activate", {"handle": handle})
+    output.emit(
+        result,
+        table=(
+            f"activated tab {result['active']} "
+            f"({result['handle']}): {str(result.get('title', ''))!r}"
+        ),
+    )
+
+
+@app.command("tab-follow")
+def tab_follow(
+    enabled: bool = typer.Option(
+        True, "--on/--off", help="Auto-follow new tabs/popups (--on) or stay put (--off)."
+    ),
+) -> None:
+    """Choose whether a newly-opened tab/popup takes over the session context."""
+    result = _send("tab_follow", {"enabled": enabled})
+    state = "enabled (auto)" if result["follow"] else "disabled (manual)"
+    output.emit(result, table=f"tab-follow {state}")
+
+
 # ---------------------------------------------------------------------------
 # Dialogs
 # ---------------------------------------------------------------------------

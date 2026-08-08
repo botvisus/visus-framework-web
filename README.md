@@ -363,6 +363,8 @@ command accepts `--json`.
 | `visus tab [idx]` | Switch to a tab by index (newest if omitted). |
 | `visus tab-new [URL]` | Open a new tab and switch to it. |
 | `visus tab-close [idx]` | Close a tab (active if omitted). |
+| `visus tab-activate <handle>` | Focus a tab by its stable handle (from `visus tabs --json`). |
+| `visus tab-follow --on/--off` | Auto-follow newly-opened tabs/popups, or stay on the current one. |
 
 ### Dialogs / cookies / JS
 

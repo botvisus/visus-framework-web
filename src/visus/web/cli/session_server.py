@@ -156,6 +156,10 @@ class SessionHandler:
         self._script: list[str] = []
         self._known_handles: list[str] = []
         self._active_handle: str | None = None
+        # Auto-follow a newly-opened tab/popup (the daemon's historical default).
+        # `tab_follow` flips it to MANUAL, matching the MCP server's default and
+        # giving an agent a predictable context that a popup cannot steal.
+        self._follow: bool = True
         self._stop: threading.Event | None = None
         # One WebDriver, one thread per connection in serve(): every op body runs
         # under this mutex. RLock (not Lock) so an op may re-enter handle().
@@ -235,11 +239,12 @@ class SessionHandler:
         return Page(SeleniumPageDelegate(driver, handle), self._page._defaults)
 
     def _resolve_active(self, handles: list[str]) -> str:
-        """Pick the active handle: auto-follow a newly-opened tab/window, else stay
-        on the last-active one (sticky), else the newest. The ``tab`` op overrides."""
+        """Pick the active handle: auto-follow a newly-opened tab/window when follow
+        mode is on, else stay on the last-active one (sticky), else the newest.
+        The ``tab``/``tab_activate`` ops override."""
         new = [h for h in handles if h not in self._known_handles]
         self._known_handles = list(handles)
-        if new:
+        if new and self._follow:
             self._active_handle = new[-1]  # follow the newest new tab/popup
         if self._active_handle not in handles:
             self._active_handle = handles[-1]
@@ -981,6 +986,52 @@ class SessionHandler:
             title = ""
         return {"active": handles.index(self._active_handle), "title": title}
 
+    def _op_tab_activate(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Focus a tab by its stable window handle (from ``tabs``).
+
+        Handles survive reordering and tab closes; indices do not.
+        """
+        self._ensure()
+        driver = self._driver()
+        if driver is None:
+            raise RuntimeError("no live browser")
+        handle = str(args.get("handle") or "")
+        handles = list(driver.window_handles)
+        if handle not in handles:
+            raise ValueError(f"no open tab with handle {handle!r}")
+        self._known_handles = list(handles)
+        self._active_handle = handle
+        self._invalidate_fields()  # cached indexes belonged to the previous tab
+        try:
+            driver.switch_to.window(handle)
+            title = driver.title
+        except Exception:  # noqa: BLE001
+            title = ""
+        return {"active": handles.index(handle), "handle": handle, "title": title}
+
+    def _op_tab_follow(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Choose how new tabs/popups are handled.
+
+        ``enabled=True`` (the daemon default): AUTO-FOLLOW — subsequent ops target
+        the most recently opened tab/popup. ``enabled=False``: MANUAL — a click that
+        opens a popup does not change the context; steer with ``tabs``/``tab``.
+        """
+        enabled = bool(args.get("enabled", True))
+        self._follow = enabled
+        if not enabled:
+            # Pin the context where it is now so the next op cannot drift.
+            driver = self._driver()
+            if driver is not None:
+                try:
+                    handles = list(driver.window_handles)
+                except Exception:  # noqa: BLE001
+                    handles = []
+                if handles:
+                    self._known_handles = list(handles)
+                    if self._active_handle not in handles:
+                        self._active_handle = handles[-1]
+        return {"follow": self._follow}
+
     def _op_status(self, args: dict[str, Any]) -> dict[str, Any]:
         """Report session state. READ-ONLY: never adopts a background window."""
         running = self._browser is not None
@@ -988,6 +1039,7 @@ class SessionHandler:
             "running": running,
             "engine": self._engine,
             "headless": self._headless,
+            "follow": self._follow,
             "fields_cached": len(self._fields),
         }
         if running:

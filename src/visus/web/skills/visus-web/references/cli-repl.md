@@ -82,6 +82,8 @@ tabs                 list open tabs/windows (active marked *)
 tab N                switch to tab/window N (omit N = newest)
 tab-new [url]        open a new tab (optionally at url)
 tab-close [N]        close tab N (omit N = active)
+tab-activate H       focus the tab with stable handle H (from `tabs`)
+tab-follow on|off    auto-follow new tabs/popups, or stay put
 help                 show this help
 quit                 exit the console (the session stays alive)
 ```

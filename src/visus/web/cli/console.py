@@ -70,6 +70,8 @@ commands:
   tab N                switch to tab/window N (omit N = newest)
   tab-new [url]        open a new tab (optionally at url)
   tab-close [N]        close tab N (omit N = active)
+  tab-activate H       focus the tab with stable handle H (from `tabs`)
+  tab-follow on|off    auto-follow new tabs/popups, or stay put
   help                 show this help
   quit                 exit the console (the session stays alive)"""
 
@@ -504,6 +506,13 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             return _act("tab_new", {"url": rest[0] if rest else None}, _tab_new_line)
         if cmd == "tab-close":
             return _act("tab_close", {"index": int(rest[0]) if rest else None}, _tab_close_line)
+        if cmd == "tab-activate":
+            r = send("tab_activate", {"handle": rest[0]})
+            return f"activated tab {r['active']} ({r['handle']}): {str(r.get('title', ''))!r}"
+        if cmd == "tab-follow":
+            on = not (rest and rest[0].lower() in ("off", "false", "no", "manual"))
+            r = send("tab_follow", {"enabled": on})
+            return f"tab-follow {'enabled (auto)' if r['follow'] else 'disabled (manual)'}"
         return f"unknown command {cmd!r} (try `help`)"
     except IndexError:
         return f"missing argument for `{cmd}` (try `help`)"

@@ -82,7 +82,7 @@ The ones you will use most:
 ```bash
 visus goto <URL> | back | forward | reload
 visus list-fields [--kind input,button] [--all] [--no-highlight] [--json]
-visus snapshot [--json]                  # role/name table of interactive elements
+visus snapshot ["#main"] [--depth N]     # REF/role/name table; REF is a list-fields index
 visus click|dblclick|hover|focus|check|uncheck [idx] [target]
 visus fill <idx> <text>                  # or: -s "#user" --value text
 visus select <idx> <value> | visus press <idx> Enter | visus clear-input <idx>

@@ -38,7 +38,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 
 | Command | What it does |
 |---|---|
-| `visus snapshot [--json]` | List interactive elements as a role/name table. |
+| `visus snapshot [SELECTOR] [--depth N] [--filename F] [--no-refs] [--json]` | List interactive elements as a REF/ROLE/NAME table. A REF **is** a `list-fields` index, so `visus snapshot` then `visus click 4` works. `SELECTOR` scopes the walk to one subtree, `--depth N` keeps only elements at most N levels below that root, `--filename` writes YAML instead of printing, `--no-refs` skips the re-enumeration (leaves the field cache untouched, every REF then `-`). |
 | `visus list-fields --kind <k> --all --no-highlight [--json]` | Enumerate interactive fields, numbered + highlighted. |
 | `visus get-text [idx] [target]` | Print an element's text content. |
 | `visus get-attribute <attr> [idx] [target]` | Print an element's attribute value. |

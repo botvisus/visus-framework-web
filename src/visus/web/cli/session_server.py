@@ -14,6 +14,7 @@ entrypoint: it reads engine/headless/url from argv/env, writes
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import logging
 import os
@@ -422,6 +423,43 @@ class SessionHandler:
         except Exception:  # noqa: BLE001 — page state is telemetry, not the result
             return {}
 
+    def _snapshot_refs(self, rows: list[dict[str, Any]]) -> list[int | None]:
+        """Map each snapshot row to a ``list_fields`` index — ONE numbering.
+
+        Both enumerations come from the same bundle helpers (``computeRole`` and
+        ``accessibleName``), so ``(role, name)`` identifies a row that is also an
+        actionable field. Rows with no actionable twin (headings, options) get None.
+        """
+        by_key: dict[tuple[str, str], int] = {}
+        for f in self._fields:
+            by_key.setdefault(((f.role or ""), (f.name or "")), f.index)
+        return [by_key.get(((r.get("role") or ""), (r.get("name") or ""))) for r in rows]
+
+    def _write_snapshot(self) -> str | None:
+        """Write the current snapshot under ``.visus/snapshots/`` and return its path.
+
+        The daemon owns ``.visus/`` (see :func:`session_file`), and its cwd is the
+        directory ``visus session start`` ran in, so the returned path is relative
+        to the project root. Never raises.
+        """
+        try:
+            page = self.page()
+            rows = page.snapshot()
+            refs = self._snapshot_refs(rows)
+            elements = [{**row, "ref": refs[i]} for i, row in enumerate(rows)]
+            text = render_snapshot_yaml(elements, url=page.url, title=page.title())
+            base = Path.cwd() / ".visus" / "snapshots"
+            base.mkdir(parents=True, exist_ok=True)
+            stamp = _dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3]
+            path = base / f"page-{stamp}.yml"
+            path.write_text(text, encoding="utf-8")
+            try:
+                return str(path.relative_to(Path.cwd()))
+            except ValueError:
+                return str(path)
+        except Exception:  # noqa: BLE001 — the sink is a convenience, never a failure
+            return None
+
     def handle(self, op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         """Dispatch one op.
 
@@ -449,6 +487,8 @@ class SessionHandler:
                 return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             if op in _MUTATING_OPS:
                 resp["page"] = self._post_state()
+                if args.get("snapshot"):
+                    resp["snapshot"] = self._write_snapshot()
             if code:
                 resp["code"] = code
                 self._script.append(code)
@@ -556,7 +596,23 @@ class SessionHandler:
         return self.page().url
 
     def _op_snapshot(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"elements": self.page().snapshot()}
+        """The page's interactive elements, numbered with list_fields indexes.
+
+        ``refs`` (default on) re-enumerates the page so every row's ``ref`` is a
+        live index an action can use immediately — this is what makes ``snapshot``
+        addressable instead of a second, incompatible numbering. Pass
+        ``refs=False`` for a pure read that leaves the field cache untouched.
+        """
+        page = self.page()
+        depth = args.get("depth")
+        rows = page.snapshot(args.get("selector"), depth=None if depth is None else int(depth))
+        if args.get("refs", True):
+            fields = page.list_fields(kinds=None, include_hidden=False, highlight=False)
+            self._fields = list(fields)
+            self._fields_url = page.url
+        refs = self._snapshot_refs(rows)
+        elements = [{**row, "ref": refs[i]} for i, row in enumerate(rows)]
+        return {"elements": elements, "url": page.url, "title": page.title()}
 
     def _op_get_attribute(self, args: dict[str, Any]) -> dict[str, Any]:
         """Attribute value of the target, keeping "absent" distinct from ``""``."""
@@ -873,6 +929,36 @@ class SessionHandler:
 # ---------------------------------------------------------------------------
 # Session file helpers
 # ---------------------------------------------------------------------------
+
+
+def _yaml_scalar(value: object) -> str:
+    """Render one scalar as YAML. Strings are always quoted — names contain colons."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def render_snapshot_yaml(elements: list[dict[str, Any]], *, url: str, title: str) -> str:
+    """Render a page snapshot as the YAML written to ``.visus/snapshots/``."""
+    out = [
+        "# visus page snapshot",
+        f"url: {_yaml_scalar(url)}",
+        f"title: {_yaml_scalar(title)}",
+        f"count: {len(elements)}",
+        "elements:",
+    ]
+    for e in elements:
+        out.append(f"  - ref: {_yaml_scalar(e.get('ref'))}")
+        out.append(f"    role: {_yaml_scalar(e.get('role') or '')}")
+        out.append(f"    name: {_yaml_scalar(e.get('name') or '')}")
+        if e.get("depth") is not None:
+            out.append(f"    depth: {_yaml_scalar(e.get('depth'))}")
+    return "\n".join(out) + "\n"
 
 
 def session_file(cwd: str | Path | None = None) -> Path:

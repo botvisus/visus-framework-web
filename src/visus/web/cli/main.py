@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json as _json
 import runpy
 from pathlib import Path
@@ -348,6 +349,26 @@ def _format_fields(fields: list[dict[str, Any]]) -> str:
     from visus.web.cli.console import format_fields
 
     return format_fields(fields)
+
+
+def _format_snapshot(elements: list[dict[str, Any]]) -> str:
+    """Render snapshot rows as a REF/ROLE/NAME table (REF = a list-fields index)."""
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
+    table.add_column("REF", justify="right", no_wrap=True)
+    table.add_column("ROLE", no_wrap=True)
+    table.add_column("NAME", overflow="fold")
+    for e in elements:
+        ref = e.get("ref")
+        table.add_row("-" if ref is None else str(ref), str(e.get("role", "")),
+                      str(e.get("name", "")))
+    console_obj = Console()
+    with console_obj.capture() as cap:
+        console_obj.print(table)
+    return cap.get().rstrip("\n")
 
 
 def _render_value(result: Any) -> str:
@@ -701,29 +722,54 @@ def url() -> None:
 
 
 @app.command()
-def snapshot(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) -> None:
-    """List the page's interactive elements as a role/name table."""
-    result = _send("snapshot", {})
+def snapshot(
+    selector: str = typer.Argument(
+        None, help='Scope the snapshot to a CSS selector, e.g. "#main".'
+    ),
+    depth: int = typer.Option(
+        None, "--depth", help="Keep only elements at most N levels below the scope root."
+    ),
+    filename: str = typer.Option(
+        None, "--filename", help="Write the snapshot as YAML here instead of printing it."
+    ),
+    refs: bool = typer.Option(
+        True,
+        "--refs/--no-refs",
+        help="Number rows with list-fields indexes (re-enumerates the page).",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List the page's interactive elements as a REF/ROLE/NAME table.
+
+    A REF is a `visus list-fields` index: `visus snapshot` then `visus click 4`
+    works. Scope it (`visus snapshot "#main"`), cap it (`--depth 2`), or save it
+    (`--filename after-login.yml`) when the page is large.
+    """
+    args: dict[str, Any] = {"selector": selector, "depth": depth, "refs": refs}
+    result = _send("snapshot", args)
     elements = result.get("elements", [])
     if as_json:
-        typer.echo(_json.dumps(elements, indent=2, ensure_ascii=False))
-        return
-    if not elements:
-        typer.echo("(no elements)")
-        return
-    from rich import box
-    from rich.console import Console
-    from rich.table import Table
+        output.set_mode(as_json=True)
 
-    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
-    table.add_column("ROLE", no_wrap=True)
-    table.add_column("NAME", overflow="fold")
-    for e in elements:
-        table.add_row(str(e.get("role", "")), str(e.get("name", "")))
-    console_obj = Console()
-    with console_obj.capture() as cap:
-        console_obj.print(table)
-    typer.echo(cap.get().rstrip("\n"))
+    if filename or output.snapshot_sink():
+        from visus.web.cli.session_server import render_snapshot_yaml
+
+        target = filename or f"page-{_dt.datetime.now():%Y-%m-%dT%H-%M-%S}.yml"
+        dest = Path(output.resolve_out(target))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(
+            render_snapshot_yaml(
+                elements, url=str(result.get("url", "")), title=str(result.get("title", ""))
+            ),
+            encoding="utf-8",
+        )
+        output.emit(elements, table=f"Snapshot: {dest}")
+        return
+
+    if not elements:
+        output.emit(elements, table="(no elements)")
+        return
+    output.emit(elements, table=_format_snapshot(elements))
 
 
 @app.command("get-attribute")

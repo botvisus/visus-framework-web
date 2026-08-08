@@ -202,8 +202,14 @@ class _FakePage:
     def reload(self) -> None:
         self.log.append("reload")
 
-    def snapshot(self) -> list[dict[str, Any]]:
-        return [{"role": "button", "name": "Go"}, {"role": "textbox", "name": "Email"}]
+    def snapshot(
+        self, selector: str | None = None, *, depth: int | None = None
+    ) -> list[dict[str, Any]]:
+        self.log.append(f"snapshot:selector={selector}:depth={depth}")
+        return [
+            {"role": "button", "name": "Go", "depth": 0},
+            {"role": "textbox", "name": "Email", "depth": 1},
+        ]
 
     def evaluate(self, expression: str, arg: object = None) -> object:
         self.log.append(f"eval:{expression}:{arg}")
@@ -446,7 +452,9 @@ def test_handle_title_url_snapshot() -> None:
     assert h.handle("title", {})["result"] == "FakeTitle"
     assert h.handle("url", {})["result"] == page.url
     snap = h.handle("snapshot", {})["result"]
-    assert snap["elements"][0] == {"role": "button", "name": "Go"}
+    assert snap["elements"][0]["role"] == "button"
+    assert snap["elements"][0]["name"] == "Go"
+    assert "ref" in snap["elements"][0]
 
 
 def test_handle_get_attribute_and_count() -> None:
@@ -625,6 +633,70 @@ def test_handle_records_a_replayable_script() -> None:
         "page.locator('#u').fill('ada')",
         "page.get_by_role('button', name='Sign in').click()",
     ]
+
+
+def test_handle_snapshot_forwards_scope_and_depth() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    h.handle("snapshot", {"selector": "#main", "depth": 2, "refs": False})
+    assert "snapshot:selector=#main:depth=2" in page.log
+
+
+def test_handle_snapshot_shares_the_list_fields_numbering() -> None:
+    """One numbering: a snapshot REF is a list-fields index you can act on."""
+    page = _FakePage()
+    page._fields[0].role = "button"
+    page._fields[0].name = "Go"
+    h = _handler_with_fake_page(page)
+    result = h.handle("snapshot", {})["result"]
+    # Row 0 is ("button", "Go") and field 0 was just given that exact (role, name),
+    # so it gets that field's index. Row 1 is ("textbox", "Email"); field 1's role
+    # is None, so no cached field carries that key and the ref is None.
+    assert result["elements"][0]["ref"] == 0
+    assert result["elements"][1]["ref"] is None
+    assert len(h._fields) == 2                   # snapshot populated the cache
+
+
+def test_handle_snapshot_no_refs_leaves_the_cache_alone() -> None:
+    page = _FakePage()
+    h = _handler_with_fake_page(page)
+    result = h.handle("snapshot", {"refs": False})["result"]
+    assert h._fields == []
+    assert all(e["ref"] is None for e in result["elements"])
+
+
+def test_render_snapshot_yaml_is_parseable_and_quoted() -> None:
+    text = session_server.render_snapshot_yaml(
+        [{"ref": 0, "role": "button", "name": 'Say "hi"', "depth": 1}],
+        url="http://x/a",
+        title="A",
+    )
+    assert 'url: "http://x/a"' in text
+    assert "count: 1" in text
+    assert "  - ref: 0" in text
+    assert '    name: "Say \\"hi\\""' in text
+    assert text.endswith("\n")
+
+
+def test_write_snapshot_lands_under_dot_visus(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.chdir(tmp_path)
+    h = _handler_with_fake_page(_FakePage())
+    rel = h._write_snapshot()
+    assert rel is not None
+    written = tmp_path / rel
+    assert written.is_file()
+    assert written.parent == tmp_path / ".visus" / "snapshots"
+    assert written.name.startswith("page-") and written.suffix == ".yml"
+    assert "role:" in written.read_text(encoding="utf-8")
+
+
+def test_handle_writes_the_sink_only_when_asked(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.chdir(tmp_path)
+    h = _handler_with_fake_page(_FakePage())
+    assert "snapshot" not in h.handle("click", {"selector": "#go"})
+    resp = h.handle("click", {"selector": "#go", "snapshot": True})
+    assert resp["snapshot"] is not None
+    assert (tmp_path / resp["snapshot"]).is_file()
 
 
 def test_handle_export_script_wraps_the_recorded_lines() -> None:

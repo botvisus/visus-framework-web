@@ -188,6 +188,53 @@ def test_raw_click_suppresses_the_generated_code(monkeypatch: pytest.MonkeyPatch
     assert r.output == "clicked\n"
 
 
+def test_snapshot_prints_a_ref_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {
+            "elements": [{"ref": 4, "role": "button", "name": "Go", "depth": 0}],
+            "url": "http://x",
+            "title": "X",
+        },
+    )
+    r = runner.invoke(app, ["snapshot"])
+    assert r.exit_code == 0
+    assert "REF" in r.output and "button" in r.output and "Go" in r.output
+
+
+def test_snapshot_forwards_scope_depth_and_refs(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args))
+        or {"elements": [], "url": "u", "title": "t"},
+    )
+    assert runner.invoke(app, ["snapshot", "#main", "--depth", "3", "--no-refs"]).exit_code == 0
+    assert calls[-1] == ("snapshot", {"selector": "#main", "depth": 3, "refs": False})
+
+
+def test_snapshot_filename_writes_yaml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {
+            "elements": [{"ref": 0, "role": "button", "name": "Go", "depth": 0}],
+            "url": "http://x",
+            "title": "X",
+        },
+    )
+    dest = tmp_path / "after-click.yml"
+    r = runner.invoke(app, ["snapshot", "--filename", str(dest)])
+    assert r.exit_code == 0
+    body = dest.read_text(encoding="utf-8")
+    assert 'url: "http://x"' in body and "  - ref: 0" in body
+    assert str(dest) in r.output
+
+
 def test_export_script_writes_the_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -210,6 +257,24 @@ def test_export_script_raw_prints_the_script(monkeypatch: pytest.MonkeyPatch) ->
     r = runner.invoke(app, ["--raw", "session", "export-script"])
     assert r.exit_code == 0
     assert r.output == script + "\n"
+
+
+@pytest.mark.browser
+def test_snapshot_ref_is_a_usable_field_index(base_url: str, tmp_path: Path) -> None:
+    session_client.start_daemon(
+        "chrome", headless=True, url=f"{base_url}/snapshot_tree.html", cwd=tmp_path
+    )
+    try:
+        snap = session_client.send("snapshot", {}, start_dir=tmp_path)
+        row = next(e for e in snap["elements"] if e["name"] == "Deep button")
+        assert row["ref"] is not None, "an actionable button must carry a REF"
+        env = session_client.send_envelope(
+            "click", {"index": row["ref"]}, start_dir=tmp_path
+        )
+        assert env["ok"] is True and env["result"] == "clicked"
+        assert "#deep" in env["code"] or "Deep button" in env["code"]
+    finally:
+        session_client.stop(start_dir=tmp_path)
 
 
 @pytest.mark.browser

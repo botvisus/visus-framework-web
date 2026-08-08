@@ -40,7 +40,7 @@ Eight commands additionally accept their own `--json` option:
 | Command | Shape |
 |---|---|
 | `visus list-fields --json` | array of field objects (`index`, `kind`, `name`, `code`, `css`, `xpath`, `frame`, `deep`, …) |
-| `visus snapshot --json` | array of `{role, name}` |
+| `visus snapshot --json` | array of `{ref, role, name, depth}` — `ref` is the `list-fields` index that acts on that row, or `null` when the row has no actionable twin |
 | `visus tabs --json` | `{"tabs": [{index, title, url, active}]}` |
 | `visus session status --json` | the full status object |
 | `visus cookies --json` | array of cookie objects |
@@ -57,7 +57,7 @@ parse a stable substring (e.g. `visus tab-new` always prints
 
 ```bash
 visus list-fields --json | jq '.[] | select(.kind=="button") | {index, name}'
-visus snapshot --json | jq -r '.[] | "\(.role): \(.name)"'
+visus snapshot --json | jq -r '.[] | "\(.ref): \(.role): \(.name)"'
 visus session status --json | jq -r '.title'
 visus cookies --json | jq -r '.[].name'
 ```

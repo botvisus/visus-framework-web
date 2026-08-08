@@ -345,10 +345,10 @@ def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
 
 
-def _format_fields(fields: list[dict[str, Any]]) -> str:
+def _format_fields(fields: list[dict[str, Any]], *, full: bool = False) -> str:
     from visus.web.cli.console import format_fields
 
-    return format_fields(fields)
+    return format_fields(fields, full=full)
 
 
 def _format_snapshot(elements: list[dict[str, Any]]) -> str:
@@ -500,6 +500,7 @@ def list_fields(
     show_all: bool = typer.Option(False, "--all", help="Include hidden/disabled fields."),
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
     no_highlight: bool = typer.Option(False, "--no-highlight", help="Skip the numbered overlay."),
+    full: bool = typer.Option(False, "--full", help="Also print the CSS and XPATH columns."),
 ) -> None:
     """Enumerate interactive fields on the current page (numbered, highlighted)."""
     kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
@@ -510,7 +511,7 @@ def list_fields(
     fields = result.get("fields", [])
     if as_json:
         output.set_mode(as_json=True)
-    output.emit(fields, table=_format_fields(fields))
+    output.emit(fields, table=_format_fields(fields, full=full))
 
 
 @app.command()

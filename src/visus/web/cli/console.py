@@ -54,13 +54,17 @@ _HELP = """commands:
   quit                 exit the console (the session stays alive)"""
 
 
-def format_fields(fields: list[dict[str, Any]], *, width: int | None = None) -> str:
-    """Render fields as a pretty table: #, KIND, NAME, the ready VISUS call, CSS, XPATH.
+def format_fields(
+    fields: list[dict[str, Any]], *, width: int | None = None, full: bool = False
+) -> str:
+    """Render fields as a table: #, KIND, NAME, and the ready-to-paste VISUS call.
 
     The VISUS column is copy-paste-ready and *frame-aware* — for an element inside
     an iframe it is wrapped in ``frame_locator(...)`` so a click/fill actually
-    reaches it (a bare css/xpath would not). An ASCII box is used so the table
-    renders correctly on any console encoding.
+    reaches it (a bare css/xpath would not). ``full=True`` adds the CSS and XPATH
+    columns; they are off by default because on a large page they triple the
+    output an agent has to read for no gain over the VISUS column. An ASCII box is
+    used so the table renders on any console encoding.
     """
     if not fields:
         return "(no fields found)"
@@ -68,23 +72,25 @@ def format_fields(fields: list[dict[str, Any]], *, width: int | None = None) -> 
     from rich.console import Console
     from rich.table import Table
 
-    table = Table(box=box.ASCII, header_style="bold", pad_edge=False, show_lines=True)
+    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
     table.add_column("#", justify="right", no_wrap=True)
     table.add_column("KIND", no_wrap=True)
     table.add_column("NAME", overflow="fold")
     table.add_column("VISUS (copy-paste)", overflow="fold", style="green")
-    table.add_column("CSS", overflow="fold")
-    table.add_column("XPATH", overflow="fold")
+    if full:
+        table.add_column("CSS", overflow="fold")
+        table.add_column("XPATH", overflow="fold")
     for f in fields:
         name = str(f.get("name") or f.get("label") or f.get("placeholder") or "")
-        table.add_row(
+        row = [
             str(f.get("index", "")),
             str(f.get("kind", "")),
             name,
             str(f.get("code", "")),
-            str(f.get("css", "")),
-            str(f.get("xpath", "")),
-        )
+        ]
+        if full:
+            row.extend([str(f.get("css", "")), str(f.get("xpath", ""))])
+        table.add_row(*row)
     # Console() auto-detects the real terminal width (wide tables use the full
     # screen) and colour (TTY only); capture() preserves both. On a narrow pipe
     # rich folds long cells. `width` lets tests pin a deterministic size.

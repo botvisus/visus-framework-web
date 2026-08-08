@@ -982,6 +982,7 @@ def test_format_fields_table_shows_visus_css_xpath() -> None:
             }
         ],
         width=200,
+        full=True,
     )
     assert "VISUS" in out and "CSS" in out and "XPATH" in out  # column headers
     assert "button" in out and "Submit" in out
@@ -990,6 +991,43 @@ def test_format_fields_table_shows_visus_css_xpath() -> None:
     # xpath values are asserted at the source in test_e2e_fields.py).
     assert "frame" in out and "#f1" in out  # the frame_locator(...) wrapping
     assert "#submit" in out  # css value
+
+_ONE_FIELD = [
+    {
+        "index": 0,
+        "kind": "button",
+        "name": "Submit",
+        "frame": [],
+        "code": 'page.locator("#submit")',
+        "css": "#submit",
+        "xpath": '//*[@id="submit"]',
+    }
+]
+
+
+def test_format_fields_default_drops_css_and_xpath() -> None:
+    out = console.format_fields(_ONE_FIELD, width=200)
+    assert "VISUS" in out and "KIND" in out
+    assert "CSS" not in out and "XPATH" not in out
+
+
+def test_format_fields_default_has_no_row_rules() -> None:
+    """show_lines=True doubled the line count of every list-fields call."""
+    two = [_ONE_FIELD[0], {**_ONE_FIELD[0], "index": 1}]
+    out = console.format_fields(two, width=200)
+    # header rule, header, header rule, 2 rows, closing rule -> 6 lines.
+    assert len(out.splitlines()) == 6
+
+
+def test_format_fields_full_restores_the_forensic_columns() -> None:
+    out = console.format_fields(_ONE_FIELD, width=200, full=True)
+    assert "CSS" in out and "XPATH" in out
+
+
+def test_cli_list_fields_full_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_client(monkeypatch, lambda op, args=None: {"fields": _ONE_FIELD})
+    assert "XPATH" not in runner.invoke(app, ["list-fields"]).output
+    assert "XPATH" in runner.invoke(app, ["list-fields", "--full"]).output
 
 
 # ---------------------------------------------------------------------------

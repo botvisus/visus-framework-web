@@ -3163,6 +3163,26 @@ def test_handle_real_hover_dblclick_focus(base_url: str) -> None:
 
 
 @pytest.mark.browser
+def test_export_script_replays_the_session_start_url(base_url: str) -> None:
+    """A session started at a URL must export a script that can actually replay.
+
+    The first navigation happens inside `_ensure()`, not through `handle()`, so
+    the normal codegen path never sees it — without an explicit record the
+    exported script starts on a blank page and every locator in it misses.
+    """
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/links.html"
+    )
+    try:
+        h.handle("click", {"target_text": "Go to page two"})
+        script = h.handle("export_script", {})["result"]["script"]
+        assert f"page.goto('{base_url}/links.html')" in script
+        assert script.index("page.goto(") < script.index(".click()")
+    finally:
+        h.close()
+
+
+@pytest.mark.browser
 def test_handle_real_eval(base_url: str) -> None:
     h = session_server.SessionHandler(engine="chrome", headless=True, url=f"{base_url}/fields.html")
     try:

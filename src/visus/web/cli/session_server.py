@@ -195,6 +195,11 @@ class SessionHandler:
                 self._page = self._browser.new_page()
                 if self._url:
                     self._page.goto(self._url)
+                    # Record it by hand: this navigation does NOT go through
+                    # handle(), so the codegen recorder never sees it. Without
+                    # this line `session export-script` emits a script that
+                    # starts on a blank page, and every locator in it misses.
+                    self._script.append(generate_script_goto(self._url))
             except Exception:
                 self.close()
                 raise

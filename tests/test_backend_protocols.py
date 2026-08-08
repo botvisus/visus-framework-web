@@ -196,6 +196,8 @@ class _FakeBrowser:
 
     def dispose(self): ...
 
+    def detach(self): ...
+
 
 class _FakeBackend:
     def launch(self, config, *, headless):

@@ -11,6 +11,7 @@ from selenium.webdriver.ie.options import Options
 from selenium.webdriver.ie.service import Service
 
 from visus.web.backends.browsers import _ie_preflight
+from visus.web.errors import UnsupportedEngineError
 
 _DEFAULT_EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 # webdriver.Ie hardcodes a 120 s client timeout with no override. A watchdog that kills the
@@ -22,8 +23,19 @@ _LAUNCH_TIMEOUT = float(os.environ.get("VISUS_WEB_IE_TIMEOUT", "45"))
 _IE_DRIVER_VERSION = os.environ.get("VISUS_WEB_IE_DRIVER_VERSION", "4.0.0")
 
 
-def build_options(*, headless: bool, download_dir: str, user_data_dir: str) -> Options:
+def build_options(
+    *,
+    headless: bool,
+    download_dir: str,
+    user_data_dir: str,
+    debugger_address: str | None = None,
+) -> Options:
     # IE-mode is always headed; headless/download_dir/user_data_dir do not apply.
+    if debugger_address:
+        raise UnsupportedEngineError(
+            "attaching to a running browser needs chrome or edge — IE mode is driven by "
+            "IEDriverServer, which cannot attach"
+        )
     opts = Options()
     opts.attach_to_edge_chrome = True
     opts.edge_executable_path = os.environ.get("VISUS_WEB_EDGE_BINARY", _DEFAULT_EDGE)

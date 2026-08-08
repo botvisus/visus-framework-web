@@ -49,6 +49,7 @@ def _spawn_driver(
     headless: bool,
     user_data_dir: str | None = None,
     remote_url: str | None = None,
+    debugger_address: str | None = None,
 ) -> tuple[WebDriver, str, str, bool]:
     """Create a driver with a profile + download dir.
 
@@ -56,6 +57,9 @@ def _spawn_driver(
     profile to reuse (created if missing, never deleted). With *remote_url*, the
     session is opened on a Selenium Grid / Remote WebDriver instead of spawning
     a local driver (download capture and profile paths are then remote-side).
+    With *debugger_address*, the driver ATTACHES to a browser somebody else
+    launched: the temp profile is created but never used by that browser, and is
+    still removed on dispose.
 
     Returns (driver, profile_dir, download_dir, owns_profile).
     """
@@ -67,7 +71,10 @@ def _spawn_driver(
         profile_dir = tempfile.mkdtemp(prefix="visus-web-")
     download_dir = tempfile.mkdtemp(prefix="visus-dl-")
     options = config.options_factory(
-        headless=headless, download_dir=download_dir, user_data_dir=profile_dir
+        headless=headless,
+        download_dir=download_dir,
+        user_data_dir=profile_dir,
+        debugger_address=debugger_address,
     )
     try:
         if remote_url is not None:
@@ -102,6 +109,7 @@ class SeleniumBrowserDelegate:
         headless: bool,
         owns_profile: bool = True,
         remote_url: str | None = None,
+        attached: bool = False,
     ) -> None:
         self._driver = driver
         self._profile_dir = profile_dir
@@ -110,6 +118,7 @@ class SeleniumBrowserDelegate:
         self._headless = headless
         self._owns_profile = owns_profile
         self._remote_url = remote_url
+        self._attached = attached
         self._disposed = False
         self._contexts: list[SeleniumContextDelegate] = []
         # First context shares the launch driver (owns_driver=False).
@@ -169,6 +178,34 @@ class SeleniumBrowserDelegate:
             shutil.rmtree(self._profile_dir, ignore_errors=True)
         shutil.rmtree(self._download_dir, ignore_errors=True)
 
+    def detach(self) -> None:
+        """End the WebDriver session WITHOUT closing the browser.
+
+        ``driver.quit()`` is deliberately not called: whether ChromeDriver closes a
+        browser it merely ATTACHED to has varied between versions, and closing the
+        user's own window is unrecoverable. Stopping the local driver PROCESS ends
+        the session just as surely and never sends a close command to the browser.
+        Temp dirs this delegate owns are still cleaned; a user-supplied persistent
+        profile is never touched.
+        """
+        if self._disposed:
+            return
+        self._disposed = True
+        atexit.unregister(self._atexit_cleanup)
+        for ctx in list(self._contexts):
+            if ctx.owns_driver:
+                ctx.close()
+        service = getattr(self._driver, "service", None)
+        stop = getattr(service, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                pass
+        if self._owns_profile:
+            shutil.rmtree(self._profile_dir, ignore_errors=True)
+        shutil.rmtree(self._download_dir, ignore_errors=True)
+
 
 class SeleniumBackend:
     def launch(
@@ -178,9 +215,14 @@ class SeleniumBackend:
         headless: bool,
         user_data_dir: str | None = None,
         remote_url: str | None = None,
+        debugger_address: str | None = None,
     ) -> SeleniumBrowserDelegate:
         driver, profile_dir, download_dir, owns_profile = _spawn_driver(
-            config, headless=headless, user_data_dir=user_data_dir, remote_url=remote_url
+            config,
+            headless=headless,
+            user_data_dir=user_data_dir,
+            remote_url=remote_url,
+            debugger_address=debugger_address,
         )
         return SeleniumBrowserDelegate(
             driver,
@@ -190,4 +232,5 @@ class SeleniumBackend:
             headless=headless,
             owns_profile=owns_profile,
             remote_url=remote_url,
+            attached=debugger_address is not None,
         )

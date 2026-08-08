@@ -35,6 +35,15 @@ class Browser:
     def close(self) -> None:
         self._delegate.dispose()
 
+    def detach(self) -> None:
+        """Release the browser without closing it (attached sessions).
+
+        Use instead of :meth:`close` when visus did not launch this browser: the
+        WebDriver session ends, the browser window stays exactly as the user left
+        it.
+        """
+        self._delegate.detach()
+
     def __enter__(self) -> Browser:
         return self
 

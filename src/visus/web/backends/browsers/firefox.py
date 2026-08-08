@@ -6,10 +6,23 @@ from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 
+from visus.web.errors import UnsupportedEngineError
+
 _MIMES = "application/octet-stream,text/plain,application/pdf,application/zip,image/png,text/csv"
 
 
-def build_options(*, headless: bool, download_dir: str, user_data_dir: str) -> Options:
+def build_options(
+    *,
+    headless: bool,
+    download_dir: str,
+    user_data_dir: str,
+    debugger_address: str | None = None,
+) -> Options:
+    if debugger_address:
+        raise UnsupportedEngineError(
+            "attaching to a running browser needs chrome or edge — Firefox exposes no "
+            "Chrome DevTools Protocol endpoint"
+        )
     opts = Options()
     if headless:
         opts.add_argument("-headless")

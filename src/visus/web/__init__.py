@@ -63,6 +63,7 @@ def launch(
     slow_mo: int = 0,
     user_data_dir: str | None = None,
     remote_url: str | None = None,
+    debugger_address: str | None = None,
 ) -> Browser:
     """Launch a browser and return a Browser handle.
 
@@ -76,15 +77,29 @@ def launch(
     *remote_url* opens the session on a Selenium Grid / Remote WebDriver
     (e.g. ``"http://grid:4444/wd/hub"``) instead of spawning a local browser.
 
+    *debugger_address* (``"host:port"``, chrome/edge only) ATTACHES to a browser
+    that is already running with remote debugging enabled instead of launching
+    one — the user's own logged-in window, or a container exposing CDP. Release
+    it with :meth:`Browser.detach`; :meth:`Browser.close` would end the browser
+    along with the session.
+
     Usage:
         with launch(headless=True) as browser:
             page = browser.new_page()
             page.goto("https://example.com")
     """
     resolved = Engine.from_str(engine)
+    if debugger_address is not None and resolved not in (Engine.CHROME, Engine.EDGE):
+        raise errors.UnsupportedEngineError(
+            f"attaching to a running browser needs chrome or edge, not {resolved.value!r}"
+        )
     config = get_browser_config(resolved)
     backend = SeleniumBackend()
     delegate = backend.launch(
-        config, headless=headless, user_data_dir=user_data_dir, remote_url=remote_url
+        config,
+        headless=headless,
+        user_data_dir=user_data_dir,
+        remote_url=remote_url,
+        debugger_address=debugger_address,
     )
     return Browser(delegate, Defaults(slow_mo_ms=slow_mo))

@@ -7,8 +7,23 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
 
-def build_options(*, headless: bool, download_dir: str, user_data_dir: str) -> Options:
+def build_options(
+    *,
+    headless: bool,
+    download_dir: str,
+    user_data_dir: str,
+    debugger_address: str | None = None,
+) -> Options:
     opts = Options()
+    if debugger_address:
+        # Attaching to a browser somebody else launched: Chrome ignores every
+        # launch argument in this mode (profile, headless, download prefs), and
+        # chromedriver rejects a session that mixes them with debuggerAddress.
+        # Log capture is also a launch-time capability, so an attached session
+        # has no performance/console history — page.network_requests() and
+        # page.console_messages() simply stay empty.
+        opts.add_experimental_option("debuggerAddress", debugger_address)
+        return opts
     if headless:
         opts.add_argument("--headless=new")
     opts.add_argument(f"--user-data-dir={user_data_dir}")

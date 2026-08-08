@@ -7,8 +7,21 @@ from selenium.webdriver.edge.options import Options
 from selenium.webdriver.edge.service import Service
 
 
-def build_options(*, headless: bool, download_dir: str, user_data_dir: str) -> Options:
+def build_options(
+    *,
+    headless: bool,
+    download_dir: str,
+    user_data_dir: str,
+    debugger_address: str | None = None,
+) -> Options:
     opts = Options()
+    if debugger_address:
+        # Same as chrome: Edge ignores launch arguments when attaching, and
+        # msedgedriver rejects a session that mixes them with debuggerAddress.
+        # The logging capabilities below are launch-time only, so an attached
+        # session has no performance/console history to drain.
+        opts.add_experimental_option("debuggerAddress", debugger_address)
+        return opts
     if headless:
         opts.add_argument("--headless=new")
     opts.add_argument(f"--user-data-dir={user_data_dir}")

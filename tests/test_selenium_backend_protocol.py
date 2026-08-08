@@ -67,7 +67,7 @@ class _SpawnableFakeDriver(_FakeDriver):
 def test_launch_with_user_data_dir_uses_and_preserves_it(tmp_path):
     captured = {}
 
-    def opts(*, headless, download_dir, user_data_dir):
+    def opts(*, headless, download_dir, user_data_dir, debugger_address=None):
         captured["user_data_dir"] = user_data_dir
         return None
 

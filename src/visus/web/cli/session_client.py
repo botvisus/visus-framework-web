@@ -285,6 +285,7 @@ def start_daemon(
     remote_url: str | None = None,
     slow_mo: int = 0,
     allow_run_code: bool = False,
+    debugger_address: str | None = None,
     cwd: str | Path | None = None,
     timeout: float = 20.0,
     idle_timeout: float | None = None,
@@ -327,6 +328,8 @@ def start_daemon(
         env["VISUS_WEB_SLOW_MO"] = str(slow_mo)
     if allow_run_code:
         env["VISUS_WEB_ALLOW_RUN_CODE"] = "1"
+    if debugger_address:
+        env["VISUS_WEB_DEBUGGER_ADDRESS"] = debugger_address
     if idle_timeout is not None:
         env["VISUS_WEB_IDLE_TIMEOUT"] = str(idle_timeout)
 

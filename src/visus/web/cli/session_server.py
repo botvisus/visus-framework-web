@@ -207,6 +207,7 @@ class SessionHandler:
         remote_url: str | None = None,
         slow_mo: int = 0,
         allow_run_code: bool = False,
+        debugger_address: str | None = None,
     ) -> None:
         self._engine = engine or os.environ.get("VISUS_WEB_ENGINE", "chrome")
         if headless is None:
@@ -220,6 +221,11 @@ class SessionHandler:
         # daemon holds cookies, logins and a token that authorises file writes,
         # so `run-code` stays off unless the user asked for it at start time.
         self._allow_run_code = allow_run_code
+        self._debugger_address = debugger_address
+        # True when the browser belongs to somebody else: closing it would destroy
+        # the user's own window, so only `detach` may end such a session.
+        self._attached = debugger_address is not None
+        self._detached = False
         self._browser: Browser | None = None
         self._context: Context | None = None
         self._page: Page | None = None
@@ -274,6 +280,7 @@ class SessionHandler:
                 slow_mo=self._slow_mo,
                 user_data_dir=self._user_data_dir,
                 remote_url=self._remote_url,
+                debugger_address=self._debugger_address,
             )
             # Failure-atomic: if any step after launch raises (bad URL, etc.),
             # tear the partial browser down so the next op retries from scratch
@@ -388,6 +395,29 @@ class SessionHandler:
         self._context = None
         self._page = None
         self._capture = None  # a capture without a browser is meaningless
+        self._invalidate_fields()
+
+    def detach(self) -> None:
+        """Mark this session for release — ``serve()`` must not close the browser."""
+        self._detached = True
+
+    def detached(self) -> bool:
+        """True once :meth:`detach` was called (read by ``serve()``'s teardown)."""
+        return self._detached
+
+    def release(self) -> None:
+        """Drop the browser WITHOUT closing it (see :meth:`visus.web.Browser.detach`).
+
+        Same teardown as :meth:`close` in every other respect — a live trace is
+        still flushed, because detaching must not orphan its log handler either.
+        """
+        self._stop_tracing_if_running()
+        if self._browser is not None:
+            self._browser.detach()
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._capture = None
         self._invalidate_fields()
 
     def _invalidate_fields(self) -> None:
@@ -1654,6 +1684,7 @@ class SessionHandler:
             "engine": self._engine,
             "headless": self._headless,
             "allow_run_code": self._allow_run_code,
+            "attached": self._attached,
             "follow": self._follow,
             "user_data_dir": self._user_data_dir,
             "remote_url": self._remote_url,
@@ -1696,6 +1727,18 @@ class SessionHandler:
         if not body:
             lines.append("    pass  # no recorded actions yet")
         return {"script": "\n".join(lines) + "\n", "lines": len(body)}
+
+    def _op_detach(self, args: dict[str, Any]) -> str:
+        """End the session while leaving an ATTACHED browser exactly as it is."""
+        if not self._attached:
+            raise RuntimeError(
+                "detach only works on a session created by `visus session attach` — "
+                "use `visus session stop` to close a browser visus launched"
+            )
+        self.detach()
+        if self._stop is not None:
+            self._stop.set()
+        return "detached — the browser stays open"
 
     def _op_shutdown(self, args: dict[str, Any]) -> str:
         self.close()
@@ -2058,7 +2101,12 @@ def serve(
             if remaining <= 0:
                 break
             worker.join(timeout=remaining)
-        handler.close()
+        if handler.detached():
+            # An attached browser belongs to the user: end the WebDriver session,
+            # never the window.
+            handler.release()
+        else:
+            handler.close()
         try:
             sf.unlink()
         except OSError:
@@ -2139,6 +2187,7 @@ def main(argv: list[str] | None = None) -> None:
     allow_run_code = os.environ.get("VISUS_WEB_ALLOW_RUN_CODE", "0") not in (
         "0", "", "false", "False", "no"
     )
+    debugger_address = os.environ.get("VISUS_WEB_DEBUGGER_ADDRESS") or None
 
     log_dir = Path.cwd() / ".visus"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -2160,6 +2209,7 @@ def main(argv: list[str] | None = None) -> None:
         remote_url=remote_url,
         slow_mo=slow_mo,
         allow_run_code=allow_run_code,
+        debugger_address=debugger_address,
     )
     try:
         serve(handler, token=token, idle_timeout=_idle_timeout_from_env(), name=name)

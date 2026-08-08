@@ -307,6 +307,8 @@ command accepts `--json`.
 |---|---|
 | `visus session start [URL] --engine <e> --headless --user-data-dir <dir> --remote-url <url> --slow-mo <ms> --idle-timeout <seconds> --allow-run-code` | Start the persistent browser daemon (headed by default); optionally on a persistent profile, a Selenium Grid, slowed down, self-reaping when idle, or with `run-code` enabled. `--idle-timeout` (omit = never) stops the daemon after that many idle seconds; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
 | `visus session stop` | Stop the session (closes the browser). |
+| `visus session attach --cdp <host:port> [URL] --engine <chrome\|edge>` | Attach to a browser that is already running (your logged-in Chrome, or a container exposing CDP). |
+| `visus session detach` | End an attached session and leave the browser open (`attach` sessions only). |
 | `visus session kill` | Force-clear a wedged session: terminate the daemon and delete `session.json`/`session.json.lock` even if `stop` can't reach it. |
 | `visus session status [--json]` | Show the running session's status. |
 | `visus session list [--json]` | List every session — this project's and any daemon left running in another project. |
@@ -316,6 +318,11 @@ command accepts `--json`.
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file. |
 | `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 | `visus console [URL]` | Deprecated alias for `visus repl` (prints a notice on stderr). |
+
+An attached session has no performance/console log history: those are enabled when a browser is
+*launched*, which visus did not do. `visus requests` and `visus logs` therefore stay empty on an
+attached session — everything else works normally. Unlike `playwright-cli`, `attach` does not
+rename the session after the browser channel; the name always comes from `--session` / `-S`.
 
 ### Navigation
 
@@ -935,6 +942,7 @@ Default timeouts (`visus.web.config.Defaults`, all in ms): `action_timeout_ms = 
 | `VISUS_WEB_REMOTE_URL` | CLI session | — | Selenium Grid / Remote WebDriver URL for the daemon. |
 | `VISUS_WEB_SLOW_MO` | CLI session | `0` | Delay every daemon action by this many milliseconds. |
 | `VISUS_WEB_ALLOW_RUN_CODE` | CLI session | off | `"1"` lets `visus run-code` execute Python in the live session. |
+| `VISUS_WEB_DEBUGGER_ADDRESS` | CLI session | — | Attach to this DevTools address instead of launching a browser. |
 | `VISUS_WEB_TOKEN` | CLI session | auto | Auth token for the local daemon socket. |
 | `VISUS_WEB_TRACING` | tracing | off | Pre-enables the tracing flag. **A recorder is still required**: use `tracing.record(...)` in code, or `visus tracing-start` from the shell. On its own it records nothing. |
 | `VISUS_WEB_EDGE_BINARY` | `edge_ie` | default install path | Path to `msedge.exe`. |

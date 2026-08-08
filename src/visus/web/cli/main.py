@@ -649,6 +649,67 @@ def session_stop() -> None:
     output.emit(session_client.stop())
 
 
+def _cdp_address(raw: str) -> str:
+    """Normalise ``--cdp`` to ``host:port``.
+
+    A container or `chrome://inspect` prints ``http://localhost:9222``; Selenium's
+    ``debuggerAddress`` wants the bare authority, so both forms are accepted.
+    """
+    value = raw.strip()
+    for prefix in ("http://", "https://", "ws://", "wss://"):
+        if value.startswith(prefix):
+            value = value[len(prefix) :]
+    return value.rstrip("/")
+
+
+@session_app.command("attach")
+def session_attach(
+    cdp: str = typer.Option(
+        ..., "--cdp", help="DevTools address, e.g. 127.0.0.1:9222 or http://localhost:9222."
+    ),
+    url: str = typer.Argument(None, help="Optional URL to navigate the attached tab to."),
+    engine: str = typer.Option("chrome", "--engine", "-e", help="chrome | edge."),
+) -> None:
+    """Attach the session to a browser that is ALREADY running (chrome/edge).
+
+    Start the target browser with remote debugging enabled — in Chrome/Edge,
+    visit `chrome://inspect/#remote-debugging` and tick "Allow remote debugging
+    for this browser instance", or launch it with `--remote-debugging-port=9222`.
+
+    The session name comes from `--session` / `-S` / `VISUS_WEB_SESSION`, exactly
+    as it does for `session start`. End it with `visus session detach` — a plain
+    `stop` would close a window that is not yours to close.
+    """
+    from visus.web.cli import output, session_client
+
+    if engine not in ("chrome", "edge"):
+        output.emit_error(
+            f"attaching needs chrome or edge, not {engine!r} — no other engine "
+            "exposes the Chrome DevTools Protocol"
+        )
+    try:
+        info = session_client.start_daemon(
+            engine, False, url, debugger_address=_cdp_address(cdp)
+        )
+    except session_client.SessionError as exc:
+        output.emit_error(str(exc))
+    output.emit(
+        info,
+        table=(
+            f"attached to {_cdp_address(cdp)} "
+            f"(pid {info['pid']}, port {info['port']}, engine {engine})"
+        ),
+    )
+
+
+@session_app.command("detach")
+def session_detach() -> None:
+    """End an attached session, leaving the browser open (`attach` sessions only)."""
+    from visus.web.cli import output
+
+    output.emit(_send("detach", {}))
+
+
 @session_app.command("kill")
 def session_kill() -> None:
     """Force-clear a wedged session: terminate the daemon and delete its state.

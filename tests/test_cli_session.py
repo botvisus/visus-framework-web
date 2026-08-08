@@ -826,7 +826,13 @@ def test_ensure_partial_launch_failure_is_atomic_and_retries(
     # Mirrors the real launch() call in _ensure(): a fake that drops a keyword
     # would fail with a TypeError and hide the teardown behaviour under test.
     def fake_launch(  # type: ignore[no-untyped-def]
-        engine, *, headless, slow_mo=0, user_data_dir=None, remote_url=None
+        engine,
+        *,
+        headless,
+        slow_mo=0,
+        user_data_dir=None,
+        remote_url=None,
+        debugger_address=None,
     ):
         b = browsers.pop(0)
         launched.append(b)

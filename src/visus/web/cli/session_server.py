@@ -186,6 +186,7 @@ class SessionHandler:
         user_data_dir: str | None = None,
         remote_url: str | None = None,
         slow_mo: int = 0,
+        allow_run_code: bool = False,
     ) -> None:
         self._engine = engine or os.environ.get("VISUS_WEB_ENGINE", "chrome")
         if headless is None:
@@ -195,6 +196,10 @@ class SessionHandler:
         self._user_data_dir = user_data_dir
         self._remote_url = remote_url
         self._slow_mo = slow_mo
+        # Arbitrary Python against the LIVE browser is opt-in per session: the
+        # daemon holds cookies, logins and a token that authorises file writes,
+        # so `run-code` stays off unless the user asked for it at start time.
+        self._allow_run_code = allow_run_code
         self._browser: Browser | None = None
         self._context: Context | None = None
         self._page: Page | None = None
@@ -1251,6 +1256,23 @@ class SessionHandler:
         """The installed rules, with secret headers redacted before they leave."""
         return {"routes": [r.redacted().to_dict() for r in self.page().routes()]}
 
+    # --- arbitrary python against the live session (opt-in) ---------------
+    def _op_run_code(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Refuse to execute Python unless this session opted in.
+
+        The gate ships BEFORE the capability on purpose: the refusal is the
+        behaviour that has to be right, and it is checked before the payload is
+        even looked at — an empty or absent ``code`` must not read as consent.
+        Execution itself lands in the next commit.
+        """
+        if not self._allow_run_code:
+            raise PermissionError(
+                "run-code is disabled for this session — it executes arbitrary Python "
+                "in your live browser. Restart with "
+                "`visus session start --allow-run-code` to enable it."
+            )
+        raise NotImplementedError("run-code execution is not wired up yet")
+
     # --- tracing ---------------------------------------------------------
     def _op_tracing_start(self, args: dict[str, Any]) -> dict[str, Any]:
         """Start recording every action into an in-memory Recorder.
@@ -1589,6 +1611,7 @@ class SessionHandler:
             "running": running,
             "engine": self._engine,
             "headless": self._headless,
+            "allow_run_code": self._allow_run_code,
             "follow": self._follow,
             "user_data_dir": self._user_data_dir,
             "remote_url": self._remote_url,
@@ -1932,6 +1955,7 @@ def serve(
             "user_data_dir": handler._user_data_dir,
             "remote_url": handler._remote_url,
             "slow_mo": handler._slow_mo,
+            "allow_run_code": handler._allow_run_code,
             "started_at": time.time(),
         }
     )
@@ -2070,6 +2094,9 @@ def main(argv: list[str] | None = None) -> None:
         slow_mo = int(os.environ.get("VISUS_WEB_SLOW_MO") or 0)
     except ValueError:
         slow_mo = 0
+    allow_run_code = os.environ.get("VISUS_WEB_ALLOW_RUN_CODE", "0") not in (
+        "0", "", "false", "False", "no"
+    )
 
     log_dir = Path.cwd() / ".visus"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -2081,7 +2108,7 @@ def main(argv: list[str] | None = None) -> None:
     _log(
         f"daemon starting session={name!r} engine={engine} headless={headless} "
         f"url={url!r} user_data_dir={user_data_dir!r} remote_url={remote_url!r} "
-        f"slow_mo={slow_mo} pid={os.getpid()}"
+        f"slow_mo={slow_mo} allow_run_code={allow_run_code} pid={os.getpid()}"
     )
     handler = SessionHandler(
         engine=engine,
@@ -2090,6 +2117,7 @@ def main(argv: list[str] | None = None) -> None:
         user_data_dir=user_data_dir,
         remote_url=remote_url,
         slow_mo=slow_mo,
+        allow_run_code=allow_run_code,
     )
     try:
         serve(handler, token=token, idle_timeout=_idle_timeout_from_env(), name=name)

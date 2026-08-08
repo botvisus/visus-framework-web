@@ -608,6 +608,11 @@ def session_start(
     slow_mo: int = typer.Option(
         0, "--slow-mo", help="Delay every action by this many milliseconds."
     ),
+    allow_run_code: bool = typer.Option(
+        False,
+        "--allow-run-code",
+        help="Allow `visus run-code` to execute Python against this live session.",
+    ),
     idle_timeout: float = typer.Option(
         None,
         "--idle-timeout",
@@ -625,6 +630,7 @@ def session_start(
             user_data_dir=user_data_dir,
             remote_url=remote_url,
             slow_mo=slow_mo,
+            allow_run_code=allow_run_code,
             idle_timeout=idle_timeout,
         )
     except session_client.SessionError as exc:

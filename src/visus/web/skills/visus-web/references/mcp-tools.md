@@ -55,6 +55,21 @@ locators) → act with `browser_click` / `browser_fill` / … targeting by
 `role`+`name`, `text`, or `selector` → `browser_wait_for` /
 `browser_expect_text` to synchronize.
 
+Every **Actions** tool returns its result followed by a `### Page` block naming
+the URL and title the action produced:
+
+```
+clicked
+
+### Page
+- URL: http://shop.test/cart
+- Title: Your cart
+```
+
+So you do not need a `browser_url` / `browser_title` call after an action just
+to learn where you ended up. Page state is best-effort: if the page cannot be
+read the tool returns the bare result rather than failing the action.
+
 ## Target parameters
 
 Every action tool accepts the same **target** parameters — provide whichever

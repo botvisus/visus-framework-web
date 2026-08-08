@@ -428,3 +428,24 @@ def test_browser_close(srv):  # type: ignore[no-untyped-def]
     # Navigate again to confirm it recovers
     server.browser_navigate(f"{base_url}/rpa.html")
     assert "rpa.html" in server.browser_url()
+
+
+@pytest.mark.browser
+def test_click_result_reports_the_resulting_page(srv):  # type: ignore[no-untyped-def]
+    """The MCP loop must close too: after an action, say what the page became."""
+    server, base_url = srv
+    server.browser_navigate(f"{base_url}/links.html")
+    result = server.browser_click(text="Go to page two")
+    assert result.startswith("clicked")
+    assert "### Page" in result
+    assert "/page2.html" in result
+    assert "page two" in result
+
+
+@pytest.mark.browser
+def test_fill_result_reports_the_page(srv):  # type: ignore[no-untyped-def]
+    server, base_url = srv
+    server.browser_navigate(f"{base_url}/forms.html")
+    result = server.browser_fill("ada99", role="textbox", name="Username")
+    assert result.startswith("filled with 'ada99'")
+    assert "- Title: forms fixture" in result

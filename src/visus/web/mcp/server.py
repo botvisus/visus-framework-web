@@ -32,6 +32,19 @@ def _any_match_visible(loc: Locator) -> bool:
         return False
 
 
+def _acted(message: str) -> str:
+    """An action's result plus the page state the agent needs for its next step.
+
+    Without this an agent is blind after every action and must spend a whole extra
+    tool call on browser_url/browser_title, or act on a stale mental model.
+    """
+    try:
+        page = _session.page()
+        return f"{message}\n\n### Page\n- URL: {page.url}\n- Title: {page.title()}"
+    except Exception:  # noqa: BLE001 — page state is telemetry, never the result
+        return message
+
+
 # ---------------------------------------------------------------------------
 # Navigation
 # ---------------------------------------------------------------------------
@@ -76,9 +89,10 @@ def browser_reload() -> str:
 
 @mcp.tool()
 def browser_snapshot() -> list[dict]:  # type: ignore[type-arg]
-    """Return the page's interactive elements as a list of {role, name} dicts.
+    """Return the page's interactive elements as a list of {role, name, depth} dicts.
 
-    Use these values to target action tools without needing CSS selectors.
+    Use role/name to target action tools without needing CSS selectors. depth is
+    how many element levels below <body> the element sits.
     """
     return _session.page().snapshot()
 
@@ -214,7 +228,7 @@ def browser_click(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).click()
-    return "clicked"
+    return _acted("clicked")
 
 
 @mcp.tool()
@@ -231,7 +245,7 @@ def browser_dblclick(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).dblclick()
-    return "double-clicked"
+    return _acted("double-clicked")
 
 
 @mcp.tool()
@@ -249,7 +263,7 @@ def browser_fill(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).fill(text_value)
-    return f"filled with {text_value!r}"
+    return _acted(f"filled with {text_value!r}")
 
 
 @mcp.tool()
@@ -267,7 +281,7 @@ def browser_press(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).press(key)
-    return f"pressed {key!r}"
+    return _acted(f"pressed {key!r}")
 
 
 @mcp.tool()
@@ -284,7 +298,7 @@ def browser_hover(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).hover()
-    return "hovered"
+    return _acted("hovered")
 
 
 @mcp.tool()
@@ -301,7 +315,7 @@ def browser_check(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).check()
-    return "checked"
+    return _acted("checked")
 
 
 @mcp.tool()
@@ -318,7 +332,7 @@ def browser_uncheck(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).uncheck()
-    return "unchecked"
+    return _acted("unchecked")
 
 
 @mcp.tool()
@@ -336,7 +350,7 @@ def browser_select_option(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).select_option(value=value)
-    return f"selected option {value!r}"
+    return _acted(f"selected option {value!r}")
 
 
 @mcp.tool()
@@ -356,7 +370,7 @@ def browser_drag(
     )
     tgt_loc = page.locator(target_selector)
     src_loc.drag_to(tgt_loc)
-    return f"dragged to {target_selector!r}"
+    return _acted(f"dragged to {target_selector!r}")
 
 
 @mcp.tool()
@@ -373,7 +387,7 @@ def browser_focus(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).focus()
-    return "focused"
+    return _acted("focused")
 
 
 @mcp.tool()
@@ -390,7 +404,7 @@ def browser_clear(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).clear()
-    return "cleared"
+    return _acted("cleared")
 
 
 @mcp.tool()
@@ -408,7 +422,7 @@ def browser_set_input_files(
     make_locator(
         page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     ).set_input_files(paths)
-    return f"set {len(paths)} file(s)"
+    return _acted(f"set {len(paths)} file(s)")
 
 
 # ---------------------------------------------------------------------------

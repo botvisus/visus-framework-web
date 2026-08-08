@@ -26,7 +26,7 @@ _HELP = """targets: a field index (`3`), a bare selector (`#submit`, `//button[1
 
 commands:
   list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
-  click TARGET         click the target
+  click TARGET [btn]   click the target (btn: left|middle|right)
   fill TARGET text     fill the target with text
   check TARGET         check the target
   uncheck TARGET       uncheck the target
@@ -35,8 +35,12 @@ commands:
   type text...         type into the focused element (real key events)
   keydown key          hold a key down (e.g. Shift)
   keyup key            release a held key
+  mousemove x y        move the pointer to viewport coordinates
+  mousedown [btn]      hold a mouse button down at the pointer
+  mouseup [btn]        release a held mouse button
+  mousewheel dx dy     scroll by a wheel delta at the pointer
   hover TARGET         hover over the target
-  dblclick TARGET      double-click the target
+  dblclick TARGET [btn] double-click the target (btn: left|middle|right)
   focus TARGET         focus the target
   clear-input TARGET   clear the target's value
   upload TARGET p...   set file(s) on a file input (paths resolved locally)
@@ -147,6 +151,21 @@ def _is_confidence(token: str) -> bool:
         return 0.0 <= float(token) <= 1.0 and ("." in token or token in ("0", "1"))
     except ValueError:
         return False
+
+
+_MOUSE_BUTTONS = ("left", "middle", "right")
+
+
+def _button_arg(tokens: list[str]) -> dict[str, Any]:
+    """An optional trailing ``left``/``middle``/``right`` word after a click target.
+
+    The REPL cannot spell this as ``--button`` — ``_target`` consumes leading
+    flags and would reject an unknown one — so it is a positional word, the same
+    shape as ``press TARGET key``.
+    """
+    if tokens and tokens[0].lower() in _MOUSE_BUTTONS:
+        return {"button": tokens[0].lower()}
+    return {}
 
 
 def format_fields(
@@ -287,8 +306,8 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             result = send("list_fields", {"highlight": False})
             return format_fields(result.get("fields", []), full=want_full)
         if cmd == "click":
-            tgt, _ = _target(rest)
-            return _act("click", tgt)
+            tgt, tail = _target(rest)
+            return _act("click", {**tgt, **_button_arg(tail)})
         if cmd == "fill":
             tgt, tail = _target(rest)
             return _act("fill", {**tgt, "text": " ".join(tail)})
@@ -312,12 +331,22 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             return _act("key_down", {"key": rest[0]})
         if cmd == "keyup":
             return _act("key_up", {"key": rest[0]})
+        if cmd == "mousemove":
+            return _act("mouse_move", {"x": float(rest[0]), "y": float(rest[1])})
+        if cmd == "mousedown":
+            return _act("mouse_down", {"button": rest[0] if rest else "left"})
+        if cmd == "mouseup":
+            return _act("mouse_up", {"button": rest[0] if rest else "left"})
+        if cmd == "mousewheel":
+            return _act(
+                "mouse_wheel", {"delta_x": float(rest[0]), "delta_y": float(rest[1])}
+            )
         if cmd == "hover":
             tgt, _ = _target(rest)
             return _act("hover", tgt)
         if cmd == "dblclick":
-            tgt, _ = _target(rest)
-            return _act("dblclick", tgt)
+            tgt, tail = _target(rest)
+            return _act("dblclick", {**tgt, **_button_arg(tail)})
         if cmd == "focus":
             tgt, _ = _target(rest)
             return _act("focus", tgt)

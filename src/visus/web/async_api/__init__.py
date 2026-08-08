@@ -728,17 +728,17 @@ class AsyncMouse:
     async def move(self, x: float, y: float) -> None:
         await asyncio.to_thread(self._m.move, x, y)
 
-    async def down(self) -> None:
-        await asyncio.to_thread(self._m.down)
+    async def down(self, *, button: str = "left") -> None:
+        await asyncio.to_thread(lambda: self._m.down(button=button))
 
-    async def up(self) -> None:
-        await asyncio.to_thread(self._m.up)
+    async def up(self, *, button: str = "left") -> None:
+        await asyncio.to_thread(lambda: self._m.up(button=button))
 
-    async def click(self, x: float, y: float) -> None:
-        await asyncio.to_thread(self._m.click, x, y)
+    async def click(self, x: float, y: float, *, button: str = "left") -> None:
+        await asyncio.to_thread(lambda: self._m.click(x, y, button=button))
 
-    async def dblclick(self, x: float, y: float) -> None:
-        await asyncio.to_thread(self._m.dblclick, x, y)
+    async def dblclick(self, x: float, y: float, *, button: str = "left") -> None:
+        await asyncio.to_thread(lambda: self._m.dblclick(x, y, button=button))
 
     async def wheel(self, delta_x: float, delta_y: float) -> None:
         await asyncio.to_thread(self._m.wheel, delta_x, delta_y)

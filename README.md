@@ -337,8 +337,11 @@ command accepts `--json`.
 
 | Command | What it does |
 |---|---|
-| `visus click [idx] [target]` | Click a field. |
-| `visus dblclick [idx] [target]` | Double-click a field. |
+| `visus click [idx] [target] [--button <b>]` | Click a field (`--button left`/`middle`/`right`). |
+| `visus dblclick [idx] [target] [--button <b>]` | Double-click a field. |
+| `visus mousemove <x> <y>` | Move the pointer to absolute viewport coordinates. |
+| `visus mousedown [--button <b>]` / `visus mouseup [--button <b>]` | Press / release a mouse button at the pointer. |
+| `visus mousewheel <dx> <dy>` | Scroll by a wheel delta at the pointer (lazy-load lists, canvases). |
 | `visus fill [idx] <text> [--submit]` / `… -s <sel> --value <v>` | Fill an input; `--submit` presses Enter afterwards. |
 | `visus clear-input [idx] [target]` | Clear an input's value. |
 | `visus check` / `visus uncheck [idx] [target]` | Check / uncheck a checkbox or radio. |

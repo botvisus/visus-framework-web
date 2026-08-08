@@ -403,6 +403,9 @@ def _render_value(result: Any) -> str:
 # is the fix — same pattern as _UPLOAD_PATHS_ARG).
 _EXACT_OPT = typer.Option(False, "--exact", help="Match --role/--text exactly, not by substring.")
 _FRAME_OPT = typer.Option(None, "--frame", help="CSS selector of the iframe holding the target.")
+_BUTTON_OPT = typer.Option(
+    "left", "--button", "-b", help="Mouse button: left (default), middle or right."
+)
 
 
 def _target_args(
@@ -578,11 +581,14 @@ def click(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    button: str = _BUTTON_OPT,
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
     """Click a field by index or by --selector/--role/--text."""
     args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    if button != "left":
+        args["button"] = button  # keep the default payload minimal
     output.emit_envelope(_send_env("click", args))
 
 
@@ -731,6 +737,41 @@ def keydown(key: str = typer.Argument(..., help="Key to hold, e.g. Shift or Cont
 def keyup(key: str = typer.Argument(..., help="Key to release.")) -> None:
     """Release a key held by `visus keydown`."""
     output.emit(_send("key_up", {"key": key}))
+
+
+# ---------------------------------------------------------------------------
+# Mouse device (absolute viewport coordinates)
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def mousemove(
+    x: float = typer.Argument(..., help="Viewport X coordinate."),
+    y: float = typer.Argument(..., help="Viewport Y coordinate."),
+) -> None:
+    """Move the pointer to absolute viewport coordinates."""
+    output.emit(_send("mouse_move", {"x": x, "y": y}))
+
+
+@app.command()
+def mousedown(button: str = _BUTTON_OPT) -> None:
+    """Hold a mouse button down at the current pointer position."""
+    output.emit(_send("mouse_down", {"button": button}))
+
+
+@app.command()
+def mouseup(button: str = _BUTTON_OPT) -> None:
+    """Release a mouse button held by `visus mousedown`."""
+    output.emit(_send("mouse_up", {"button": button}))
+
+
+@app.command()
+def mousewheel(
+    delta_x: float = typer.Argument(..., help="Horizontal scroll delta in pixels."),
+    delta_y: float = typer.Argument(..., help="Vertical scroll delta in pixels."),
+) -> None:
+    """Scroll by a wheel delta at the current pointer position."""
+    output.emit(_send("mouse_wheel", {"delta_x": delta_x, "delta_y": delta_y}))
 
 
 @app.command()
@@ -1011,11 +1052,14 @@ def dblclick(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    button: str = _BUTTON_OPT,
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
     """Double-click a field by index or by --selector/--role/--text."""
     args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    if button != "left":
+        args["button"] = button
     output.emit_envelope(_send_env("dblclick", args))
 
 

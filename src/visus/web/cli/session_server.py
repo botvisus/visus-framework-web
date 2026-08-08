@@ -103,6 +103,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
         "add_cookies", "clear_cookies", "eval", "state_load",
         "type", "key_down", "key_up",
+        "mouse_move", "mouse_down", "mouse_up", "mouse_wheel",
     }
 )
 
@@ -532,8 +533,19 @@ class SessionHandler:
         return {"fields": [f.to_dict() for f in fields]}
 
     def _op_click(self, args: dict[str, Any]) -> str:
-        self._target(args).click()
-        return "clicked"
+        """Click the target.
+
+        ``button`` is ``left`` (default), ``middle`` or ``right``. A non-left
+        click goes through the pointer device at the target's centre, because
+        the actionability click path is left-button only.
+        """
+        button = str(args.get("button") or "left")
+        if button == "left":
+            self._target(args).click()
+            return "clicked"
+        x, y = self._pointer_center(args)
+        self.page().mouse.click(x, y, button=button)
+        return f"clicked with the {button} button"
 
     def _op_fill(self, args: dict[str, Any]) -> str:
         text = args.get("text", "")
@@ -722,8 +734,14 @@ class SessionHandler:
         return "hovered"
 
     def _op_dblclick(self, args: dict[str, Any]) -> str:
-        self._target(args).dblclick()
-        return "double-clicked"
+        """Double-click the target (``button``: left, middle or right)."""
+        button = str(args.get("button") or "left")
+        if button == "left":
+            self._target(args).dblclick()
+            return "double-clicked"
+        x, y = self._pointer_center(args)
+        self.page().mouse.dblclick(x, y, button=button)
+        return f"double-clicked with the {button} button"
 
     def _op_focus(self, args: dict[str, Any]) -> str:
         self._target(args).focus()
@@ -752,6 +770,44 @@ class SessionHandler:
         paths = args.get("paths") or []
         self._target(args).set_input_files(paths)
         return f"set {len(paths)} file(s)"
+
+    # --- pointer device --------------------------------------------------
+    def _pointer_center(self, args: dict[str, Any]) -> tuple[float, float]:
+        """Viewport centre of the action target, scrolled into view first.
+
+        ``Locator.bounding_box`` and ``Page.mouse`` both work in viewport
+        coordinates, so no conversion is needed between them.
+        """
+        loc = self._target(args).first()
+        loc.scroll_into_view_if_needed()
+        box = loc.bounding_box()
+        if box is None:
+            raise ValueError("target has no bounding box — it may be hidden or detached")
+        return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+    def _op_mouse_move(self, args: dict[str, Any]) -> str:
+        """Move the pointer to absolute viewport coordinates."""
+        x, y = float(args.get("x", 0)), float(args.get("y", 0))
+        self.page().mouse.move(x, y)
+        return f"moved to ({x}, {y})"
+
+    def _op_mouse_down(self, args: dict[str, Any]) -> str:
+        """Hold a mouse button down at the current pointer position."""
+        button = str(args.get("button") or "left")
+        self.page().mouse.down(button=button)
+        return f"{button} button down"
+
+    def _op_mouse_up(self, args: dict[str, Any]) -> str:
+        """Release a mouse button held by ``mouse_down``."""
+        button = str(args.get("button") or "left")
+        self.page().mouse.up(button=button)
+        return f"{button} button up"
+
+    def _op_mouse_wheel(self, args: dict[str, Any]) -> str:
+        """Scroll by a wheel delta at the current pointer position."""
+        dx, dy = float(args.get("delta_x", 0)), float(args.get("delta_y", 0))
+        self.page().mouse.wheel(dx, dy)
+        return f"scrolled by ({dx}, {dy})"
 
     # --- wait / expect ---------------------------------------------------
     def _op_wait(self, args: dict[str, Any]) -> str:

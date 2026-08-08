@@ -41,7 +41,7 @@ targets: a field index (`3`), a bare selector (`#submit`, `//button[1]`),
          or flags (`--selector #go`, `--role button --name Save`, `--text Save [--exact]`).
 
 list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
-click TARGET         click the target
+click TARGET [btn]   click the target (btn: left|middle|right)
 fill TARGET text     fill the target with text
 check TARGET         check the target
 uncheck TARGET       uncheck the target
@@ -50,8 +50,12 @@ press [TARGET] key   press a key on the target, or on the page with no target
 type text...         type into the focused element (real key events)
 keydown key          hold a key down (e.g. Shift)
 keyup key            release a held key
+mousemove x y        move the pointer to viewport coordinates
+mousedown [btn]      hold a mouse button down at the pointer
+mouseup [btn]        release a held mouse button
+mousewheel dx dy     scroll by a wheel delta at the pointer
 hover TARGET         hover over the target
-dblclick TARGET      double-click the target
+dblclick TARGET [btn] double-click the target (btn: left|middle|right)
 focus TARGET         focus the target
 clear-input TARGET   clear the target's value
 upload TARGET p...   set file(s) on a file input (paths resolved locally)

@@ -53,8 +53,11 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 
 | Command | What it does |
 |---|---|
-| `visus click [idx] [target]` | Click a field. |
-| `visus dblclick [idx] [target]` | Double-click a field. |
+| `visus click [idx] [target] [--button <b>] [-b <b>]` | Click a field. `--button` is `left` (default), `middle` or `right` — a right click opens the page's context menu, a middle click is open-in-new-tab. A non-left click goes through the pointer device at the target's centre, because the auto-waiting click path is left-button only. |
+| `visus dblclick [idx] [target] [--button <b>]` | Double-click a field. |
+| `visus mousemove <x> <y>` | Move the pointer to absolute **viewport** coordinates. |
+| `visus mousedown [--button <b>]` / `visus mouseup [--button <b>]` | Press / release a mouse button at the current pointer position — a drag is `mousemove`, `mousedown`, `mousemove`, `mouseup`. |
+| `visus mousewheel <dx> <dy>` | Scroll by a wheel delta at the pointer: the way to drive lazy-loading lists and canvases. Note Chrome enters autoscroll after a **middle** click and swallows the next wheel until the pointer moves again. |
 | `visus fill [idx] <text> [--submit]` / `… -s <sel> --value <v>` | Fill an input. `--submit` presses Enter on the same element afterwards, which submits most forms in one command instead of two. |
 | `visus clear-input [idx] [target]` | Clear an input's value. |
 | `visus check` / `visus uncheck [idx] [target]` | Check / uncheck a checkbox or radio. |

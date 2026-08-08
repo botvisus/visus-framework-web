@@ -22,21 +22,24 @@ class Mouse:
         """Move the mouse pointer to absolute viewport coordinates (x, y)."""
         self._d.mouse_move(x, y)
 
-    def down(self) -> None:
-        """Press (hold) the primary mouse button at the current position."""
-        self._d.mouse_down()
+    def down(self, *, button: str = "left") -> None:
+        """Press (hold) a mouse button at the current position.
 
-    def up(self) -> None:
-        """Release the primary mouse button."""
-        self._d.mouse_up()
+        ``button`` is ``"left"`` (default), ``"middle"`` or ``"right"``.
+        """
+        self._d.mouse_down(button=button)
 
-    def click(self, x: float, y: float) -> None:
-        """Move to (x, y) and perform a single left-click."""
-        self._d.mouse_click(x, y)
+    def up(self, *, button: str = "left") -> None:
+        """Release a held mouse button (``"left"``, ``"middle"`` or ``"right"``)."""
+        self._d.mouse_up(button=button)
 
-    def dblclick(self, x: float, y: float) -> None:
-        """Move to (x, y) and perform a double left-click."""
-        self._d.mouse_dblclick(x, y)
+    def click(self, x: float, y: float, *, button: str = "left") -> None:
+        """Move to (x, y) and perform a single click with ``button``."""
+        self._d.mouse_click(x, y, button=button)
+
+    def dblclick(self, x: float, y: float, *, button: str = "left") -> None:
+        """Move to (x, y) and perform a double click with ``button``."""
+        self._d.mouse_dblclick(x, y, button=button)
 
     def wheel(self, delta_x: float, delta_y: float) -> None:
         """Scroll by (delta_x, delta_y) pixels at the current pointer position."""

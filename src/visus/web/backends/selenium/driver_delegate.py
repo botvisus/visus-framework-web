@@ -17,6 +17,7 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
+from selenium.webdriver.common.actions.mouse_button import MouseButton
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
@@ -47,6 +48,20 @@ _KEYMAP = {
     "End": Keys.END,
 }
 _MODMAP = {"Control": Keys.CONTROL, "Shift": Keys.SHIFT, "Alt": Keys.ALT, "Meta": Keys.META}
+
+# Public button names → the W3C pointer button index. Kept here (never in a
+# public signature) so the hidden-engine rule holds: callers pass a plain str.
+_BUTTONS = {"left": MouseButton.LEFT, "middle": MouseButton.MIDDLE, "right": MouseButton.RIGHT}
+
+
+def _pointer_button(name: str) -> int:
+    """Map ``"left"``/``"middle"``/``"right"`` to the pointer button index (0/1/2)."""
+    try:
+        return int(_BUTTONS[name.lower()])
+    except KeyError:
+        raise errors.VisusWebError(
+            f"unknown mouse button {name!r} — use 'left', 'middle' or 'right'"
+        ) from None
 
 
 def _parse_key(key: str) -> tuple[list[str], str]:
@@ -804,39 +819,41 @@ class SeleniumPageDelegate:
         ab.pointer_action.move_to_location(self._mouse_x, self._mouse_y)  # type: ignore[no-untyped-call]
         ab.perform()
 
-    def mouse_down(self) -> None:
+    def mouse_down(self, *, button: str = "left") -> None:
         self._activate()
         ab = ActionBuilder(self._driver)
-        ab.pointer_action.pointer_down()  # type: ignore[no-untyped-call]
+        ab.pointer_action.pointer_down(_pointer_button(button))  # type: ignore[no-untyped-call]
         ab.perform()
 
-    def mouse_up(self) -> None:
+    def mouse_up(self, *, button: str = "left") -> None:
         self._activate()
         ab = ActionBuilder(self._driver)
-        ab.pointer_action.pointer_up()  # type: ignore[no-untyped-call]
+        ab.pointer_action.pointer_up(_pointer_button(button))  # type: ignore[no-untyped-call]
         ab.perform()
 
-    def mouse_click(self, x: float, y: float) -> None:
+    def mouse_click(self, x: float, y: float, *, button: str = "left") -> None:
         self._activate()
         self._mouse_x, self._mouse_y = int(x), int(y)
+        b = _pointer_button(button)
         ab = ActionBuilder(self._driver)
         ab.pointer_action.move_to_location(  # type: ignore[no-untyped-call]
             self._mouse_x, self._mouse_y
-        ).pointer_down().pointer_up()
+        ).pointer_down(b).pointer_up(b)
         ab.perform()
 
-    def mouse_dblclick(self, x: float, y: float) -> None:
+    def mouse_dblclick(self, x: float, y: float, *, button: str = "left") -> None:
         self._activate()
         self._mouse_x, self._mouse_y = int(x), int(y)
+        b = _pointer_button(button)
         ab = ActionBuilder(self._driver)
         (
             ab.pointer_action.move_to_location(  # type: ignore[no-untyped-call]
                 self._mouse_x, self._mouse_y
             )
-            .pointer_down()
-            .pointer_up()
-            .pointer_down()
-            .pointer_up()
+            .pointer_down(b)
+            .pointer_up(b)
+            .pointer_down(b)
+            .pointer_up(b)
         )
         ab.perform()
 

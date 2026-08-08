@@ -1016,8 +1016,8 @@ async def test_async_mouse_down_up() -> None:
     am = AsyncMouse(m)
     await am.down()
     await am.up()
-    m.down.assert_called_once()
-    m.up.assert_called_once()
+    m.down.assert_called_once_with(button="left")
+    m.up.assert_called_once_with(button="left")
 
 
 async def test_async_mouse_click_dblclick() -> None:
@@ -1025,8 +1025,18 @@ async def test_async_mouse_click_dblclick() -> None:
     am = AsyncMouse(m)
     await am.click(1.0, 2.0)
     await am.dblclick(3.0, 4.0)
-    m.click.assert_called_once_with(1.0, 2.0)
-    m.dblclick.assert_called_once_with(3.0, 4.0)
+    m.click.assert_called_once_with(1.0, 2.0, button="left")
+    m.dblclick.assert_called_once_with(3.0, 4.0, button="left")
+
+
+async def test_async_mouse_forwards_a_non_left_button() -> None:
+    """The async mirror must carry `button` through, not silently drop it."""
+    m = MagicMock()
+    am = AsyncMouse(m)
+    await am.down(button="right")
+    await am.click(5.0, 6.0, button="middle")
+    m.down.assert_called_once_with(button="right")
+    m.click.assert_called_once_with(5.0, 6.0, button="middle")
 
 
 async def test_async_mouse_wheel() -> None:

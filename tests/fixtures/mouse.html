@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <title>mouse fixture</title>
+    <style>
+      #pad { position: absolute; left: 0; top: 60px; width: 300px; height: 160px; background: #eee; }
+    </style>
+  </head>
+  <body>
+    <div id="pad">pad</div>
+    <div id="ctxres"></div>
+    <div id="auxres"></div>
+    <div id="downres"></div>
+    <div id="upres"></div>
+    <div id="wheelres"></div>
+    <script>
+      // e.button: 0 = left, 1 = middle, 2 = right. Every result div records the
+      // button index so a test can prove WHICH button the CLI actually sent.
+      var pad = document.getElementById('pad');
+      pad.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        document.getElementById('ctxres').textContent = 'context';
+      });
+      pad.addEventListener('auxclick', function (e) {
+        document.getElementById('auxres').textContent = 'aux-' + e.button;
+      });
+      pad.addEventListener('mousedown', function (e) {
+        document.getElementById('downres').textContent = 'down-' + e.button;
+      });
+      pad.addEventListener('mouseup', function (e) {
+        document.getElementById('upres').textContent = 'up-' + e.button;
+      });
+      window.addEventListener('wheel', function (e) {
+        document.getElementById('wheelres').textContent = 'wheel-' + Math.round(e.deltaY);
+      }, { passive: true });
+    </script>
+  </body>
+</html>

@@ -115,17 +115,17 @@ class _CapturingFakePage:
     def mouse_move(self, x, y):
         self.calls.append(("mouse_move", x, y))
 
-    def mouse_down(self):
-        self.calls.append(("mouse_down",))
+    def mouse_down(self, *, button="left"):
+        self.calls.append(("mouse_down", button))
 
-    def mouse_up(self):
-        self.calls.append(("mouse_up",))
+    def mouse_up(self, *, button="left"):
+        self.calls.append(("mouse_up", button))
 
-    def mouse_click(self, x, y):
-        self.calls.append(("mouse_click", x, y))
+    def mouse_click(self, x, y, *, button="left"):
+        self.calls.append(("mouse_click", x, y, button))
 
-    def mouse_dblclick(self, x, y):
-        self.calls.append(("mouse_dblclick", x, y))
+    def mouse_dblclick(self, x, y, *, button="left"):
+        self.calls.append(("mouse_dblclick", x, y, button))
 
     def mouse_wheel(self, delta_x, delta_y):
         self.calls.append(("mouse_wheel", delta_x, delta_y))
@@ -173,19 +173,19 @@ class TestMouseProperty:
 
     def test_mouse_down_delegates(self, page, fake_page):
         page.mouse.down()
-        assert ("mouse_down",) in fake_page.calls
+        assert ("mouse_down", "left") in fake_page.calls
 
     def test_mouse_up_delegates(self, page, fake_page):
         page.mouse.up()
-        assert ("mouse_up",) in fake_page.calls
+        assert ("mouse_up", "left") in fake_page.calls
 
     def test_mouse_click_delegates(self, page, fake_page):
         page.mouse.click(100.0, 200.0)
-        assert ("mouse_click", 100.0, 200.0) in fake_page.calls
+        assert ("mouse_click", 100.0, 200.0, "left") in fake_page.calls
 
     def test_mouse_dblclick_delegates(self, page, fake_page):
         page.mouse.dblclick(50.0, 75.0)
-        assert ("mouse_dblclick", 50.0, 75.0) in fake_page.calls
+        assert ("mouse_dblclick", 50.0, 75.0, "left") in fake_page.calls
 
     def test_mouse_wheel_delegates(self, page, fake_page):
         page.mouse.wheel(0.0, 120.0)

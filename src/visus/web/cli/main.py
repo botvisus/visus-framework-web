@@ -61,6 +61,12 @@ def _root(
         envvar="VISUS_WEB_SESSION",
         help="Session name (default: 'default'). `-s` is --selector, so this is -S.",
     ),
+    config: str = typer.Option(
+        None,
+        "--config",
+        envvar="VISUS_WEB_CONFIG",
+        help="Config file (default: the nearest .visus/cli.json).",
+    ),
 ) -> None:
     """Global entry point for every `visus` subcommand.
 
@@ -72,21 +78,33 @@ def _root(
     """
     # Local import: PLAN 1 keeps it inside the function so `visus` still starts
     # when the skill package is unreadable.
+    from visus.web.cli import config as cliconfig
+    from visus.web.cli import session_client
     from visus.web.cli.skill_check import check_installed_skills
 
     # set_mode FIRST (PLAN 1's extension contract, rule 3): a skill-drift warning
-    # must never be written before the output mode is decided.
+    # must never be written before the output mode is decided. Everything below
+    # can fail, and every failure leaves through emit_error, which formats itself
+    # according to the mode.
     output.set_mode(as_json=as_json, raw=raw)
-    output.set_output_dir(output_dir)
     output.set_snapshot_sink(snapshot_sink)
+
+    try:
+        cfg = cliconfig.resolve(config)
+    except cliconfig.ConfigError as exc:
+        output.emit_error(str(exc))
+    cliconfig.set_active(cfg)
+
+    # An explicit flag always wins over the config file (`is_default` is not needed
+    # here: `--session`/`--output-dir` default to None, so `or`/`is not None` is the
+    # same test).
+    output.set_output_dir(output_dir if output_dir is not None else cfg.output_dir)
     # AFTER set_mode (PLAN 1's rule 3) so an invalid name leaves through
     # emit_error formatted for the active mode, and BEFORE the skill check.
     # The try/except is _root's only error funnel: without it a bad name would
     # be a traceback rather than a clean exit 1 on stderr.
-    from visus.web.cli import session_client
-
     try:
-        session_client.set_session_name(session)
+        session_client.set_session_name(session or cfg.session)
     except session_client.SessionError as exc:
         output.emit_error(f"error: {exc}")
     # The guard tuple is PLAN 1's constant — never re-inline the literal, and never
@@ -632,6 +650,7 @@ def _target_args(
 
 @session_app.command("start")
 def session_start(
+    ctx: typer.Context,
     url: str = typer.Argument(None, help="URL to open once the browser starts."),
     engine: str = typer.Option(
         "chrome", "--engine", "-e", "--browser", help="chrome | edge | firefox | edge_ie."
@@ -675,7 +694,32 @@ def session_start(
 ) -> None:
     """Start a persistent browser session (detached daemon)."""
     from visus.web.api.devices import DEFAULT_MOBILE, get_device
+    from visus.web.cli import config as cliconfig
     from visus.web.cli import session_client
+
+    # The config supplies DEFAULTS only: is_default asks click where each value
+    # came from, so anything the user actually typed is left untouched.
+    cfg = cliconfig.active()
+    if cliconfig.is_default(ctx, "engine") and cfg.engine:
+        engine = cfg.engine
+    if cliconfig.is_default(ctx, "headless") and cfg.headless is not None:
+        headless = cfg.headless
+    if cliconfig.is_default(ctx, "url") and cfg.url:
+        url = cfg.url
+    if cliconfig.is_default(ctx, "device") and cfg.device:
+        device = cfg.device
+    if cliconfig.is_default(ctx, "persistent") and cfg.persistent is not None:
+        persistent = cfg.persistent
+    if cliconfig.is_default(ctx, "user_data_dir") and cfg.user_data_dir:
+        user_data_dir = cfg.user_data_dir
+    if cliconfig.is_default(ctx, "remote_url") and cfg.remote_url:
+        remote_url = cfg.remote_url
+    if cliconfig.is_default(ctx, "slow_mo") and cfg.slow_mo is not None:
+        slow_mo = cfg.slow_mo
+    if cliconfig.is_default(ctx, "idle_timeout") and cfg.idle_timeout is not None:
+        idle_timeout = cfg.idle_timeout
+    if cliconfig.is_default(ctx, "allow_run_code") and cfg.allow_run_code is not None:
+        allow_run_code = cfg.allow_run_code
 
     chosen = [flag for flag, on in (("--persistent", persistent), ("--profile", profile)) if on]
     if user_data_dir and chosen:

@@ -461,6 +461,34 @@ real request never leaves the browser, so there is nothing to strip from it.
 
 </details>
 
+### Config file
+
+Put shared defaults in `.visus/cli.json` (discovered from the current directory upward, like
+`.git`), or point at one with `visus --config <path>`. Every value is a **default** — an option
+you actually type always wins.
+
+```json
+{
+  "session": "default",
+  "engine": "chrome",
+  "headless": false,
+  "url": "https://app.example.com",
+  "device": "iPhone 15",
+  "persistent": true,
+  "userDataDir": "./profiles/main",
+  "remoteUrl": "http://grid:4444/wd/hub",
+  "slowMo": 0,
+  "idleTimeout": 600,
+  "allowRunCode": false,
+  "outputDir": "artifacts"
+}
+```
+
+Relative `userDataDir` / `outputDir` values resolve against the config file's **project**
+directory — the parent of `.visus`, so `"artifacts"` means `repo/artifacts` — which makes a config
+in the repo root mean the same thing from every subdirectory. An unknown key is an error naming
+the key; a typo never silently does nothing.
+
 ---
 
 ## Python usage guide
@@ -946,6 +974,7 @@ Default timeouts (`visus.web.config.Defaults`, all in ms): `action_timeout_ms = 
 | `VISUS_WEB_URL` | CLI session | — | Initial URL opened when the daemon starts. |
 | `VISUS_WEB_SESSION` | CLI session | `default` | Session name (same as `--session` / `-S`). |
 | `VISUS_WEB_HOME` | CLI session | `~/.visus` | Where the cross-project session registry lives. |
+| `VISUS_WEB_CONFIG` | CLI | — | Config file path (same as `--config`). |
 | `VISUS_WEB_USER_DATA_DIR` | CLI session | — | Persistent browser profile directory for the daemon. |
 | `VISUS_WEB_REMOTE_URL` | CLI session | — | Selenium Grid / Remote WebDriver URL for the daemon. |
 | `VISUS_WEB_SLOW_MO` | CLI session | `0` | Delay every daemon action by this many milliseconds. |

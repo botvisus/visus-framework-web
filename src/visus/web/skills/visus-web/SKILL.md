@@ -21,6 +21,9 @@ visus doctor                   # prove a browser + driver really launch
 
 No install rights? `uvx --from "visus-web[cli]" visus doctor`.
 Console script not on PATH? `python -m visus.web.cli doctor`.
+**`visus` runs something else?** visus-desktop claims the same name; in an
+environment with both, `visus-web` is the alias that only ever means this tool —
+every command below works under either name.
 
 Extras: `[cli]` the CLI · `[mcp]` the MCP server · `[vision]` OCR + image matching.
 

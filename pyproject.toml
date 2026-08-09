@@ -115,6 +115,11 @@ docs = [
 
 [project.scripts]
 visus = "visus.web.cli._entry:cli_main"
+# `visus` COLIDE: visus-desktop declara esse mesmo nome, então num ambiente com os
+# dois quem instalou por último fica com o arquivo — e um agente que leu a skill
+# do web mandaria comandos de browser para o CLI de desktop, em silêncio. Este
+# alias é o nome que sempre significa web, em qualquer instalação.
+visus-web = "visus.web.cli._entry:cli_main"
 visus-web-mcp = "visus.web.cli._entry:mcp_main"
 
 [project.entry-points.pytest11]

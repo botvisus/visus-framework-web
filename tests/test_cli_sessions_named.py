@@ -335,8 +335,14 @@ def test_the_upward_walk_does_not_mistake_the_registry_for_a_project(
     project = home / "code" / "project"
     project.mkdir(parents=True)
 
-    assert session_client._find_sessions_dir(project) is None
+    # Asserts the registry is SKIPPED, not that the walk finds nothing: tmp_path
+    # lives under the real %TEMP%, and any `.visus` a developer (or an earlier
+    # test) left in an ancestor is a legitimate find that says nothing about the
+    # rule under test.
+    fake_registry = home / ".visus" / "sessions"
+    assert session_client._find_sessions_dir(project) != fake_registry
     assert session_client._find_session_file(project, "other") is None
+    assert session_client._is_registry(fake_registry)
     # the DEFAULT ~/.visus is a registry too, even with the override pointed away
     assert session_client._is_registry(Path.home() / ".visus" / "sessions")
 

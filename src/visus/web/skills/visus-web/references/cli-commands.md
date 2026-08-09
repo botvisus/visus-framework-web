@@ -74,7 +74,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus hover` / `visus focus [idx] [target]` | Hover / focus a field. |
 | `visus drag <src> <dst>` / `… --to-selector` | Drag a source element onto a target. |
 | `visus drop [idx] [target] --path <f>` / `--data <t> [--data-type <ct>]` | The THIRD case, which neither `drag` nor `upload` reaches: a dropzone with no `<input type=file>`, which only reacts to a `DragEvent` carrying a `DataTransfer` from outside the page. `--path` reads the file on the client (so the path is relative to your cwd), base64s it, and rebuilds a real `File` in the page; `--data` drops text under `--data-type` (default `text/plain`). Fires `dragenter`, `dragover`, `drop` in order and reports how many files and which types landed. |
-| `visus upload [idx] <paths…>` | Set file(s) on a file input. |
+| `visus upload [idx] <paths…>` | Set file(s) on a file input; paths resolve against YOUR cwd. **The target is optional** — with none, visus finds the page's single `<input type=file>`, including one hidden behind a styled "Choose a file" button (the shape an OS file chooser normally hides). No chooser dialog is ever opened. Zero inputs points you at `visus drop --path`; two or more refuses and tells you to pick one with `list-fields` + an index. A leading all-digits token IS that index — for a file literally named `2`, pass `./2` or use `--selector`. |
 
 ### Wait / assert
 

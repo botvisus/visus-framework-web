@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head><title>upload fixture</title></head>
+  <body>
+    <!-- The common real-world shape: a styled button whose click() proxies to a
+         hidden input. Targeting the INPUT works without ever opening the OS
+         file chooser the button would normally raise. -->
+    <button id="pick" onclick="document.getElementById('hidden_file').click()">
+      Choose a file
+    </button>
+    <input id="hidden_file" type="file" style="display:none" />
+    <pre id="out">idle</pre>
+    <script>
+      document.getElementById('hidden_file').addEventListener('change', function (e) {
+        var names = Array.prototype.map.call(e.target.files, function (f) { return f.name; });
+        document.getElementById('out').textContent = names.join(',');
+      });
+    </script>
+  </body>
+</html>

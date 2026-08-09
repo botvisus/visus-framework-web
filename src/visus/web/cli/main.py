@@ -1535,12 +1535,14 @@ def drop(
 
 # Module-level singleton default (B008: a function call cannot be a mutable
 # list-typed default inline; reading it from a module variable is the fix).
-_UPLOAD_PATHS_ARG = typer.Argument(None, help="One or more file paths to upload.")
+_UPLOAD_PATHS_ARG = typer.Argument(
+    None,
+    help="One or more file paths. A leading all-digits token is read as a field index.",
+)
 
 
 @app.command()
 def upload(
-    index: int = typer.Argument(None, help="File-input field index from the last list-fields."),
     paths: list[str] = _UPLOAD_PATHS_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
@@ -1549,12 +1551,32 @@ def upload(
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
-    """Set file(s) on a file input. By index: `visus upload 4 a.png b.png`."""
-    if not paths:
+    """Set file(s) on a file input.
+
+    With no target visus finds the page's single `<input type=file>` — including
+    one hidden behind a styled "Choose a file" button, which is the shape a file
+    chooser normally hides::
+
+        visus upload ./avatar.png
+        visus upload 4 a.png b.png
+
+    The index is not a separate typed argument: `index: int` first would make
+    typer reject `visus upload ./a.png` as a bad integer before the body ever
+    runs. A leading ALL-DIGITS token is the index instead — the same rule the
+    REPL uses. Name a file called `2` with `--selector` or `./2`.
+    """
+    tokens = list(paths or [])
+    index: int | None = None
+    if tokens and tokens[0].isdigit():
+        index = int(tokens[0])
+        tokens = tokens[1:]
+    if not tokens:
         output.emit_error("error: provide at least one file path to upload")
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    args: dict[str, Any] = {}
+    if index is not None or selector or role or text:
+        args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     # Resolve paths against the CLIENT's cwd so the daemon receives absolute paths.
-    args["paths"] = [str(Path(p).resolve()) for p in paths]
+    args["paths"] = [str(Path(p).resolve()) for p in tokens]
     output.emit_envelope(_send_env("upload", args))
 
 

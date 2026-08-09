@@ -1048,9 +1048,35 @@ class SessionHandler:
         result = self._target(args).evaluate(_DROP_JS, payload)
         return {"dropped": result}
 
+    def _only_file_input(self) -> Locator:
+        """The page's single ``<input type=file>`` — the target-free ``visus upload``.
+
+        No OS file-chooser interception is needed: a button that "opens the file
+        chooser" is proxying for an input, and setting files on that input is both
+        simpler and more reliable than driving a native dialog. Hidden inputs count
+        — sites routinely hide them behind a styled button.
+        """
+        loc = self.page().locator('input[type="file"]', deep=True)
+        found = loc.count()
+        if found == 0:
+            raise errors.ElementNotFoundError(
+                "no <input type=file> on this page — open the form that reveals one, "
+                "or use `visus drop --path <file>` for a dropzone that has none"
+            )
+        if found > 1:
+            raise errors.StrictModeViolation(
+                f"{found} file inputs on this page — name one explicitly: run "
+                "`visus list-fields` and pass its index, e.g. `visus upload 4 a.png`"
+            )
+        return loc.first()
+
     def _op_upload(self, args: dict[str, Any]) -> str:
+        """Set file(s) on a file input — the target is optional."""
         paths = args.get("paths") or []
-        self._target(args).set_input_files(paths)
+        if not paths:
+            raise ValueError("upload: provide at least one file path")
+        target = self._target(args) if self._has_target(args) else self._only_file_input()
+        target.set_input_files(paths)
         return f"set {len(paths)} file(s)"
 
     # --- pointer device --------------------------------------------------

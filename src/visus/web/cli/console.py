@@ -44,7 +44,7 @@ commands:
   focus TARGET         focus the target
   clear-input TARGET   clear the target's value
   drop TARGET text...  drop a text payload onto the target (files: use `visus drop --path`)
-  upload TARGET p...   set file(s) on a file input (paths resolved locally)
+  upload [TARGET] p... set file(s) on a file input (omit TARGET to find the only one)
   drag TARGET TARGET   drag the first target onto the second
   goto url             navigate to url
   back                 navigate back in history
@@ -398,11 +398,19 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             dropped = r.get("dropped", {})
             return f"dropped {dropped.get('files', 0)} file(s), types {dropped.get('types', [])}"
         if cmd == "upload":
-            tgt, tail = _target(rest)
-            if not tail:
+            # NOT _target(rest): a bare `upload ./a.png` would parse the path as a
+            # selector. The target is optional here — the daemon finds the page's
+            # only file input when none is given.
+            files = list(rest)
+            upload_args: dict[str, Any] = {}
+            if files and files[0].isdigit():
+                upload_args["index"] = int(files[0])
+                files = files[1:]
+            if not files:
                 return "missing file path(s) for `upload` (try `help`)"
-            paths = [str(Path(p).resolve()) for p in tail]
-            return _act("upload", {**tgt, "paths": paths})
+            # Resolve against the CLIENT's cwd, not the daemon's (see main.upload).
+            upload_args["paths"] = [str(Path(p).resolve()) for p in files]
+            return str(send("upload", upload_args))
         if cmd == "drag":
             tgt, tail = _target(rest)
             return _act("drag", {**tgt, **_drag_target(tail)})

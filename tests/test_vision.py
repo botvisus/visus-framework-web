@@ -173,3 +173,54 @@ def test_loader_invalid_base64() -> None:
 
     with pytest.raises(ValueError, match="valid base64"):
         _to_ndarray("this-is-not-a-file-and-not-base64!!!")
+
+
+# ---------------------------------------------------------------------------
+# OCR with geometry
+# ---------------------------------------------------------------------------
+
+
+def test_read_text_boxes_returns_geometry() -> None:
+    from visus.web.vision import TextBox, read_text_boxes
+
+    boxes = read_text_boxes(_text_img("SUBMIT"))
+    assert boxes, "expected at least one recognised text run"
+    assert all(isinstance(b, TextBox) for b in boxes)
+    hit = next(b for b in boxes if _norm(b.text) == "SUBMIT")
+    # The helper draws at (20, 20) at 60px on a 600x130 canvas.
+    assert 0 <= hit.x < 120, hit
+    assert 0 <= hit.y < 120, hit
+    assert hit.width > 50 and hit.height > 20, hit
+    assert 0.0 < hit.confidence <= 1.0
+    assert hit.center_x == hit.x + hit.width // 2
+    assert hit.center_y == hit.y + hit.height // 2
+
+
+def test_read_text_boxes_on_a_blank_image_is_empty() -> None:
+    from visus.web.vision import read_text_boxes
+
+    assert read_text_boxes(Image.new("RGB", (200, 60), "white")) == []
+
+
+def test_find_text_matches_case_insensitively_by_substring() -> None:
+    from visus.web.vision import find_text
+
+    img = _text_img("SUBMIT")
+    assert find_text(img, "submit") is not None
+    assert find_text(img, "ubmi") is not None
+    assert find_text(img, "cancel") is None
+
+
+def test_find_text_exact_requires_the_whole_run() -> None:
+    from visus.web.vision import find_text
+
+    img = _text_img("SUBMIT")
+    assert find_text(img, "SUBMIT", exact=True) is not None
+    assert find_text(img, "ubmi", exact=True) is None
+
+
+def test_read_text_still_joins_every_run() -> None:
+    """The existing read_text contract is unchanged by the refactor."""
+    from visus.web.vision import read_text
+
+    assert _norm(read_text(_text_img("HELLOWORLD"))) == "HELLOWORLD"

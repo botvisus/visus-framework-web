@@ -235,3 +235,23 @@ def test_repl_help_lists_the_route_commands() -> None:
     out = console.dispatch("help", lambda op, args: None)
     for line in ("route ", "unroute", "routes"):
         assert line in out, f"{line!r} missing from the REPL help"
+
+
+def test_every_command_this_plan_added_has_a_repl_twin_and_a_readme_row() -> None:
+    from pathlib import Path as _Path
+
+    readme = _Path("README.md").read_text(encoding="utf-8")
+    repl_source = _Path("src/visus/web/cli/console.py").read_text(encoding="utf-8")
+
+    for name in ("devices", "drop", "route", "route-list", "run-code", "unroute", "upload"):
+        assert f"visus {name}" in readme, f"`visus {name}` has no README row"
+
+    # Session-lifecycle commands intentionally have NO repl twin: the REPL runs
+    # inside a session, and each of these either ends it or reports on others.
+    for name in ("session list", "session close-all", "session kill-all",
+                 "session delete-data", "session attach", "session detach"):
+        assert f"visus {name}" in readme, f"`visus {name}` has no README row"
+
+    for repl in ("drop", "route", "unroute", "routes", "run-code", "upload"):
+        assert f'cmd == "{repl}"' in repl_source, f"{repl!r} missing from console.dispatch"
+        assert repl in console._HELP, f"{repl!r} missing from the REPL help text"

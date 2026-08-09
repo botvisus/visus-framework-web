@@ -99,6 +99,13 @@ cli = [
     # long-option parsing `--skills=agents` is pinned against.
     "click>=8.2.0,<9",
 ]
+# Run video (docs/design/video-screencast.md). Frame capture itself needs
+# nothing — it polls page.screenshot() — so these are the ASSEMBLY dependencies:
+# imageio-ffmpeg supplies the encoder, pillow the frame handling.
+video = [
+    "imageio-ffmpeg>=0.4.9",
+    "pillow>=10.0.0",
+]
 docs = [
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.0",

@@ -176,3 +176,38 @@ def test_aria_snapshot_on_failure(browser, base_url, tmp_path):
     assert snap is not None, "aria_snapshot must be present on failure"
     assert isinstance(snap, list), f"aria_snapshot should be list, got {type(snap)}"
     assert len(snap) > 0, "aria_snapshot should be non-empty on a real page"
+
+
+@pytest.mark.browser
+def test_capture_frames_records_a_changing_page(browser):
+    """Frames must actually differ — a capture that repeats one frame is not video."""
+    from visus.web.observability.video import capture_frames
+
+    page = browser.new_page()
+    # No `%` anywhere in this URL: a data: URL percent-DECODES, so a modulo
+    # written as `%240` becomes `$0` and the whole script is a syntax error —
+    # the div then never repaints and every frame is identical.
+    page.goto(
+        "data:text/html,<body style='margin:0'>"
+        "<div id=b style='width:400px;height:200px;background:rgb(0,0,0)'></div>"
+        "<script>var n=0;setInterval(function(){n=n+40;if(n>240){n=0;}"
+        "document.getElementById('b').style.background='rgb('+n+','+n+','+n+')';},80);</script>"
+    )
+    frames = capture_frames(page, fps=5, duration_ms=1200)
+    assert len(frames) >= 4, f"expected at least 4 frames, got {len(frames)}"
+    assert all(f.startswith(b"\x89PNG") for f in frames)
+    assert len(set(frames)) >= 2, "every captured frame was identical"
+
+
+@pytest.mark.browser
+def test_cdp_screencast_availability_is_reported_not_assumed(browser):
+    """The spike's whole point: record the answer instead of guessing it.
+
+    Whatever this returns, capture_frames must still work — the design document
+    records the value observed here and justifies the chosen mechanism.
+    """
+    from visus.web.observability.video import cdp_screencast_available
+
+    page = browser.new_page()
+    page.goto("data:text/html,<title>probe</title>")
+    assert isinstance(cdp_screencast_available(page), bool)

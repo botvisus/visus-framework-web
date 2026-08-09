@@ -16,9 +16,13 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP, Image
 
 from visus.web.api.assertions import expect
-from visus.web.mcp.session import Session, make_locator
+from visus.web.mcp.session import Session
 from visus.web.ops.remote import RemoteDispatcher
 from visus.web.ops.targeting import any_match_visible as _any_match_visible
+
+# `make_locator` is deliberately NOT imported here any more: every tool resolves
+# through `_session.target()`, so one payload dict works locally and across the
+# daemon socket alike. `mcp.session` still re-exports it for Task 1's identity test.
 
 mcp = FastMCP("visus-web")
 _session = Session()
@@ -98,33 +102,57 @@ def _acted(env: dict[str, Any], message: str) -> str:
 @mcp.tool()
 def browser_navigate(url: str) -> str:
     """Navigate the browser to a URL and return the resulting title."""
-    page = _session.page()
-    page.goto(url)
-    return f"navigated to {page.url!r} (title: {page.title()!r})"
+
+    def _local() -> str:
+        page = _session.page()
+        page.goto(url)
+        _session.invalidate_fields()  # cached indexes belonged to the previous page
+        return page.url
+
+    env = _run("goto", {"url": url}, _local)
+    return _acted(env, f"navigated to {env['result']!r}")
 
 
 @mcp.tool()
 def browser_navigate_back() -> str:
     """Navigate back in browser history."""
-    page = _session.page()
-    page.go_back()
-    return f"went back → {page.url!r}"
+
+    def _local() -> str:
+        page = _session.page()
+        page.go_back()
+        _session.invalidate_fields()  # cached indexes belonged to the previous page
+        return page.url
+
+    env = _run("back", {}, _local)
+    return _acted(env, f"went back → {env['result']!r}")
 
 
 @mcp.tool()
 def browser_navigate_forward() -> str:
     """Navigate forward in browser history."""
-    page = _session.page()
-    page.go_forward()
-    return f"went forward → {page.url!r}"
+
+    def _local() -> str:
+        page = _session.page()
+        page.go_forward()
+        _session.invalidate_fields()  # cached indexes belonged to the previous page
+        return page.url
+
+    env = _run("forward", {}, _local)
+    return _acted(env, f"went forward → {env['result']!r}")
 
 
 @mcp.tool()
 def browser_reload() -> str:
     """Reload the current page."""
-    page = _session.page()
-    page.reload()
-    return f"reloaded {page.url!r}"
+
+    def _local() -> str:
+        page = _session.page()
+        page.reload()
+        _session.invalidate_fields()  # cached indexes belonged to the previous page
+        return page.url
+
+    env = _run("reload", {}, _local)
+    return _acted(env, f"reloaded {env['result']!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -133,13 +161,25 @@ def browser_reload() -> str:
 
 
 @mcp.tool()
-def browser_snapshot() -> list[dict]:  # type: ignore[type-arg]
+def browser_snapshot(
+    selector: str | None = None,
+    depth: int | None = None,
+) -> list[dict]:  # type: ignore[type-arg]
     """Return the page's interactive elements as a list of {role, name, depth} dicts.
 
     Use role/name to target action tools without needing CSS selectors. depth is
-    how many element levels below <body> the element sits.
+    how many element levels below <body> the element sits; pass *depth* to keep
+    only elements at most that many levels below the root, and *selector* to
+    scope the walk to one subtree. Each row's ``ref`` is a live browser_list_fields
+    index, so it can be passed straight to an action tool as ``index``.
     """
-    return _session.page().snapshot()
+    args: dict[str, Any] = {"selector": selector, "depth": depth}
+
+    def _local() -> dict[str, Any]:
+        return {"elements": _session.page().snapshot(selector, depth=depth)}
+
+    elements: list[dict[str, Any]] = _run("snapshot", args, _local)["result"]["elements"]
+    return elements
 
 
 @mcp.tool()
@@ -153,9 +193,13 @@ def browser_list_fields(
     Enumerates buttons, inputs, textareas, links, selects, checkboxes/radios,
     custom dropdowns, and contenteditable elements — framework-agnostically,
     across open shadow DOM and same-origin iframes. Each returned dict carries a
-    ready-to-use locator plus the frame chain and a deep flag so the field can be
-    re-resolved for an action (root = page; for sel in frame: root =
-    root.frame_locator(sel); target = root.locator(locator, deep=deep)).
+    ready-to-use locator plus the frame chain and a deep flag.
+
+    Each returned dict carries an ``index``: pass it as the ``index`` argument of
+    any action tool (browser_click, browser_fill, …) and the element is
+    re-resolved through its iframe chain and open shadow roots for you. Do NOT
+    rebuild that chain by hand — a bare css/xpath cannot reach inside a frame.
+    Indexes are void after a navigation; run this tool again.
 
     kind is an optional comma-separated filter (e.g. "button,input") restricting
     the result to those kinds; omit it to list every kind. include_hidden also
@@ -163,18 +207,33 @@ def browser_list_fields(
     overlay on the page (default off; a no-op when headless).
     """
     parsed = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
-    fields = _session.page().list_fields(
-        kinds=parsed, include_hidden=include_hidden, highlight=highlight
-    )
-    _session.cache_fields(fields)  # so the action tools can target by `index`
-    return [f.to_dict() for f in fields]
+    args: dict[str, Any] = {
+        "kinds": parsed,
+        "include_hidden": include_hidden,
+        "highlight": highlight,
+    }
+
+    def _local() -> dict[str, Any]:
+        fields = _session.page().list_fields(
+            kinds=parsed, include_hidden=include_hidden, highlight=highlight
+        )
+        _session.cache_fields(fields)  # so the action tools can target by `index`
+        return {"fields": [f.to_dict() for f in fields]}
+
+    rows: list[dict[str, Any]] = _run("list_fields", args, _local)["result"]["fields"]
+    return rows
 
 
 @mcp.tool()
 def browser_clear_highlights() -> str:
     """Remove the numbered field-highlight overlay drawn by browser_list_fields."""
-    _session.page().clear_highlights()
-    return "cleared"
+
+    def _local() -> str:
+        _session.page().clear_highlights()
+        return "cleared"
+
+    cleared: str = _run("clear_highlights", {}, _local)["result"]
+    return cleared
 
 
 @mcp.tool()
@@ -194,13 +253,15 @@ def browser_translate_element(html: str) -> dict[str, object]:
 @mcp.tool()
 def browser_title() -> str:
     """Return the current page title."""
-    return _session.page().title()
+    title: str = _run("title", {}, lambda: _session.page().title())["result"]
+    return title
 
 
 @mcp.tool()
 def browser_url() -> str:
     """Return the current page URL."""
-    return _session.page().url
+    url: str = _run("url", {}, lambda: _session.page().url)["result"]
+    return url
 
 
 @mcp.tool()
@@ -585,53 +646,82 @@ def browser_expect_text(
 
 @mcp.tool()
 def browser_tab_list() -> list[dict]:  # type: ignore[type-arg]
-    """List all open tabs as [{index, handle, title, url}].
+    """List all open tabs as [{index, handle, title, url, active}].
 
     Reflects every open tab — including ones opened by a link or window.open —
     by reconciling against the live window handles. ``handle`` is a stable id you
-    can pass to browser_tab_activate.
+    can pass to browser_tab_activate, and ``active`` marks the tab every other
+    tool is currently acting on.
     """
-    pages = _session.pages()
-    result = []
-    for i, p in enumerate(pages):
-        try:
-            title = p.title()
-            url = p.url
-        except Exception:
-            title = ""
-            url = ""
-        result.append({"index": i, "handle": p.handle, "title": title, "url": url})
-    return result
+
+    def _local() -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        for i, p in enumerate(_session.pages()):
+            try:
+                title, url = p.title(), p.url
+            except Exception:  # noqa: BLE001 — one dead tab must not hide the live ones
+                title, url = "", ""
+            rows.append(
+                {
+                    "index": i,
+                    "handle": p.handle,
+                    "title": title,
+                    "url": url,
+                    "active": i == _session._current_idx,
+                }
+            )
+        return {"tabs": rows, "active": _session._current_idx}
+
+    tabs: list[dict[str, Any]] = _run("tabs", {}, _local)["result"]["tabs"]
+    return tabs
 
 
 @mcp.tool()
 def browser_tab_new(url: str | None = None) -> str:
     """Open a new browser tab, optionally navigating to url. Returns new tab index."""
-    p = _session.new_page(url)
-    idx = len(_session.pages()) - 1
-    return f"opened tab {idx}" + (f" at {p.url!r}" if url else "")
+
+    def _local() -> dict[str, Any]:
+        p = _session.new_page(url)
+        return {"index": len(_session.pages()) - 1, "title": p.title()}
+
+    env = _run("tab_new", {"url": url}, _local)
+    return f"opened tab {env['result']['index']}"
 
 
 @mcp.tool()
 def browser_tab_select(index: int) -> str:
     """Switch to a tab by its 0-based index."""
-    p = _session.select(index)
-    return f"switched to tab {index} ({p.url!r})"
+
+    def _local() -> dict[str, Any]:
+        p = _session.select(index)
+        return {"active": index, "title": p.title()}
+
+    env = _run("tab", {"index": index}, _local)
+    return f"switched to tab {env['result']['active']}"
 
 
 @mcp.tool()
 def browser_tab_activate(handle: str) -> str:
     """Focus a tab by its stable handle (from browser_tab_list). Survives reordering."""
-    p = _session.activate(handle)
-    return f"activated tab {handle} ({p.url!r})"
+
+    def _local() -> dict[str, Any]:
+        p = _session.activate(handle)
+        return {"active": _session._current_idx, "handle": handle, "title": p.title()}
+
+    env = _run("tab_activate", {"handle": handle}, _local)
+    return f"activated tab {env['result']['handle']} (index {env['result']['active']})"
 
 
 @mcp.tool()
 def browser_tab_close(index: int | None = None) -> str:
     """Close a tab by index (default: current tab)."""
-    idx = index if index is not None else None
-    _session.close_tab(idx)
-    return f"closed tab {idx if idx is not None else 'current'}"
+
+    def _local() -> dict[str, Any]:
+        _session.close_tab(index)
+        return {"closed": index, "remaining": len(_session._pages)}
+
+    env = _run("tab_close", {"index": index}, _local)
+    return f"closed tab {env['result']['closed']} ({env['result']['remaining']} remaining)"
 
 
 @mcp.tool()
@@ -646,7 +736,11 @@ def browser_set_tab_follow(enabled: bool) -> str:
     enabled=True: AUTO-FOLLOW. Subsequent operations target the most recently
     opened tab/popup window automatically (handy for "open in new tab" flows).
     """
-    on = _session.set_follow(enabled)
+    def _local() -> dict[str, Any]:
+        return {"follow": _session.set_follow(enabled)}
+
+    env = _run("tab_follow", {"enabled": enabled}, _local)
+    on = env["result"]["follow"]
     return f"tab-follow {'enabled (auto)' if on else 'disabled (manual)'}"
 
 
@@ -663,14 +757,16 @@ def browser_handle_dialog(accept: bool = True, prompt_text: str | None = None) -
     NOTE: The action that triggers the dialog must be called BEFORE this tool,
     as this tool handles the PENDING dialog immediately.
     """
-    page = _session.page()
-    msg, typ = page._delegate.handle_next_dialog(
-        accept=accept,
-        prompt_text=prompt_text,
-        timeout_ms=5000,
-    )
-    action = "accepted" if accept else "dismissed"
-    return f"{action} {typ!r} dialog: {msg!r}"
+    def _local() -> str:
+        page = _session.page()
+        msg, typ = page._delegate.handle_next_dialog(
+            accept=accept, prompt_text=prompt_text, timeout_ms=5000
+        )
+        action = "accepted" if accept else "dismissed"
+        return f"{action} {typ!r} dialog: {msg!r}"
+
+    env = _run("dialog", {"accept": accept, "prompt_text": prompt_text}, _local)
+    return _acted(env, str(env["result"]))
 
 
 # ---------------------------------------------------------------------------
@@ -686,14 +782,24 @@ def browser_network_requests(url_filter: str = "") -> list[dict]:  # type: ignor
     only URLs containing that substring (e.g. "/api/"). Chromium engines only.
     Use it to verify that the API call behind a UI action really happened.
     """
-    page = _session.page()
-    out = [
-        {"url": r.url, "method": r.method, "status": r.status, "resource_type": r.resource_type}
-        for r in page.network_requests()
-    ]
-    if url_filter:
-        out = [r for r in out if url_filter in str(r["url"])]
-    return out
+    def _local() -> dict[str, Any]:
+        out: list[dict[str, Any]] = [
+            {
+                "url": r.url,
+                "method": r.method,
+                "status": r.status,
+                "resource_type": r.resource_type,
+            }
+            for r in _session.page().network_requests()
+        ]
+        if url_filter:
+            out = [r for r in out if url_filter in str(r["url"])]
+        return {"requests": out}
+
+    requests: list[dict[str, Any]] = _run("network_requests", {"url_filter": url_filter}, _local)[
+        "result"
+    ]["requests"]
+    return requests
 
 
 @mcp.tool()
@@ -704,11 +810,18 @@ def browser_console_messages(level: str = "") -> list[dict]:  # type: ignore[typ
     (e.g. "SEVERE" for errors only). Chromium engines only. Check this first
     when a page misbehaves with no visible cause.
     """
-    page = _session.page()
-    out = [{"level": m.level, "text": m.text} for m in page.console_messages()]
-    if level:
-        out = [m for m in out if m["level"] == level.upper()]
-    return out
+    def _local() -> dict[str, Any]:
+        out: list[dict[str, Any]] = [
+            {"level": m.level, "text": m.text} for m in _session.page().console_messages()
+        ]
+        if level:
+            out = [m for m in out if m["level"] == level.upper()]
+        return {"messages": out}
+
+    messages: list[dict[str, Any]] = _run("console_messages", {"level": level}, _local)["result"][
+        "messages"
+    ]
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -719,21 +832,35 @@ def browser_console_messages(level: str = "") -> list[dict]:  # type: ignore[typ
 @mcp.tool()
 def browser_get_cookies() -> list[dict]:  # type: ignore[type-arg]
     """Return all cookies for the current context."""
-    return _session.context().cookies()
+    def _local() -> dict[str, Any]:
+        return {"cookies": _session.context().cookies()}
+
+    env = _run("cookies", {}, _local)
+    cookies: list[dict[str, Any]] = env["result"]["cookies"]
+    return cookies
 
 
 @mcp.tool()
 def browser_add_cookies(cookies: list[dict]) -> str:  # type: ignore[type-arg]
     """Add cookies to the current context. Each cookie must have at least 'name', 'value', 'url'."""
-    _session.context().add_cookies(cookies)
-    return f"added {len(cookies)} cookie(s)"
+    def _local() -> str:
+        _session.context().add_cookies(cookies)
+        return f"added {len(cookies)} cookie(s)"
+
+    env = _run("add_cookies", {"cookies": cookies}, _local)
+    return _acted(env, str(env["result"]))
 
 
 @mcp.tool()
 def browser_clear_cookies() -> str:
     """Clear all cookies in the current context."""
-    _session.context().clear_cookies()
-    return "cookies cleared"
+
+    def _local() -> str:
+        _session.context().clear_cookies()
+        return "cookies cleared"
+
+    env = _run("clear_cookies", {}, _local)
+    return _acted(env, str(env["result"]))
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +897,7 @@ def browser_screenshot(
 def browser_evaluate(
     expression: str,
     arg: object = None,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -782,17 +910,23 @@ def browser_evaluate(
     With no target the function runs on the page and is called as
     '(expression)(arg)', e.g. '() => document.title'.
 
-    With a target (selector / role+name / text) it runs on that ELEMENT and is
-    called as '(expression)(element, arg)', e.g. '(el) => el.value' — this is
-    how you read id/class/dataset or any property list_fields does not return.
+    With a target (index / selector / role+name / text) it runs on that ELEMENT
+    and is called as '(expression)(element, arg)', e.g. '(el) => el.value' — this
+    is how you read id/class/dataset or any property list_fields does not return.
     """
-    page = _session.page()
-    if selector is None and role is None and text is None:
-        return page.evaluate(expression, arg)
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    return loc.first().evaluate(expression, arg)
+    args["expression"] = expression
+    args["arg"] = arg
+
+    def _local() -> dict[str, Any]:
+        if all(args.get(key) is None for key in ("index", "selector", "role", "target_text")):
+            return {"result": _session.page().evaluate(expression, arg)}
+        return {"result": _session.target(args).first().evaluate(expression, arg)}
+
+    result: dict[str, Any] = _run("eval", args, _local)["result"]
+    return result["result"]
 
 
 # ---------------------------------------------------------------------------
@@ -835,9 +969,10 @@ def browser_solve_captcha(
     args = _target_payload(
         index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    solved: str = _run(
-        "solve_captcha", args, lambda: _session.page().solve_captcha(_session.target(args))
-    )["result"]
+    def _local() -> str:
+        return _session.page().solve_captcha(_session.target(args))
+
+    solved: str = _run("solve_captcha", args, _local)["result"]
     return solved
 
 
@@ -895,7 +1030,17 @@ def browser_find_image(
 
 @mcp.tool()
 def browser_close() -> str:
-    """Close the browser and reset the session."""
+    """Close this server's browser and reset the session.
+
+    While attached to a `visus` session (browser_attach_session) this DETACHES
+    instead: the shell's browser is not ours to close, and killing it would
+    destroy whatever state the user built up. `visus session stop` owns that
+    lifetime.
+    """
+    global _remote
+    if _remote is not None:
+        _remote = None
+        return "detached from the visus session (it is still running — use `visus session stop`)"
     _session.close()
     return "browser closed"
 

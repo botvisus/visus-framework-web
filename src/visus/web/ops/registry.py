@@ -114,5 +114,8 @@ INDEXABLE_TOOLS: frozenset[str] = frozenset(
         "browser_read_text",
         "browser_solve_captcha",
         "browser_find_image",
+        # PLAN 5 Task 12 made `eval` element-scopable on both surfaces; `index` is
+        # the one target form it could not express until now.
+        "browser_evaluate",
     }
 )

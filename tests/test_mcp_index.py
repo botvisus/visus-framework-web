@@ -69,14 +69,38 @@ def test_index_reaches_a_field_inside_open_shadow_dom(srv):  # type: ignore[no-u
 
 @pytest.mark.browser
 def test_a_navigation_makes_cached_indexes_refuse_to_resolve(srv):  # type: ignore[no-untyped-def]
-    """The MCP surface inherits the daemon's staleness contract, not just its cache."""
-    from visus.web.ops.targeting import StaleFieldIndexError
+    """The MCP surface inherits the daemon's staleness contract, not just its cache.
 
+    An EXPLICIT navigation drops the cache outright, exactly as the daemon's
+    `_op_goto` does — so the refusal is "there is no cache", not "the cache is
+    stale". An empty cache is the stronger guarantee: it cannot mis-resolve.
+    """
     server, base_url = srv
     server.browser_navigate(f"{base_url}/fields.html")
     server.browser_list_fields(include_hidden=True)
     server.browser_navigate(f"{base_url}/forms.html")
 
+    with pytest.raises(IndexError, match="run list_fields first"):
+        server._session.field_locator(0)
+
+
+@pytest.mark.browser
+def test_a_js_driven_navigation_is_caught_by_the_page_stamp(srv):  # type: ignore[no-untyped-def]
+    """The stamp is what catches a navigation visus never initiated.
+
+    Invalidating on goto/back/forward/reload only covers navigations we perform.
+    A page that navigates ITSELF leaves the cache populated and pointing at
+    elements that no longer exist — which is the case the URL stamp exists for.
+    """
+    from visus.web.ops.targeting import StaleFieldIndexError
+
+    server, base_url = srv
+    server.browser_navigate(f"{base_url}/fields.html")
+    server.browser_list_fields(include_hidden=True)
+    server.browser_evaluate(f"() => {{ location.href = '{base_url}/forms.html'; }}")
+    server._session.page().wait_for_url("**/forms.html")
+
+    assert server._session._fields, "the cache must survive a navigation we did not perform"
     with pytest.raises(StaleFieldIndexError, match="run list-fields again"):
         server._session.field_locator(0)
 
@@ -112,9 +136,7 @@ def test_a_stale_index_is_refused_by_an_action_tool(srv):  # type: ignore[no-unt
     server.browser_list_fields(include_hidden=True)
     server.browser_navigate(f"{base_url}/forms.html")
 
-    from visus.web.ops.targeting import StaleFieldIndexError
-
-    with pytest.raises(StaleFieldIndexError, match="run list-fields again"):
+    with pytest.raises(IndexError, match="run list_fields first"):
         server.browser_click(index=0)
 
 

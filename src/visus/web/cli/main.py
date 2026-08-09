@@ -229,15 +229,60 @@ def translate(
 
 
 @app.command()
-def doctor(engine: str = "chrome") -> None:
-    """Check that a browser + driver launch correctly."""
+def doctor(
+    engine: str = typer.Option("chrome", "--engine", "-e", help="chrome|edge|firefox|edge_ie."),
+    remote_url: str = typer.Option(
+        None,
+        "--remote-url",
+        help="Selenium Grid / Remote WebDriver URL, e.g. http://grid:4444/wd/hub.",
+    ),
+    headless: bool = typer.Option(True, "--headless/--headed"),
+) -> None:
+    """Check that a browser + driver launch correctly (locally or on a Grid).
+
+    The first command to run when anything is wrong. On failure it exits 1 with a
+    message that names the engine, the endpoint and the most likely cause — never
+    a raw driver traceback.
+    """
+    from visus.web.cli import output
+
+    if engine == "edge_ie" and headless:
+        output.emit_error(
+            "edge_ie is always headed (IE mode has no headless driver) — "
+            "run `visus doctor --engine edge_ie --headed`"
+        )
+    where = remote_url or "a locally launched browser"
     try:
-        with launch(Engine.from_str(engine), headless=True) as b:
+        with launch(Engine.from_str(engine), headless=headless, remote_url=remote_url) as b:
             p = b.new_page()
             p.goto("data:text/html,<title>ok</title>")
-            output.emit(f"OK: {engine} launches and navigates (title: {p.title()!r})")
-    except Exception as exc:  # noqa: BLE001
-        output.emit_error(f"FAILED: {exc}")
+            output.emit(f"OK: {engine} via {where} launches and navigates (title: {p.title()!r})")
+    except Exception as exc:  # noqa: BLE001 — every failure is reported, none escapes
+        detail = f"{type(exc).__name__}: {exc}"
+        hints = [f"FAILED: {engine} via {where} — {detail}"]
+        if remote_url:
+            hints.append(
+                f"  - is {remote_url} reachable from this machine? "
+                "try `curl <url>/status` (a Grid answers with JSON)"
+            )
+            hints.append(
+                f"  - does the Grid have a free {engine} node? "
+                "check the Grid console's browser capacity"
+            )
+            hints.append("  - drop --remote-url to test the same engine locally")
+        elif engine == "edge_ie":
+            from visus.web.backends.browsers import _ie_preflight
+
+            if not _ie_preflight.ie_mode_enabled():
+                hints.append("  - " + _ie_preflight.admin_hint().replace("\n", "\n    "))
+            else:
+                hints.append(
+                    "  - IE mode is enabled; close ALL Edge windows and retry, and pin "
+                    "the driver with VISUS_WEB_IE_DRIVER_VERSION=4.0.0"
+                )
+        else:
+            hints.append("  - run `visus install --engine " + engine + "` to fetch the driver")
+        output.emit_error("\n".join(hints))
 
 
 def _install_skills(flavor: str, *, force: bool) -> None:

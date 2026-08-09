@@ -92,7 +92,9 @@ def test_clipboard_read_does_not_open_a_console(monkeypatch: pytest.MonkeyPatch)
     assert bool(flags & NO_WINDOW) is WINDOWS, seen[0]
 
 
-def test_the_daemon_spawn_stays_detached(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_daemon_spawn_stays_detached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
     """Detachment is what outlives the shell; it is orthogonal to the window."""
     from visus.web.cli import session_client
 
@@ -105,8 +107,12 @@ def test_the_daemon_spawn_stays_detached(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(session_client, "find_session", lambda base, name=None: None)
     monkeypatch.setattr(session_client.subprocess, "Popen", _FakePopen)
+    # cwd=tmp_path, because after Popen the wait loop reads
+    # `<cwd>/.visus/sessions/<name>.json` DIRECTLY — patching find_session is not
+    # enough, and a real `visus session start` in this repo would satisfy the
+    # loop and make the spawn look successful.
     with pytest.raises(session_client.SessionError):
-        session_client.start_daemon("chrome", True, None, timeout=0.2)
+        session_client.start_daemon("chrome", True, None, cwd=tmp_path, timeout=0.2)
 
     if WINDOWS:
         assert captured["creationflags"] & getattr(subprocess, "DETACHED_PROCESS", 0x8)
@@ -115,7 +121,7 @@ def test_the_daemon_spawn_stays_detached(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_the_daemon_runs_under_pythonw_so_it_allocates_no_console(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     """The daemon itself was the window.
 
@@ -136,7 +142,7 @@ def test_the_daemon_runs_under_pythonw_so_it_allocates_no_console(
     monkeypatch.setattr(session_client, "find_session", lambda base, name=None: None)
     monkeypatch.setattr(session_client.subprocess, "Popen", _FakePopen)
     with pytest.raises(session_client.SessionError):
-        session_client.start_daemon("chrome", True, None, timeout=0.2)
+        session_client.start_daemon("chrome", True, None, cwd=tmp_path, timeout=0.2)
 
     exe = captured["argv"][0]
     if WINDOWS:

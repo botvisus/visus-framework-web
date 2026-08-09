@@ -113,8 +113,10 @@ class Session:
         ``RemoteDispatcher``. ``target_text`` (not ``text``) is the locator-text
         key, because ``text`` is already fill's VALUE payload.
         """
+        nth = args.get("nth")
         if args.get("index") is not None:
-            return self.field_locator(int(args["index"]))
+            field = self.field_locator(int(args["index"]))
+            return field.nth(int(nth)) if nth is not None else field
         if all(args.get(key) is None for key in ("selector", "role", "target_text")):
             # Validate before page(): a missing target is an argument error, and
             # page() would lazily LAUNCH A BROWSER just to report it.
@@ -127,6 +129,7 @@ class Session:
             text=args.get("target_text"),
             exact=bool(args.get("exact", False)),
             frame=args.get("frame"),
+            nth=None if nth is None else int(nth),
         )
 
     def context(self) -> Context:

@@ -50,11 +50,24 @@ __all__ = [
     "SessionHandler",
     "SessionLockedError",
     "StaleFieldIndexError",
+    "cli_hint",
     "main",
     "make_locator",
     "serve",
     "session_file",
 ]
+
+# The library raises strict-mode violations naming its own Python methods. A CLI
+# caller cannot call those, so the daemon rewrites the advice into the flag the
+# CLI actually has. The wording is matched, not the exception type, because the
+# same sentence is raised from the resolver and from the assertion engine.
+_PY_ESCAPE = "use first()/last()/nth()"
+_CLI_ESCAPE = "pass --nth N to pick one (0 = first, -1 = last), or use a narrower target"
+
+
+def cli_hint(message: str) -> str:
+    """Rewrite library-API advice into CLI advice, leaving other errors untouched."""
+    return message.replace(_PY_ESCAPE, _CLI_ESCAPE)
 
 
 def _norm_rect(rect: Any) -> dict[str, float] | None:
@@ -476,8 +489,10 @@ class SessionHandler:
         Note the locator-text target is read from ``target_text`` (not ``text``)
         so it never collides with ``fill``'s ``text`` *value* payload.
         """
+        nth = args.get("nth")
         if "index" in args and args["index"] is not None:
-            return self._resolve_field(int(args["index"]))
+            field = self._resolve_field(int(args["index"]))
+            return field.nth(int(nth)) if nth is not None else field
         return make_locator(
             self.page(),
             selector=args.get("selector"),
@@ -486,6 +501,7 @@ class SessionHandler:
             text=args.get("target_text"),
             exact=bool(args.get("exact", False)),
             frame=args.get("frame"),
+            nth=None if nth is None else int(nth),
         )
 
     def _field_code(self, index: int) -> str | None:
@@ -616,7 +632,7 @@ class SessionHandler:
                 code = self._generated_code(op, args)
                 resp: dict[str, Any] = {"ok": True, "result": method(args)}
             except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
-                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                return {"ok": False, "error": cli_hint(f"{type(exc).__name__}: {exc}")}
             if op in _MUTATING_OPS:
                 resp["page"] = self._post_state()
                 if args.get("snapshot"):

@@ -41,6 +41,7 @@ def _target_payload(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> dict[str, Any]:
     """This tool's targeting parameters as the DAEMON's payload.
 
@@ -57,6 +58,7 @@ def _target_payload(
         "target_text": text,
         "exact": exact,
         "frame": frame,
+        "nth": nth,
     }
 
 

@@ -28,13 +28,43 @@ Extras: `[cli]` the CLI · `[mcp]` the MCP server · `[vision]` OCR + image matc
 
 ```bash
 visus session start https://practicetestautomation.com/practice-test-login/
+visus fill "#username" student           # a selector, like any other browser CLI
+visus fill "#password" Password123
+visus click "#submit"
+visus expect-text "h1" "Logged In Successfully"             # PASSED / FAILED
+visus session stop                       # closes the browser
+```
+
+Don't know the selectors? List the page and act by number — the cheapest path in
+tokens, and the one to prefer when you are exploring:
+
+```bash
 visus list-fields                        # numbered table + numbered overlay on the page
 visus fill 1 student                     # act by index
 visus fill 2 Password123
 visus click --role button --name Submit  # or target by role/name/selector/text
-visus expect-text --role heading "Logged In Successfully"   # PASSED / FAILED
-visus session stop                       # closes the browser
 ```
+
+## How to name an element
+
+Every command that acts on an element takes the target the same way, and the
+FIRST positional argument is it:
+
+```bash
+visus click "#submit"                    # CSS
+visus click "//button[@id='submit']"     # XPath (also `xpath=...`)
+visus click "text=Log out"               # by visible text
+visus click 4                            # a `visus list-fields` index — digits only
+visus click --role button --name Submit  # ARIA role (+ --name to refine)
+visus click --selector "#submit"         # the long form of the first line
+```
+
+A plain number is a field index; anything else is a selector. When a command
+also takes a value, the target comes first: `visus fill "#user" bob`,
+`visus select "#country" US`, `visus press "#q" Enter`, `visus type "#q" hi`.
+
+If a target matches several elements the command refuses rather than guessing —
+add `--nth 0` (first), `--nth -1` (last), or narrow the target.
 
 `visus session status` shows pid, port, engine, url, title and `fields_cached`.
 Full reference: **[references/cli-session.md](references/cli-session.md)**.
@@ -47,6 +77,9 @@ Full reference: **[references/cli-session.md](references/cli-session.md)**.
 - **`--name` alone is not a target.** It only qualifies `--role`. A command with
   no index and no `--selector` / `--role` / `--text` exits 1 with
   `error: provide an index, or --selector / --role / --text`.
+- **A loose target that matches several elements is an error, not a guess.**
+  `locator resolved to N elements` → re-run with `--nth 0` / `--nth -1`, or use a
+  more specific selector.
 - **Timeouts are milliseconds.** `--timeout 5000`, not `5`.
 - **Never sleep.** Every action auto-waits; `visus wait --state visible` and
   `visus expect-text` are the synchronisation primitives.
@@ -86,10 +119,11 @@ The ones you will use most:
 visus goto <URL> | back | forward | reload
 visus list-fields [--kind input,button] [--all] [--highlight] [--full] [--json]
 visus snapshot ["#main"] [--depth N]     # REF/role/name table; REF is a list-fields index
-visus click|dblclick|hover|focus|check|uncheck [idx] [target]
-visus fill <idx> <text>                  # or: -s "#user" --value text
-visus select <idx> <value> | visus press <idx> Enter | visus clear-input <idx>
-visus get-text|get-attribute <attr>|count [idx] [target]
+visus click|dblclick|hover|focus|check|uncheck <target>   # "#css" | //xpath | text=… | idx
+visus fill <target> <text>               # also: -s "#user" --value text
+visus select <target> <value> | visus press <target> Enter | visus clear-input <target>
+visus get-text|get-attribute <attr>|count <target>
+visus <any of the above> --nth 0         # when a target matches several elements
 visus title | visus url | visus tabs | visus tab <idx>
 visus wait [idx] --state visible|hidden|attached|detached --timeout <ms>
 visus expect-text [idx] <text> --timeout <ms>

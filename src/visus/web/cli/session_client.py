@@ -128,6 +128,29 @@ def _socket_open(port: int, *, host: str = "127.0.0.1", timeout: float = 1.0) ->
         return False
 
 
+def _is_registry(sessions_dir: Path) -> bool:
+    """True when a candidate ``.visus/sessions`` is the CROSS-PROJECT registry.
+
+    ``~/.visus/sessions`` sits on the upward path of nearly every project (they
+    live under the user's home), and it holds every project's mirror entry. A
+    walk that accepted it would bind a project with no ``.visus`` of its own to
+    whatever another project is running.
+
+    Both the CONFIGURED home (``VISUS_WEB_HOME``) and the default ``~/.visus``
+    count. Pointing the override elsewhere does not turn the default location
+    into a project — and a test that redirects the override still runs under a
+    real home directory that has one.
+    """
+    from visus.web.cli import session_server
+
+    try:
+        resolved = sessions_dir.resolve()
+        homes = {session_server.registry_dir(), Path.home() / ".visus" / "sessions"}
+        return any(resolved == home.resolve() for home in homes)
+    except OSError:  # unresolvable path (permissions, dead symlink) — not the registry
+        return False
+
+
 def _find_session_file(
     start_dir: str | Path | None = None, name: str | None = None
 ) -> Path | None:
@@ -142,7 +165,10 @@ def _find_session_file(
     cur = cur.resolve()
     filename = f"{session_name(name)}.json"
     for d in [cur, *cur.parents]:
-        candidate = d / ".visus" / "sessions" / filename
+        sessions = d / ".visus" / "sessions"
+        if _is_registry(sessions):
+            continue
+        candidate = sessions / filename
         if candidate.is_file():
             return candidate
     return None
@@ -553,7 +579,7 @@ def _find_sessions_dir(start_dir: str | Path | None = None) -> Path | None:
     cur = cur.resolve()
     for d in [cur, *cur.parents]:
         candidate = d / ".visus" / "sessions"
-        if candidate.is_dir():
+        if candidate.is_dir() and not _is_registry(candidate):
             return candidate
     return None
 

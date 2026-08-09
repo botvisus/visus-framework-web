@@ -29,6 +29,14 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+# The one positional every element command shares. Defined up here because the
+# first of them (`screenshot`) is declared long before the targeting helpers.
+_TARGET_ARG = typer.Argument(
+    None,
+    metavar="[TARGET]",
+    help='A `list-fields` index (7) or a selector ("#id", ".cls", "//xpath", "text=Hi").',
+)
+
 #: Subcommands that install the skill — they must never be nagged about it.
 #: May grow, must never shrink.
 _SKILL_INSTALL_COMMANDS: tuple[str, ...] = ("install", "install-skills")
@@ -312,6 +320,9 @@ def install(
     skills: str = typer.Option(
         None,
         "--skills",
+        # The BARE `--skills` is legal because `_entry.cli_main` normalises argv
+        # (`skills.normalize_skills_argv`) before Click parses it — Typer has no
+        # optional-value option, so the entry point supplies one.
         help="Install the agent skill instead of a driver: --skills or --skills=agents.",
     ),
     force: bool = typer.Option(
@@ -659,32 +670,87 @@ _MOBILE_OPT = typer.Option(
 )
 _EXACT_OPT = typer.Option(False, "--exact", help="Match --role/--text exactly, not by substring.")
 _FRAME_OPT = typer.Option(None, "--frame", help="CSS selector of the iframe holding the target.")
+_NTH_OPT = typer.Option(
+    None,
+    "--nth",
+    help="Pick one of several matches: 0 is the first, -1 the last. "
+    "This is the way out of a 'resolved to N elements' error.",
+)
+# `--session` is a GROUP-level flag, so Click only accepts it before the
+# subcommand. It reads as an option of the session subcommands themselves, which
+# is where it gets typed first, so those repeat it locally.
+_SESSION_OPT = typer.Option(
+    None, "--session", "-S", help="Session name (default: 'default'). `-s` is --selector."
+)
+
+
+def _use_session(name: str | None) -> None:
+    """Apply a subcommand-level ``--session`` on top of the group-level one."""
+    if name is None:
+        return
+    from visus.web.cli import session_client
+
+    try:
+        session_client.set_session_name(name)
+    except session_client.SessionError as exc:
+        output.emit_error(f"error: {exc}")
 _BUTTON_OPT = typer.Option(
     "left", "--button", "-b", help="Mouse button: left (default), middle or right."
 )
 
 
-def _index_or_value(
-    target: str | None, value: str | None, has_option_target: bool
-) -> tuple[int | None, str | None]:
-    """Split a leading positional into ``(index, value)``.
+def _positional(target: str | None, selector: str | None) -> tuple[int | None, str | None]:
+    """Fold a bare positional target into ``(index, selector)``.
 
-    `visus fill 7 hello` and `visus fill -s "#u" hello` are both natural, but a
-    typed `index: int` first parameter makes the second one a PARSE error before
-    the body ever runs ("hello is not a valid int"). So the slot is a string, and
-    it counts as an index only when it is all digits — the rule `visus press`
-    already uses. With a --selector/--role/--text target present, a lone
-    positional is the VALUE.
+    ALL DIGITS is a `list-fields` index; ANYTHING ELSE is a selector, so
+    `visus click "#submit"` works — the spelling every other browser CLI uses and
+    the one a model reaches for first. The rule cannot be ambiguous because a CSS
+    or XPath selector is never all digits.
+
+    Before this, the slot was typed `index: int` and the natural form died in the
+    PARSER ("'#submit' is not a valid int") before any code could explain itself.
+
+    An explicit ``--selector`` wins, so a stray positional never silently
+    overrides a target the caller spelled out.
     """
     if target is None:
-        return None, value
-    if target.isdigit() and not has_option_target:
-        return int(target), value
-    if has_option_target and value is None:
-        return None, target
+        return None, selector
     if target.isdigit():
-        return int(target), value
-    return None, value if value is not None else target
+        return int(target), selector
+    return None, selector or target
+
+
+def _index_or_value(
+    target: str | None, value: str | None, has_option_target: bool
+) -> tuple[int | None, str | None, str | None]:
+    """Split leading positionals into ``(index, selector, value)``.
+
+    For the commands that take a target AND a value (`fill`, `select`, `press`,
+    `expect-text`). Three natural spellings all have to work::
+
+        visus fill 7 hello              # index, value
+        visus fill "#user" hello        # selector, value  (the playwright shape)
+        visus fill -s "#user" hello     # option target, value
+
+    The last one is why the slot is a string: with a typed `int` it was a parse
+    error. When an option target is present a LONE positional is the VALUE —
+    otherwise `-s "#u" hello` would read "hello" as a selector.
+    """
+    if target is None:
+        return None, None, value
+    if has_option_target:
+        if value is None:
+            return None, None, target
+        return (int(target) if target.isdigit() else None), None, value
+    if value is None:
+        # One positional and nothing else. A NUMBER is still a target, so
+        # `visus fill 2` reports the missing text rather than a missing target;
+        # anything else is the value (`visus press Enter`).
+        if target.isdigit():
+            return int(target), None, None
+        return None, None, target
+    index, selector = _positional(target, None)
+    return index, selector, value
 
 
 def _target_args(
@@ -696,12 +762,13 @@ def _target_args(
     *,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> dict[str, Any]:
     """Build the {index|selector|role|name|text} target dict for an action op.
 
-    ``exact`` and ``frame`` are only sent when set: the daemon reads them in
-    ``session_server.make_locator`` and the defaults would otherwise pad every
-    payload.
+    ``exact``, ``frame`` and ``nth`` are only sent when set: the daemon reads
+    them in ``session_server.make_locator`` and the defaults would otherwise pad
+    every payload.
     """
     if index is not None:
         args: dict[str, Any] = {"index": index}
@@ -721,6 +788,8 @@ def _target_args(
         args["exact"] = True
     if frame is not None:
         args["frame"] = frame
+    if nth is not None:
+        args["nth"] = nth
     return args
 
 
@@ -728,10 +797,15 @@ def _target_args(
 def session_start(
     ctx: typer.Context,
     url: str = typer.Argument(None, help="URL to open once the browser starts."),
+    session: str = _SESSION_OPT,
     engine: str = typer.Option(
         "chrome", "--engine", "-e", "--browser", help="chrome | edge | firefox | edge_ie."
     ),
-    headless: bool = typer.Option(False, "--headless", help="Run headless (default: headed)."),
+    headless: bool = typer.Option(
+        False,
+        "--headless/--headed",
+        help="Run headless (default: headed). --headed is accepted and is the default.",
+    ),
     user_data_dir: str = typer.Option(
         None,
         "--user-data-dir",
@@ -772,6 +846,8 @@ def session_start(
     from visus.web.api.devices import DEFAULT_MOBILE, get_device
     from visus.web.cli import config as cliconfig
     from visus.web.cli import session_client
+
+    _use_session(session)
 
     # The config supplies DEFAULTS only: is_default asks click where each value
     # came from, so anything the user actually typed is left untouched.
@@ -841,10 +917,11 @@ def session_start(
 
 
 @session_app.command("stop")
-def session_stop() -> None:
+def session_stop(session: str = _SESSION_OPT) -> None:
     """Stop the running session (closes the browser)."""
     from visus.web.cli import session_client
 
+    _use_session(session)
     output.emit(session_client.stop())
 
 
@@ -925,10 +1002,12 @@ def session_kill() -> None:
 @session_app.command("status")
 def session_status(
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+    session: str = _SESSION_OPT,
 ) -> None:
     """Show the running session's status."""
     from visus.web.cli import session_client
 
+    _use_session(session)
     if as_json:
         output.set_mode(as_json=True)
     info = session_client.status()
@@ -1057,7 +1136,7 @@ def list_fields(
 
 @app.command()
 def click(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1074,12 +1153,14 @@ def click(
     button: str = _BUTTON_OPT,
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Click a field by index, by --selector/--role/--text, or by --image."""
+    """Click an element: `visus click "#submit"`, `visus click 4`, or --image/--ocr-text."""
+    index, sel = _positional(target, selector)
     if ocr_text is not None:
         ocr_args: dict[str, Any] = {"ocr_text": ocr_text, "exact_text": False}
         if index is not None or selector or role or text:
-            ocr_args.update(_target_args(index, selector, role, name, text))
+            ocr_args.update(_target_args(index, sel, role, name, text, nth=nth))
         env = _send_env("click_ocr_text", ocr_args)
         r = env["result"]
         message = (
@@ -1094,13 +1175,13 @@ def click(
             "confidence": confidence,
         }
         if index is not None or selector or role or text:
-            image_args.update(_target_args(index, selector, role, name, text))
+            image_args.update(_target_args(index, sel, role, name, text, nth=nth))
         env = _send_env("click_image", image_args)
         r = env["result"]
         message = f"clicked image at ({r['x']}, {r['y']}) confidence={r['confidence']:.3f}"
         output.emit_envelope({**env, "result": message})
         return
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     if button != "left":
         # A pixel click always uses the primary button, so this stays in the
         # NON-image branch.
@@ -1128,10 +1209,15 @@ def fill(
     ),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Fill a field. By index: `visus fill 7 hello`. By selector: `-s "#u" hello`."""
-    index, positional = _index_or_value(target, text, bool(selector or role or by_text))
-    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
+    """Fill a field: `visus fill 7 hello`, `visus fill "#u" hello`, or `-s "#u" hello`."""
+    index, pos_selector, positional = _index_or_value(
+        target, text, bool(selector or role or by_text)
+    )
+    args = _target_args(
+        index, selector or pos_selector, role, name, by_text, exact=exact, frame=frame, nth=nth
+    )
     fill_value = positional if positional is not None else value
     if fill_value is None:
         output.emit_error("error: no text to fill — use `visus fill <index> <text>` or `--value`")
@@ -1143,29 +1229,33 @@ def fill(
 
 @app.command()
 def check(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Check a checkbox/radio field."""
-    args = _target_args(index, selector, role, name, None, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, None, exact=exact, frame=frame, nth=nth)
     output.emit_envelope(_send_env("check", args))
 
 
 @app.command()
 def uncheck(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Uncheck a checkbox field."""
-    args = _target_args(index, selector, role, name, None, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, None, exact=exact, frame=frame, nth=nth)
     output.emit_envelope(_send_env("uncheck", args))
 
 
@@ -1186,10 +1276,15 @@ def select(
     ),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Select an option on a <select> field. By index: `visus select 5 US`."""
-    index, positional = _index_or_value(target, value, bool(selector or role or by_text))
-    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
+    """Select an option: `visus select 5 US` or `visus select "#country" US`."""
+    index, pos_selector, positional = _index_or_value(
+        target, value, bool(selector or role or by_text)
+    )
+    args = _target_args(
+        index, selector or pos_selector, role, name, by_text, exact=exact, frame=frame, nth=nth
+    )
     val = positional if positional is not None else option_value
     if val is None:
         output.emit_error(
@@ -1214,28 +1309,33 @@ def press(
     ),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Press a key. On a field: `visus press 7 Enter`. On the page: `visus press Enter`."""
+    """Press a key: `visus press 7 Enter`, `visus press "#q" Enter`, or `visus press Enter`."""
     has_option_target = bool(selector or role or by_text)
-    index = int(target) if target is not None and target.isdigit() else None
-    k = key if key is not None else key_value
-    if k is None and index is None and target is not None and not has_option_target:
-        k = target  # `visus press Enter` — the whole argument was the key
+    index, pos_selector, k = _index_or_value(target, key, has_option_target)
+    if k is None:
+        k = key_value
     if k is None:
         output.emit_error(
             "error: no key — use `visus press <index> <key>`, `--key`, or `visus press <key>`"
         )
-    if index is None and not has_option_target:
+    if index is None and not (has_option_target or pos_selector):
         output.emit_envelope(_send_env("press", {"key": k}))
         return
-    args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
+    args = _target_args(
+        index, selector or pos_selector, role, name, by_text, exact=exact, frame=frame, nth=nth
+    )
     args["key"] = k
     output.emit_envelope(_send_env("press", args))
 
 
 @app.command("type")
 def type_text(
-    text: str = typer.Argument(..., help="Text to type with real key events."),
+    first: str = typer.Argument(
+        ..., metavar="[TARGET] TEXT", help="Text to type — or a target, then the text."
+    ),
+    second: str = typer.Argument(None, hidden=True),
     index: int = typer.Option(None, "--index", "-i", help="Focus this field first."),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
@@ -1243,12 +1343,35 @@ def type_text(
     by_text: str = typer.Option(None, "--text", help="Target a field by its visible text."),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Type text into the focused element (or focus a target first)."""
+    """Type into the focused element, or into a target: `visus type "#q" hello`.
+
+    A LONE positional is always the text — `visus type 42` types "42" rather than
+    focusing field 42, because typing a number (a ZIP, an amount) is ordinary and
+    a text argument was this command's only shape before. A target is what the
+    SECOND positional makes of the first.
+    """
+    if second is None:
+        text, pos_index, pos_selector = first, None, None
+    else:
+        text = second
+        pos_index, pos_selector = _positional(first, None)
     args: dict[str, Any] = {"text": text}
-    if index is not None or selector or role or by_text:
+    if pos_index is not None:
+        index = pos_index
+    if index is not None or selector or role or by_text or pos_selector:
         args.update(
-            _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
+            _target_args(
+                index,
+                selector or pos_selector,
+                role,
+                name,
+                by_text,
+                exact=exact,
+                frame=frame,
+                nth=nth,
+            )
         )
     output.emit(_send("type", args))
 
@@ -1309,16 +1432,18 @@ def goto(url: str = typer.Argument(..., help="URL to navigate to.")) -> None:
 
 @app.command("get-text")
 def get_text(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Print a field's text content."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     result = _send("get_text", args)
     output.emit(result, table=_render_value(result))
 
@@ -1332,13 +1457,18 @@ def session_screenshot(
     hires: bool = typer.Option(
         False, "--hires", help="Capture at device-pixel-ratio 2 (better for OCR / vision)."
     ),
-    index: int = typer.Argument(None, help="Field index to screenshot (omit = whole page)."),
+    target: str = typer.Argument(
+        None,
+        metavar="[TARGET]",
+        help='A `list-fields` index (7) or a selector ("#id", "//xpath") — omit = whole page.',
+    ),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text", help="Target an element by its visible text."),
 ) -> None:
     """DEPRECATED alias for `visus screenshot` with no URL."""
+    index, sel = _positional(target, selector)
     typer.echo(
         "warning: `visus session-screenshot` is deprecated — use `visus screenshot` "
         "(with no URL it shoots the live session).",
@@ -1349,7 +1479,7 @@ def session_screenshot(
         full_page=full_page,
         hires=hires,
         index=index,
-        selector=selector,
+        selector=sel,
         role=role,
         name=name,
         text=text,
@@ -1377,7 +1507,7 @@ def clear_highlights() -> None:
 
 @app.command()
 def highlight(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1386,12 +1516,14 @@ def highlight(
     hide: bool = typer.Option(False, "--hide", help="Remove the box instead of drawing it."),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Draw a highlight box around ONE element (`--hide` removes it)."""
+    index, sel = _positional(target, selector)
     if hide:
         output.emit(_send("highlight", {"hide": True}))
         return
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     if style:
         args["style"] = style
     output.emit(_send("highlight", args))
@@ -1517,8 +1649,11 @@ def find(
 
 @app.command()
 def snapshot(
-    selector: str = typer.Argument(
-        None, help='Scope the snapshot to a CSS selector, e.g. "#main".'
+    scope: str = typer.Argument(
+        None, metavar="[SELECTOR]", help='Scope the snapshot to a CSS selector, e.g. "#main".'
+    ),
+    selector: str = typer.Option(
+        None, "--selector", "-s", help="Same as the positional scope; every other command has it."
     ),
     depth: int = typer.Option(
         None, "--depth", help="Keep only elements at most N levels below the scope root."
@@ -1541,7 +1676,7 @@ def snapshot(
     (`--filename after-login.yml`) when the page is large.
     """
     args: dict[str, Any] = {
-        "selector": selector,
+        "selector": scope or selector,
         "depth": depth,
         "refs": refs,
         "boxes": boxes,
@@ -1575,16 +1710,18 @@ def snapshot(
 @app.command("get-attribute")
 def get_attribute(
     attr_name: str = typer.Argument(..., help="Attribute name, e.g. `href`."),
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Print an element's attribute value."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     args["attr_name"] = attr_name
     result = _send("get_attribute", args)
     output.emit(result, table=_render_value(result))
@@ -1592,22 +1729,24 @@ def get_attribute(
 
 @app.command()
 def count(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Print how many elements match the target."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit(_send("count", args))
 
 
 @app.command("generate-locator")
 def generate_locator(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1615,11 +1754,13 @@ def generate_locator(
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
     raw: bool = typer.Option(False, "--raw", help="Print only the expression."),
+    nth: int = _NTH_OPT,
 ) -> None:
     """Print the copy-paste `visus.web` expression for one element."""
+    index, sel = _positional(target, selector)
     result = _send(
         "generate_locator",
-        _target_args(index, selector, role, name, text, exact=exact, frame=frame),
+        _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth),
     )
     if raw:
         output.set_mode(raw=True)
@@ -1640,22 +1781,24 @@ def generate_locator(
 
 @app.command()
 def hover(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Hover over a field by index or by --selector/--role/--text."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    """Hover over a field by TARGET: `4`, `"#id"`, `//xpath`, `text=…`."""
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit_envelope(_send_env("hover", args))
 
 
 @app.command()
 def dblclick(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1663,9 +1806,11 @@ def dblclick(
     button: str = _BUTTON_OPT,
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Double-click a field by index or by --selector/--role/--text."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    """Double-click a field by TARGET: `4`, `"#id"`, `//xpath`, `text=…`."""
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     if button != "left":
         args["button"] = button
     output.emit_envelope(_send_env("dblclick", args))
@@ -1673,38 +1818,46 @@ def dblclick(
 
 @app.command()
 def focus(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Focus a field by index or by --selector/--role/--text."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    """Focus a field by TARGET: `4`, `"#id"`, `//xpath`, `text=…`."""
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit_envelope(_send_env("focus", args))
 
 
 @app.command("clear-input")
 def clear_input(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Clear an input field's value (distinct from `clear`, which removes highlights)."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit_envelope(_send_env("clear_input", args))
 
 
 @app.command()
 def drag(
-    index: int = typer.Argument(None, help="Source field index from the last list-fields."),
-    target_index: int = typer.Argument(None, help="Target field index."),
+    source: str = typer.Argument(
+        None, metavar="[SOURCE]", help="Source: a `list-fields` index or a selector."
+    ),
+    dest: str = typer.Argument(
+        None, metavar="[DEST]", help="Destination: a `list-fields` index or a selector."
+    ),
     selector: str = typer.Option(None, "--selector", "-s", help="Source selector."),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1713,13 +1866,18 @@ def drag(
     to_index: int = typer.Option(None, "--to-index", help="Target field index."),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Drag a source element onto a target. By index: `visus drag 3 7`."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    """Drag one element onto another: `visus drag 3 7` or `visus drag "#a" "#b"`."""
+    index, sel = _positional(source, selector)
+    target_index, target_selector = _positional(dest, None)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     if to_selector is not None:
         args["target_selector"] = to_selector
     elif to_index is not None:
         args["target_index"] = to_index
+    elif target_selector is not None:
+        args["target_selector"] = target_selector
     elif target_index is not None:
         args["target_index"] = target_index
     else:
@@ -1731,7 +1889,7 @@ def drag(
 
 @app.command()
 def drop(
-    index: int = typer.Argument(None, help="Dropzone field index from the last list-fields."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1741,6 +1899,7 @@ def drop(
     data_type: str = typer.Option(
         "text/plain", "--data-type", help="MIME type for --data (default text/plain)."
     ),
+    nth: int = _NTH_OPT,
 ) -> None:
     """Drop a file or a payload onto an element from outside the page.
 
@@ -1749,6 +1908,7 @@ def drop(
         visus drop --selector "#zone" --path ./report.csv
         visus drop 4 --data '{"id":1}' --data-type application/json
     """
+    index, sel = _positional(target, selector)
     import base64
     import mimetypes
 
@@ -1758,7 +1918,7 @@ def drop(
         output.emit_error("nothing to drop — pass --path <file> or --data <text>")
     if path is not None and data is not None:
         output.emit_error("pass --path or --data, not both")
-    args = _target_args(index, selector, role, name, text)
+    args = _target_args(index, sel, role, name, text, nth=nth)
     if path is not None:
         # Read on the CLIENT side so the path resolves against the user's cwd.
         source = Path(path)
@@ -1794,6 +1954,7 @@ def upload(
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Set file(s) on a file input.
 
@@ -1818,7 +1979,7 @@ def upload(
         output.emit_error("error: provide at least one file path to upload")
     args: dict[str, Any] = {}
     if index is not None or selector or role or text:
-        args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+        args = _target_args(index, selector, role, name, text, exact=exact, frame=frame, nth=nth)
     # Resolve paths against the CLIENT's cwd so the daemon receives absolute paths.
     args["paths"] = [str(Path(p).resolve()) for p in tokens]
     output.emit_envelope(_send_env("upload", args))
@@ -1831,7 +1992,7 @@ def upload(
 
 @app.command()
 def wait(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -1840,9 +2001,11 @@ def wait(
     timeout: int = typer.Option(None, "--timeout", help="Timeout in milliseconds."),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """Wait for an element to reach a state (visible/hidden)."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     args["state"] = state
     if timeout is not None:
         args["timeout"] = timeout
@@ -1867,10 +2030,15 @@ def expect_text(
     timeout: int = typer.Option(None, "--timeout", help="Timeout in milliseconds."),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
-    """Assert an element contains text (prints PASSED/FAILED). By index: `expect-text 0 Hi`."""
-    index, positional = _index_or_value(target, expected, bool(selector or role or text))
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    """Assert an element contains text: `expect-text 0 Hi` or `expect-text "#flash" Hi`."""
+    index, pos_selector, positional = _index_or_value(
+        target, expected, bool(selector or role or text)
+    )
+    args = _target_args(
+        index, selector or pos_selector, role, name, text, exact=exact, frame=frame, nth=nth
+    )
     want = positional if positional is not None else expected_text
     if want is None:
         output.emit_error(
@@ -2171,6 +2339,7 @@ def eval_js(
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+    nth: int = _NTH_OPT,
 ) -> None:
     """Evaluate JavaScript and print the result.
 
@@ -2187,7 +2356,7 @@ def eval_js(
     args: dict[str, Any] = {"expression": expression, "arg": parsed_arg}
     if index is not None or selector or role or text:
         args.update(
-            _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+            _target_args(index, selector, role, name, text, exact=exact, frame=frame, nth=nth)
         )
     env = _send_env("eval", args)
     if as_json:
@@ -2442,38 +2611,42 @@ def network_export(
 
 @app.command("read-text")
 def read_text(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """OCR the targeted element's screenshot and print the recognized text."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit(_send("read_text", args))
 
 
 @app.command("solve-captcha")
 def solve_captcha(
-    index: int = typer.Argument(None),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
+    nth: int = _NTH_OPT,
 ) -> None:
     """OCR-solve a text CAPTCHA in the targeted element and print the solution."""
-    args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+    index, sel = _positional(target, selector)
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit(_send("solve_captcha", args))
 
 
 @app.command("find-image")
 def find_image(
     template: str = typer.Argument(..., help="Path to the template PNG to search for."),
-    index: int = typer.Argument(None, help="Optional field index to scope the search."),
+    target: str = _TARGET_ARG,
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -2482,14 +2655,15 @@ def find_image(
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Find a template image inside the page (or a targeted element)."""
+    index, sel = _positional(target, selector)
     args: dict[str, Any] = {
         "template_path": str(Path(template).resolve()),
         "confidence": confidence,
     }
     if index is not None:
         args["index"] = index
-    if selector or role or text:
-        args["selector"] = selector
+    if sel or role or text:
+        args["selector"] = sel
         args["role"] = role
         args["name"] = name
         args["target_text"] = text

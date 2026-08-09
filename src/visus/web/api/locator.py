@@ -108,6 +108,13 @@ class Locator:
             return self._child({"kind": "xpath", "value": selector[len("xpath=") :]})
         if selector.startswith("css="):
             return self._child(self._css_step(selector[len("css=") :], deep))
+        if selector.startswith("text="):
+            # Playwright's text engine, and what a model writes for "find by the
+            # words on screen". Quoting the value asks for an exact match there,
+            # so it maps onto get_by_text's `exact` rather than a second matcher.
+            value = selector[len("text=") :].strip()
+            exact = len(value) >= 2 and value[0] == '"' and value[-1] == '"'
+            return self._child(_text_step("text", value[1:-1] if exact else value, exact))
         if selector.startswith("//") or selector.startswith("("):
             return self._child({"kind": "xpath", "value": selector})
         return self._child(self._css_step(selector, deep))

@@ -52,6 +52,25 @@ def test_locator_css_and_xpath_prefixes():
     assert mk("//a") == [{"kind": "xpath", "value": "//a"}]
 
 
+def test_locator_text_engine_prefix():
+    """`text=Sign in` is what a Playwright user — or a model — writes for a text target.
+
+    It resolves to exactly the `get_by_text` step, so one spelling of "find by
+    visible text" exists rather than two that could drift apart. `text="Sign in"`
+    with quotes is Playwright's EXACT-match form.
+    """
+    d = _RecordingDelegate()
+
+    def mk(sel):
+        return _steps(Locator(d, (), _DEFAULTS).locator(sel))
+
+    assert mk("text=Sign in") == [{"kind": "text", "value": "Sign in", "exact": False}]
+    assert mk('text="Sign in"') == [{"kind": "text", "value": "Sign in", "exact": True}]
+    assert mk("text=  padded  ") == [{"kind": "text", "value": "padded", "exact": False}]
+    # a CSS selector that merely CONTAINS "text=" is not the text engine
+    assert mk('[data-x="text=1"]') == [{"kind": "css", "value": '[data-x="text=1"]'}]
+
+
 def test_get_by_role_appends_step_immutably():
     d = _RecordingDelegate()
     root = Locator(d, (), _DEFAULTS)

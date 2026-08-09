@@ -318,6 +318,35 @@ def test_list_sessions_merges_local_and_other_projects(
         srv.close()
 
 
+def test_the_upward_walk_does_not_mistake_the_registry_for_a_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``~/.visus/sessions`` is the REGISTRY, not some project's local state.
+
+    Every project under the user's home (i.e. nearly all of them) has the visus
+    home on its upward path. A project with no ``.visus`` of its own would walk
+    straight into it and report every other project's session as this project's
+    "local" one — the same walk that binds ``repo/src`` to ``repo``'s daemon.
+    """
+    home = tmp_path / "home"
+    (home / ".visus" / "sessions").mkdir(parents=True)
+    (home / ".visus" / "sessions" / "abc123-other.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("VISUS_WEB_HOME", str(home / ".visus"))
+    project = home / "code" / "project"
+    project.mkdir(parents=True)
+
+    assert session_client._find_sessions_dir(project) is None
+    assert session_client._find_session_file(project, "other") is None
+    # the DEFAULT ~/.visus is a registry too, even with the override pointed away
+    assert session_client._is_registry(Path.home() / ".visus" / "sessions")
+
+    # a real project-local directory is still found, including from a subfolder
+    (project / ".visus" / "sessions").mkdir(parents=True)
+    src = project / "src"
+    src.mkdir()
+    assert session_client._find_sessions_dir(src) == project / ".visus" / "sessions"
+
+
 def test_list_sessions_marks_a_dead_entry_not_live(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

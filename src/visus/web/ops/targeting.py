@@ -59,20 +59,29 @@ def make_locator(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> Locator:
     """Resolve a locator from the given target params.
 
     ``frame`` is applied first, so a role/text/selector target is looked up
     *inside* that iframe rather than in the top document.
+
+    ``nth`` picks one match out of several (0-based; negative counts from the
+    end). It is the escape hatch a strict-mode violation points at, and it lives
+    HERE so both frontends offer it — an error that advises a way out must be
+    followable on whichever surface received it.
     """
     root: Any = page if frame is None else page.frame_locator(frame)
+    loc: Locator
     if role is not None:
-        return cast(Locator, root.get_by_role(role, name=name, exact=exact))
-    if text is not None:
-        return cast(Locator, root.get_by_text(text, exact=exact))
-    if selector is not None:
-        return cast(Locator, root.locator(selector))
-    raise ValueError("provide one of: index, role, text, selector")
+        loc = cast(Locator, root.get_by_role(role, name=name, exact=exact))
+    elif text is not None:
+        loc = cast(Locator, root.get_by_text(text, exact=exact))
+    elif selector is not None:
+        loc = cast(Locator, root.locator(selector))
+    else:
+        raise ValueError("provide one of: index, role, text, selector")
+    return loc.nth(nth) if nth is not None else loc
 
 
 def resolve_field(

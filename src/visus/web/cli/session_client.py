@@ -165,10 +165,12 @@ def _find_session_file(
     cur = cur.resolve()
     filename = f"{session_name(name)}.json"
     for d in [cur, *cur.parents]:
-        sessions = d / ".visus" / "sessions"
-        if _is_registry(sessions):
-            continue
-        candidate = sessions / filename
+        # Sem pular a home aqui, de propósito: este lookup é por NOME EXATO, e um
+        # registro nunca se chama `<name>.json` (é `<sha>-<name>.json`), então não
+        # há colisão a evitar. Pular derrubaria quem roda com cwd == ~, cuja sessão
+        # vive legitimamente em `~/.visus/sessions/<name>.json` — medido: `session
+        # start` no home criava uma sessão que nenhum comando seguinte achava.
+        candidate = d / ".visus" / "sessions" / filename
         if candidate.is_file():
             return candidate
     return None

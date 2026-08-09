@@ -341,8 +341,11 @@ def test_the_upward_walk_does_not_mistake_the_registry_for_a_project(
     # rule under test.
     fake_registry = home / ".visus" / "sessions"
     assert session_client._find_sessions_dir(project) != fake_registry
-    assert session_client._find_session_file(project, "other") is None
     assert session_client._is_registry(fake_registry)
+    # O lookup por NOME EXATO não pula a home: um registro se chama
+    # `<sha>-<name>.json`, então `other.json` nunca casaria com ele de qualquer
+    # forma — e pular quebraria quem trabalha com cwd == ~.
+    assert session_client._find_session_file(project, "other") is None
     # the DEFAULT ~/.visus is a registry too, even with the override pointed away
     assert session_client._is_registry(Path.home() / ".visus" / "sessions")
 
@@ -351,6 +354,25 @@ def test_the_upward_walk_does_not_mistake_the_registry_for_a_project(
     src = project / "src"
     src.mkdir()
     assert session_client._find_sessions_dir(src) == project / ".visus" / "sessions"
+
+
+def test_a_session_started_in_the_home_directory_is_still_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cwd == ~` é incomum, mas legítimo — e foi o que a regra de registro quebrou.
+
+    MEDIDO: `visus session start` rodado no home criava
+    `~/.visus/sessions/<name>.json` e o comando SEGUINTE não achava nada, porque
+    o lookup pulava a pasta inteira. O nome exato nunca colide com um registro
+    (`<sha>-<name>.json`), então não havia o que pular aqui.
+    """
+    home = tmp_path / "home"
+    sessions = home / ".visus" / "sessions"
+    sessions.mkdir(parents=True)
+    monkeypatch.setenv("VISUS_WEB_HOME", str(home / ".visus"))
+    (sessions / "trabalho.json").write_text('{"pid": 1, "port": 2}', encoding="utf-8")
+
+    assert session_client._find_session_file(home, "trabalho") == sessions / "trabalho.json"
 
 
 def test_list_sessions_marks_a_dead_entry_not_live(

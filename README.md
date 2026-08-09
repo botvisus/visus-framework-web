@@ -407,6 +407,7 @@ command accepts `--json`.
 | Command | What it does |
 |---|---|
 | `visus codegen <URL> -o <file> --engine <e>` | Record interactions in a headed browser and generate `visus.web` code. |
+| `visus generate-locator [idx] [target] [--raw]` | Print the copy-paste `visus.web` expression for one element (plus its css/xpath by index). |
 | `visus doctor --engine <e>` | Check a browser + driver launch correctly. |
 | `visus install --engine <e>` | Resolve/download the browser driver via Selenium Manager. |
 | `visus install --skills` / `--skills=agents` | Install the bundled agent skill into `./.claude/` or `./.agents/`. |

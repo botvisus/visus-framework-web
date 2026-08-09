@@ -1078,6 +1078,34 @@ def count(
     output.emit(_send("count", args))
 
 
+@app.command("generate-locator")
+def generate_locator(
+    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    text: str = typer.Option(None, "--text"),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
+    raw: bool = typer.Option(False, "--raw", help="Print only the expression."),
+) -> None:
+    """Print the copy-paste `visus.web` expression for one element."""
+    result = _send(
+        "generate_locator",
+        _target_args(index, selector, role, name, text, exact=exact, frame=frame),
+    )
+    if raw:
+        output.set_mode(raw=True)
+    lines = [str(result.get("code", ""))]
+    if result.get("css"):
+        lines.append(f"css   : {result['css']}")
+    if result.get("xpath"):
+        lines.append(f"xpath : {result['xpath']}")
+    # The value is a str, so `emit` drops the table under --raw all by itself and
+    # this prints the expression alone.
+    output.emit(result.get("code"), table="\n".join(lines))
+
+
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------

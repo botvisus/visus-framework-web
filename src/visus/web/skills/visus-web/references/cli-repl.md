@@ -69,6 +69,7 @@ find text            grep the snapshot, with 3 rows of context around each hit
 text TARGET          print the target's text content
 attr name TARGET     print the target's attribute value
 count TARGET         count elements matching the target
+generate-locator TGT print the copy-paste visus.web expression
 wait TARGET [state]  wait until the target is visible/hidden
 expect TARGET text   assert the target contains text (PASSED/FAILED)
 cookies              list cookies for the context

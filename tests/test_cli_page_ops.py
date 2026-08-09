@@ -820,3 +820,110 @@ def test_cookie_ops_against_a_real_browser(base_url: str) -> None:
         assert h.handle("cookie_get", {"name": "other"})["result"]["present"] is True
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# generate-locator
+# ---------------------------------------------------------------------------
+
+
+def test_locator_expr_mirrors_make_locator_branch_order() -> None:
+    from visus.web.cli.codegen import locator_expr
+
+    assert locator_expr(role="button", name="Save") == 'page.get_by_role("button", name="Save")'
+    assert locator_expr(role="button", name="Save", exact=True) == (
+        'page.get_by_role("button", name="Save", exact=True)'
+    )
+    assert locator_expr(text="Sign in") == 'page.get_by_text("Sign in")'
+    assert locator_expr(selector="#u") == 'page.locator("#u")'
+    # role wins over text wins over selector -- the same order as make_locator.
+    assert locator_expr(selector="#u", role="button") == 'page.get_by_role("button")'
+    assert locator_expr(selector="#u", frame="#f1") == 'page.frame_locator("#f1").locator("#u")'
+    with pytest.raises(ValueError, match="provide one of"):
+        locator_expr()
+
+
+def test_op_generate_locator_from_the_field_cache() -> None:
+    h = _handler(_BoxPage())
+    h.handle("list_fields", {})  # populates the cache
+    out = h.handle("generate_locator", {"index": 0})["result"]
+    assert out == {
+        "code": 'page.get_by_role("button", name="Go")',
+        "css": "#b",
+        "xpath": "//button",
+    }
+    bad = h.handle("generate_locator", {"index": 5})
+    assert bad["ok"] is False and "out of range" in bad["error"]
+
+
+def test_op_generate_locator_from_a_selector_target() -> None:
+    h = _handler(_BoxPage())
+    out = h.handle("generate_locator", {"role": "button", "name": "Save"})["result"]
+    assert out == {
+        "code": 'page.get_by_role("button", name="Save")',
+        "css": None,
+        "xpath": None,
+    }
+
+
+def test_cli_generate_locator(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {}))
+        or {"code": 'page.locator("#u")', "css": "#u", "xpath": "//input"},
+    )
+    r = runner.invoke(app, ["generate-locator", "3"])
+    assert r.exit_code == 0, r.output
+    assert calls[0] == ("generate_locator", {"index": 3})
+    assert 'page.locator("#u")' in r.output
+    assert "//input" in r.output
+
+
+def test_cli_generate_locator_raw_prints_only_the_expression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--raw` means the expression alone: the emitted value is a `str`, so PLAN 4's
+    `emit` drops the css/xpath table under RAW (Prerequisites rule 6)."""
+    from visus.web.cli import output
+
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {"code": 'page.locator("#u")', "css": "#u", "xpath": "//input"},
+    )
+    try:
+        r = runner.invoke(app, ["generate-locator", "3", "--raw"])
+        assert r.exit_code == 0, r.output
+        assert r.output == 'page.locator("#u")\n'
+    finally:
+        output.set_mode()
+
+
+def test_repl_generate_locator() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return {"code": 'page.locator("#u")', "css": None, "xpath": None}
+
+    out = console.dispatch("generate-locator #u", send)
+    assert calls[0] == ("generate_locator", {"selector": "#u"})
+    assert out == 'page.locator("#u")'
+    assert "generate-locator" in console.dispatch("help", send)
+
+
+@pytest.mark.browser
+def test_generate_locator_matches_the_list_fields_column(base_url: str) -> None:
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/fields.html"
+    )
+    try:
+        fields = h.handle("list_fields", {"highlight": False})["result"]["fields"]
+        i = next(n for n, f in enumerate(fields) if f["locator"] == "#btn")
+        out = h.handle("generate_locator", {"index": i})["result"]
+        assert out["code"] == fields[i]["code"]
+        assert out["css"] == fields[i]["css"]
+    finally:
+        h.close()

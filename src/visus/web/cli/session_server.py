@@ -824,6 +824,39 @@ class SessionHandler:
     def _op_count(self, args: dict[str, Any]) -> int:
         return self._target(args).count()
 
+    def _op_generate_locator(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The copy-paste visus.web expression for a target.
+
+        For a cached index this is ``Field.code`` verbatim — the same
+        frame-aware string ``list_fields`` puts in its VISUS column — plus that
+        field's css/xpath. For a selector/role/text target the expression is
+        built by ``codegen.locator_expr`` and there is no css/xpath to report.
+        """
+        from visus.web.cli.codegen import locator_expr
+
+        index = args.get("index")
+        if index is not None:
+            i = int(index)
+            if i < 0 or i >= len(self._fields):
+                raise IndexError(
+                    f"field index {i} out of range "
+                    f"(have {len(self._fields)}; run list_fields first)"
+                )
+            field = self._fields[i]
+            return {"code": field.code, "css": field.css, "xpath": field.xpath}
+        return {
+            "code": locator_expr(
+                selector=args.get("selector"),
+                role=args.get("role"),
+                name=args.get("name"),
+                text=args.get("target_text"),
+                exact=bool(args.get("exact", False)),
+                frame=args.get("frame"),
+            ),
+            "css": None,
+            "xpath": None,
+        }
+
     # --- actions ---------------------------------------------------------
     def _op_hover(self, args: dict[str, Any]) -> str:
         self._target(args).hover()

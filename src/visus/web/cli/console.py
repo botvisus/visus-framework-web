@@ -57,6 +57,7 @@ commands:
   text TARGET          print the target's text content
   attr name TARGET     print the target's `name` attribute
   count TARGET         count elements matching the target
+  generate-locator TGT print the copy-paste visus.web expression
   wait TARGET [state]  wait until the target is visible/hidden
   expect TARGET text   assert the target contains text (PASSED/FAILED)
   cookies              list cookies for the context
@@ -464,6 +465,9 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         if cmd == "count":
             tgt, _ = _target(rest)
             return str(send("count", tgt))
+        if cmd == "generate-locator":
+            gl_target, _ = _target(rest)
+            return str(send("generate_locator", gl_target).get("code"))
         if cmd == "wait":
             tgt, tail = _target(rest)
             wait_args: dict[str, Any] = dict(tgt)

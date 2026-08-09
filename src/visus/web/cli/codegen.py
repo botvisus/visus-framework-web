@@ -63,6 +63,51 @@ def _target_expr(t: dict) -> str:  # type: ignore[type-arg]
     return f"locator({t['value']!r})"
 
 
+def _pystr(s: str) -> str:
+    """A double-quoted Python string literal.
+
+    Deliberately not ``repr``: this must match how ``Field.code`` is spelled in
+    ``driver_delegate.list_fields`` so ``visus generate-locator`` prints the same
+    text as the VISUS column of ``visus list-fields`` for the same element.
+    ``_target_expr`` above keeps ``repr`` — its output is the golden text
+    asserted in ``tests/test_codegen.py``.
+    """
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def locator_expr(
+    *,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+) -> str:
+    """The copy-paste ``visus.web`` expression for a CLI target.
+
+    Mirrors ``session_server.make_locator``'s branch order exactly — role, then
+    text, then selector — so the printed line resolves the element the CLI would
+    actually act on, and is frame-aware like ``Field.code``.
+    """
+    expr = "page" if frame is None else f"page.frame_locator({_pystr(frame)})"
+    if role is not None:
+        parts = [_pystr(role)]
+        if name is not None:
+            parts.append(f"name={_pystr(name)}")
+        if exact:
+            parts.append("exact=True")
+        return f"{expr}.get_by_role({', '.join(parts)})"
+    if text is not None:
+        parts = [_pystr(text)]
+        if exact:
+            parts.append("exact=True")
+        return f"{expr}.get_by_text({', '.join(parts)})"
+    if selector is not None:
+        return f"{expr}.locator({_pystr(selector)})"
+    raise ValueError("provide one of: role, text, selector")
+
+
 # Actions whose generated call takes no argument.
 _NO_ARG_ACTIONS: dict[str, str] = {
     "click": "click",

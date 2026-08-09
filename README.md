@@ -394,6 +394,7 @@ command accepts `--json`.
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |
 | `visus clear` | Remove the numbered field-highlight overlay. |
 | `visus highlight [idx] [target] [--style <css>] [--hide]` | Box a single element on the live page (`visus clear` erases the numbered overlay). |
+| `visus resize <w> <h>` | Resize the window so the viewport is exactly `w x h` (prints what was achieved). |
 | `visus read-text [idx] [target]` *(`[vision]`)* | OCR an element's screenshot → recognized text. |
 | `visus solve-captcha [idx] [target]` *(`[vision]`)* | OCR-solve a text CAPTCHA. |
 | `visus find-image <template.png> [idx] [target] -c <conf> [--json]` *(`[vision]`)* | Find a template image inside the page/element. |

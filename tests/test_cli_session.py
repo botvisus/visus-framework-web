@@ -418,7 +418,7 @@ def test_mutating_ops_cover_every_state_changing_op() -> None:
             "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
             "add_cookies", "clear_cookies", "eval", "state_load",
             "type", "key_down", "key_up",
-            "mouse_move", "mouse_down", "mouse_up", "mouse_wheel",
+            "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
         }
     )
     actual = session_server._MUTATING_OPS

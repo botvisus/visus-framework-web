@@ -414,3 +414,74 @@ def test_scoped_eval_against_a_real_page(base_url: str) -> None:
         assert with_arg["result"]["result"] == "btnbtn"
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# resize
+# ---------------------------------------------------------------------------
+
+
+class _ResizePage:
+    url = "http://x/"
+
+    def __init__(self) -> None:
+        self.sized: tuple[int, int] | None = None
+
+    def set_viewport_size(self, width: int, height: int) -> None:
+        self.sized = (width, height)
+
+    def evaluate(self, expression: str, arg: object = None) -> object:
+        # The window manager clamped the width -- the op must report what it got.
+        return {"w": 900, "h": 720}
+
+
+def test_op_resize_reports_the_achieved_size() -> None:
+    page = _ResizePage()
+    h = _handler(page)
+    out = h.handle("resize", {"width": 1024, "height": 720})
+    assert out["ok"] is True, out
+    assert page.sized == (1024, 720)
+    assert out["result"] == {"width": 900, "height": 720}
+
+
+def test_cli_resize(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {}))
+        or {"width": 1024, "height": 720},
+    )
+    r = runner.invoke(app, ["resize", "1024", "720"])
+    assert r.exit_code == 0, r.output
+    assert calls[0] == ("resize", {"width": 1024, "height": 720})
+    assert "1024x720" in r.output
+
+
+def test_repl_resize() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return {"width": 800, "height": 600}
+
+    out = console.dispatch("resize 800 600", send)
+    assert calls[0] == ("resize", {"width": 800, "height": 600})
+    assert "800x600" in out
+    assert "resize" in console.dispatch("help", send)
+
+
+@pytest.mark.browser
+def test_resize_changes_the_real_viewport(base_url: str) -> None:
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/fields.html"
+    )
+    try:
+        out = h.handle("resize", {"width": 900, "height": 600})
+        assert out["ok"] is True, out
+        assert out["result"]["width"] == 900
+        assert out["result"]["height"] == 600
+        inner = h.handle("eval", {"expression": "() => window.innerWidth"})
+        assert inner["result"]["result"] == 900
+    finally:
+        h.close()

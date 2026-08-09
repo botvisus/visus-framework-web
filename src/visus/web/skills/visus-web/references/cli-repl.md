@@ -63,6 +63,7 @@ drag TARGET TARGET   drag the first target onto the second
 goto url             navigate to url
 back / forward / reload
 title / url          print the page title / current URL
+resize w h           resize the window so the viewport is w×h
 snapshot [sel] [--boxes] interactive elements (REF/role/name), optionally scoped
 find text            grep the snapshot, with 3 rows of context around each hit
 text TARGET          print the target's text content

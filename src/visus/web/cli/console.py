@@ -51,6 +51,7 @@ commands:
   reload               reload the current page
   title                print the page title
   url                  print the current URL
+  resize w h           resize the window so the viewport is w×h
   snapshot [sel] [--boxes] interactive elements (REF/role/name), optionally scoped
   find text            grep the snapshot, with 3 rows of context around each hit
   text TARGET          print the target's text content
@@ -397,6 +398,9 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             return str(send("title", {}))
         if cmd == "url":
             return str(send("url", {}))
+        if cmd == "resize":
+            r = send("resize", {"width": int(rest[0]), "height": int(rest[1])})
+            return f"viewport is now {r['width']}x{r['height']}"
         if cmd == "snapshot":
             want_boxes = "--boxes" in rest
             # `--boxes` is a flag, not the scope selector PLAN 4 reads from rest[0].

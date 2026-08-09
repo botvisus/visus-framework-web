@@ -944,6 +944,16 @@ def url() -> None:
 
 
 @app.command()
+def resize(
+    width: int = typer.Argument(..., help="Viewport width in CSS pixels."),
+    height: int = typer.Argument(..., help="Viewport height in CSS pixels."),
+) -> None:
+    """Resize the session window so the viewport is exactly width × height."""
+    result = _send("resize", {"width": width, "height": height})
+    output.emit(result, table=f"viewport is now {result['width']}x{result['height']}")
+
+
+@app.command()
 def find(
     query: str = typer.Argument(..., help="Text to look for in the page snapshot."),
     regex: bool = typer.Option(

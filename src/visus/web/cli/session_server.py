@@ -115,7 +115,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
         "add_cookies", "clear_cookies", "eval", "state_load",
         "type", "key_down", "key_up",
-        "mouse_move", "mouse_down", "mouse_up", "mouse_wheel",
+        "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
     }
 )
 
@@ -695,6 +695,24 @@ class SessionHandler:
     # --- inspect ---------------------------------------------------------
     def _op_title(self, args: dict[str, Any]) -> str:
         return self.page().title()
+
+    def _op_resize(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Resize the window so the viewport is width × height.
+
+        Returns the size actually achieved: a window manager can clamp the
+        request (minimum widths, screen size), and reporting the request back
+        would hide that.
+        """
+        width, height = int(args.get("width", 0)), int(args.get("height", 0))
+        if width <= 0 or height <= 0:
+            raise ValueError("resize needs a positive width and height")
+        page = self.page()
+        page.set_viewport_size(width, height)
+        got = cast(
+            "dict[str, Any]",
+            page.evaluate("() => ({w: window.innerWidth, h: window.innerHeight})"),
+        )
+        return {"width": int(got["w"]), "height": int(got["h"])}
 
     def _op_url(self, args: dict[str, Any]) -> str:
         return self.page().url

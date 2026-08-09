@@ -299,3 +299,118 @@ def test_boxes_come_from_a_real_page(base_url: str) -> None:
         assert go["box"]["width"] > 0
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# element-scoped eval (CLI + MCP)
+# ---------------------------------------------------------------------------
+
+
+class _EvalLocator:
+    def __init__(self, log: list[str], label: str) -> None:
+        self._log = log
+        self._label = label
+
+    def first(self) -> _EvalLocator:
+        return self
+
+    def evaluate(self, expression: str, arg: object = None) -> object:
+        self._log.append(f"loc.evaluate:{self._label}:{expression}:{arg!r}")
+        return "element-value"
+
+
+class _EvalPage:
+    url = "http://x/"
+
+    def __init__(self) -> None:
+        self.log: list[str] = []
+
+    def locator(self, selector: str, *, deep: bool = False) -> _EvalLocator:
+        return _EvalLocator(self.log, f"loc({selector})")
+
+    def evaluate(self, expression: str, arg: object = None) -> object:
+        self.log.append(f"page.evaluate:{expression}:{arg!r}")
+        return "page-value"
+
+
+def test_op_eval_without_a_target_stays_on_the_page() -> None:
+    page = _EvalPage()
+    h = _handler(page)
+    out = h.handle("eval", {"expression": "() => document.title", "arg": None})
+    assert out["result"] == {"result": "page-value"}
+    assert page.log == ["page.evaluate:() => document.title:None"]
+
+
+def test_op_eval_with_a_target_runs_on_the_element() -> None:
+    page = _EvalPage()
+    h = _handler(page)
+    out = h.handle("eval", {"expression": "(el) => el.id", "selector": "#b", "arg": 7})
+    assert out["result"] == {"result": "element-value"}
+    assert page.log == ["loc.evaluate:loc(#b):(el) => el.id:7"]
+
+
+def test_cli_eval_forwards_the_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send_envelope",
+        lambda op, args=None, **_: calls.append((op, args or {}))
+        or {"ok": True, "result": {"result": "v"}, "page": {"url": "http://x/", "title": "T"}},
+    )
+    assert runner.invoke(app, ["eval", "() => document.title"]).exit_code == 0
+    assert runner.invoke(app, ["eval", "(el) => el.id", "--index", "3"]).exit_code == 0
+    assert runner.invoke(app, ["eval", "(el) => el.id", "-s", "#b"]).exit_code == 0
+    assert calls[0] == ("eval", {"expression": "() => document.title", "arg": None})
+    assert calls[1][1]["index"] == 3 and calls[1][1]["expression"] == "(el) => el.id"
+    assert calls[2][1]["selector"] == "#b"
+
+
+def test_repl_eval_and_eval_on() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return {"result": "v"}
+
+    console.dispatch("eval () => document.title", send)
+    console.dispatch("eval-on 3 (el) => el.id", send)
+    console.dispatch("eval-on #b (el) => el.id", send)
+    assert calls[0] == ("eval", {"expression": "() => document.title"})
+    assert calls[1] == ("eval", {"index": 3, "expression": "(el) => el.id"})
+    assert calls[2] == ("eval", {"selector": "#b", "expression": "(el) => el.id"})
+    assert "eval-on" in console.dispatch("help", send)
+
+
+def test_mcp_browser_evaluate_accepts_a_target() -> None:
+    """The MCP tool must gain the same scoping, not just the CLI."""
+    import inspect
+
+    from visus.web.mcp import server as mcp_server
+
+    params = inspect.signature(mcp_server.browser_evaluate).parameters
+    for want in ("selector", "role", "name", "text", "exact", "frame"):
+        assert want in params, f"browser_evaluate is missing {want!r}"
+
+
+@pytest.mark.browser
+def test_scoped_eval_against_a_real_page(base_url: str) -> None:
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/fields.html"
+    )
+    try:
+        page_level = h.handle("eval", {"expression": "() => document.title"})
+        assert page_level["result"]["result"] == "fields fixture"
+
+        scoped = h.handle(
+            "eval", {"expression": "(el) => el.textContent", "selector": "#btn"}
+        )
+        assert scoped["ok"] is True, scoped
+        assert scoped["result"]["result"] == "Click me"
+
+        with_arg = h.handle(
+            "eval",
+            {"expression": "(el, n) => el.id.repeat(n)", "selector": "#btn", "arg": 2},
+        )
+        assert with_arg["result"]["result"] == "btnbtn"
+    finally:
+        h.close()

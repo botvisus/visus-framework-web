@@ -1009,8 +1009,16 @@ class SessionHandler:
 
     # --- javascript ------------------------------------------------------
     def _op_eval(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Evaluate a JS function, on the page or on a targeted element.
+
+        With no target the function is called as ``(expression)(arg)``. With a
+        target (index / selector / role / target_text) it is called as
+        ``(expression)(element, arg)`` — the first parameter is the DOM element.
+        """
         expression = args.get("expression", "")
         arg = args.get("arg")
+        if self._has_target(args):
+            return {"result": self._target(args).first().evaluate(expression, arg)}
         return {"result": self.page().evaluate(expression, arg)}
 
     # --- devtools: console / network -------------------------------------

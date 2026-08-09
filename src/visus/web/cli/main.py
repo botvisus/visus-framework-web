@@ -1406,16 +1406,33 @@ def state_load(
 def eval_js(
     expression: str = typer.Argument(..., help="A JS function, e.g. '() => document.title'."),
     arg: str = typer.Argument(None, help="Optional JSON argument passed to the function."),
+    index: int = typer.Option(None, "--index", "-i", help="Run on this field instead of the page."),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    text: str = typer.Option(None, "--text", help="Target an element by its visible text."),
+    exact: bool = _EXACT_OPT,
+    frame: str = _FRAME_OPT,
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
-    """Evaluate a JavaScript expression in the page and print the result."""
+    """Evaluate JavaScript and print the result.
+
+    On the page: `visus eval '() => document.title'` — the function takes the
+    optional argument. On an element: `visus eval '(el) => el.id' -s "#u"` — the
+    function takes the ELEMENT first, then the optional argument.
+    """
     parsed_arg: Any = None
     if arg is not None:
         try:
             parsed_arg = _json.loads(arg)
         except _json.JSONDecodeError:
             parsed_arg = arg  # treat as a plain string when not valid JSON
-    env = _send_env("eval", {"expression": expression, "arg": parsed_arg})
+    args: dict[str, Any] = {"expression": expression, "arg": parsed_arg}
+    if index is not None or selector or role or text:
+        args.update(
+            _target_args(index, selector, role, name, text, exact=exact, frame=frame)
+        )
+    env = _send_env("eval", args)
     if as_json:
         output.set_mode(as_json=True)
     value = (env.get("result") or {}).get("result")

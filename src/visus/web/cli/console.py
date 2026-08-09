@@ -64,6 +64,7 @@ commands:
   state-save [file]    save cookies + web storage (default storage-state.json)
   state-load file      restore a snapshot (navigate to the origin first)
   eval expr            evaluate a JS expression
+  eval-on TGT expr     evaluate `(el, arg) => …` on one element
   logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
   requests [FILTER]    captured network responses (substring URL filter)
   request N            one captured response, with its body
@@ -492,6 +493,11 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 "eval",
                 {"expression": " ".join(rest)},
                 lambda r: str((r or {}).get("result")),
+            )
+        if cmd == "eval-on":
+            ev_target, ev_tail = _target(rest)
+            return str(
+                send("eval", {**ev_target, "expression": " ".join(ev_tail)}).get("result")
             )
         if cmd == "logs":
             messages = send("console_messages", {"level": rest[0] if rest else None}).get(

@@ -658,12 +658,32 @@ def browser_screenshot(
 
 
 @mcp.tool()
-def browser_evaluate(expression: str, arg: object = None) -> object:
-    """Evaluate a JavaScript expression in the browser and return the result.
+def browser_evaluate(
+    expression: str,
+    arg: object = None,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+) -> object:
+    """Evaluate a JavaScript function in the browser and return the result.
 
-    The expression must be a function, e.g. '() => document.title' or '(x) => x * 2'.
+    With no target the function runs on the page and is called as
+    '(expression)(arg)', e.g. '() => document.title'.
+
+    With a target (selector / role+name / text) it runs on that ELEMENT and is
+    called as '(expression)(element, arg)', e.g. '(el) => el.value' — this is
+    how you read id/class/dataset or any property list_fields does not return.
     """
-    return _session.page().evaluate(expression, arg)
+    page = _session.page()
+    if selector is None and role is None and text is None:
+        return page.evaluate(expression, arg)
+    loc = make_locator(
+        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return loc.first().evaluate(expression, arg)
 
 
 # ---------------------------------------------------------------------------

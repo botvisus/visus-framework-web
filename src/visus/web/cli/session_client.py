@@ -332,6 +332,30 @@ def _daemon_interpreter() -> str:
     return str(pythonw) if pythonw.is_file() else sys.executable
 
 
+def _daemon_argv() -> list[str]:
+    """Command PREFIX that hosts the daemon; the daemon's own args are appended.
+
+    Normally ``[interpreter, -m, visus.web.cli.session_server]``. A FROZEN host
+    (Nuitka/PyInstaller) has no python to spawn — ``sys.executable`` points at an
+    embedded interpreter that may not exist on disk, and the spawn dies with
+    ``FileNotFoundError [WinError 2]``. Such a host sets ``VISUS_WEB_DAEMON_CMD``
+    to a JSON list naming itself (e.g. ``["app.exe", "__daemon", "web"]``) and
+    runs ``session_server.main`` from inside.
+
+    A malformed value falls back rather than raising: a bad env var must not be
+    the reason `session start` fails.
+    """
+    override = os.environ.get("VISUS_WEB_DAEMON_CMD")
+    if override:
+        try:
+            parsed = json.loads(override)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list) and parsed and all(isinstance(p, str) for p in parsed):
+            return [str(p) for p in parsed]
+    return [_daemon_interpreter(), "-m", "visus.web.cli.session_server"]
+
+
 def start_daemon(
     engine: str = "chrome",
     headless: bool = False,
@@ -404,14 +428,7 @@ def start_daemon(
         start_new_session = True
 
     subprocess.Popen(
-        [
-            _daemon_interpreter(),
-            "-m",
-            "visus.web.cli.session_server",
-            engine,
-            env["VISUS_WEB_HEADLESS"],
-        ]
-        + ([url] if url else []),
+        _daemon_argv() + [engine, env["VISUS_WEB_HEADLESS"]] + ([url] if url else []),
         cwd=str(base),
         env=env,
         stdin=subprocess.DEVNULL,

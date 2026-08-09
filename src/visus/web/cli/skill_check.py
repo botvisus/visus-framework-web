@@ -11,6 +11,7 @@ Port of ``playwright-cli/skillCheck.js``. Three properties are load-bearing:
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -49,6 +50,22 @@ def frame(lines: list[str]) -> str:
     return "\n".join([top, *body, bottom]) + "\n"
 
 
+def normalise_cli_name(text: str) -> str:
+    """Fold the ``visus-web`` command spelling back to ``visus`` for comparison.
+
+    An installer may rewrite the skill to name the binary that actually works in
+    its environment: ``visus`` is not ours alone (visus-desktop declares the same
+    console script), so a mixed install has to say ``visus-web``. That rewrite is
+    NOT staleness, and treating it as such is worse than useless — the warning
+    fires on every command and tells the user to reinstall, which would replace
+    the corrected copy with one naming a binary that runs another program.
+
+    Only the whole token is folded: ``visus-web-mcp`` and ``visus.web`` keep their
+    names.
+    """
+    return re.sub(r"(?<![\w.-])visus-web(?![\w.-])", "visus", text)
+
+
 def check_installed_skills(cwd: Path | None = None) -> None:
     """Compare installed vs bundled; write a framed warning to STDERR on drift."""
     try:
@@ -56,9 +73,10 @@ def check_installed_skills(cwd: Path | None = None) -> None:
         bundled = read_skill(bundled_skill_dir() / "SKILL.md")
         if bundled is None:
             return
+        bundled_key = normalise_cli_name(bundled)
         for target in installed_skill_targets(base):
             installed = read_skill(target.dir / "SKILL.md")
-            if installed is None or installed == bundled:
+            if installed is None or normalise_cli_name(installed) == bundled_key:
                 continue
             try:
                 shown: Path | str = target.dir.relative_to(base)

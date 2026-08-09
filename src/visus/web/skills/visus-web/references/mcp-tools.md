@@ -5,7 +5,7 @@ pip install "visus-web[mcp]"
 visus-web-mcp          # stdio; `visus mcp` is the same thing
 ```
 
-**47 tools**. By default they drive the server's OWN browser, a *different
+**50 tools**. By default they drive the server's OWN browser, a *different
 process* from the CLI session daemon and with opposite defaults — headless, and
 new tabs are **not** followed automatically.
 
@@ -37,7 +37,7 @@ template `visus://skill/references/{name}`, and the prompt
 }
 ```
 
-## The 47 tools, by group
+## The 50 tools, by group
 
 | Group | Tools |
 |---|---|
@@ -51,10 +51,11 @@ template `visus://skill/references/{name}`, and the prompt
 | Cookies | `browser_get_cookies`, `browser_add_cookies`, `browser_clear_cookies` |
 | Media / JS | `browser_screenshot`, `browser_evaluate` |
 | Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha`, `browser_find_image` |
+| Tracing | `browser_tracing_start`, `browser_tracing_stop`, `browser_tracing_report` — record a run and write a SINGLE-FILE HTML report: every screenshot embedded as a data URI, a KPI band, per-step logs, and the ARIA snapshot on failure. Hand the path to your human; it needs no viewer. `report` works on any trace zip with no browser at all. The other two refuse while attached, because the actions would be happening in the daemon. |
 | Lifecycle | `browser_close` |
 | Attach | `browser_attach_session`, `browser_detach_session` |
 
-That is 4 + 9 + 12 + 2 + 6 + 1 + 2 + 3 + 2 + 3 + 1 + 2 = **47**, pinned by
+That is 4 + 9 + 12 + 2 + 6 + 1 + 2 + 3 + 2 + 3 + 1 + 2 + 3 = **50**, pinned by
 `tests/test_mcp_server.py`.
 
 **Recommended agent flow:** `browser_navigate` → `browser_snapshot` (read the

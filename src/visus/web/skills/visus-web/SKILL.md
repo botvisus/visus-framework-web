@@ -65,7 +65,7 @@ When something goes wrong: **[references/troubleshooting.md](references/troubles
 | You are | Use | Why |
 |---|---|---|
 | A coding agent with shell access | **the `visus` CLI** | Cheapest tokens: no tool schemas, one line per action, numbered indexes instead of an accessibility dump. This is the default. |
-| An MCP client without shell access | **`visus-web-mcp`** | **47 tools** over the same browser surface. Its browser is a *separate* process from the CLI daemon **by default**. Call `browser_attach_session` to drive the daemon's browser instead — then the model and the human share one page, one session and one field-index vocabulary. `browser_detach_session` goes back to the server's own browser. |
+| An MCP client without shell access | **`visus-web-mcp`** | **50 tools** over the same browser surface. Its browser is a *separate* process from the CLI daemon **by default**. Call `browser_attach_session` to drive the daemon's browser instead — then the model and the human share one page, one session and one field-index vocabulary. `browser_detach_session` goes back to the server's own browser. |
 | Writing a durable script or a test | **the Python library** | `from visus.web import launch, rpa, expect`. Auto-waiting actions, auto-retrying assertions, HTML run reports. |
 
 The CLI daemon and the MCP server hold **independent** browsers with opposite
@@ -112,7 +112,7 @@ browser's console messages, which are `visus logs`.)
 
 ## MCP server
 
-`visus-web-mcp` (or `visus mcp`) exposes **47 tools** — navigation, ARIA
+`visus-web-mcp` (or `visus mcp`) exposes **50 tools** — navigation, ARIA
 snapshot, `browser_list_fields`, every action, tabs, dialogs, cookies,
 network/console capture, screenshot, evaluate, and the vision tools. Configure
 with `VISUS_WEB_ENGINE` (chrome | edge | firefox | edge_ie) and

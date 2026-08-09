@@ -76,6 +76,8 @@ SESSIONLESS_TOOLS: frozenset[str] = frozenset(
         # Pure HTML parsing — `visus translate` is its CLI twin and is likewise the
         # only command in either CLI that works with no browser running at all.
         "browser_translate_element",
+        # Pure zip -> html rendering. No page, no session, no daemon.
+        "browser_tracing_report",
     }
 )
 
@@ -89,6 +91,10 @@ LOCAL_ONLY_TOOLS: frozenset[str] = frozenset(
         # never be one of the ops that gets sent.
         "browser_attach_session",
         "browser_detach_session",
+        # Tracing installs a Recorder in THIS process. Attached, the actions happen
+        # in the daemon, so these refuse and name `visus tracing-start/stop`.
+        "browser_tracing_start",
+        "browser_tracing_stop",
     }
 )
 

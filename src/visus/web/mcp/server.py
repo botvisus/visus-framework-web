@@ -1035,6 +1035,63 @@ def browser_find_image(
 
 
 # ---------------------------------------------------------------------------
+# Tracing: the single-file HTML report
+# ---------------------------------------------------------------------------
+
+
+def _refuse_while_attached(cli_command: str) -> None:
+    """Refuse a this-process-only operation while the browser lives elsewhere."""
+    if _remote is not None:
+        raise RuntimeError(
+            "attached to a visus session — the browser runs in the daemon, so this "
+            f"server would record nothing. Run `{cli_command}` against that session "
+            "instead, or call browser_detach_session first."
+        )
+
+
+@mcp.tool()
+def browser_tracing_start() -> str:
+    """Start recording every action with a screenshot, timing and correlated logs.
+
+    Recording continues until browser_tracing_stop, which writes a trace zip and a
+    SINGLE-FILE HTML report — every screenshot embedded as a data URI, a KPI band,
+    per-step logs and, on any failure, the ARIA snapshot of the page at that
+    moment. That file needs no viewer: attach it to a ticket, a PR or a CI job.
+    """
+    from visus.web import tracing
+
+    _refuse_while_attached("visus tracing-start")
+    recorder = tracing.start_recording()
+    return f"tracing started (run {recorder.run_id})"
+
+
+@mcp.tool()
+def browser_tracing_stop(zip_path: str = "run.zip", report: str = "report.html") -> dict[str, str]:
+    """Stop recording; write the trace zip and the single-file HTML report.
+
+    Returns the absolute paths of both, e.g. {"zip": "...", "report": "..."}.
+    Give the report path to the human — it is self-contained.
+    """
+    from visus.web import tracing
+
+    _refuse_while_attached("visus tracing-stop --report")
+    return tracing.stop_recording(zip_path, report)
+
+
+@mcp.tool()
+def browser_tracing_report(zip_path: str, output: str = "report.html") -> str:
+    """Render the single-file HTML report from an existing trace zip.
+
+    Works on any zip written by browser_tracing_stop, `visus tracing-stop` or the
+    library's tracing.record() — no browser and no session needed. Returns the
+    absolute path of the written HTML.
+    """
+    from visus.web import tracing
+
+    return tracing.render_report(zip_path, output)
+
+
+# ---------------------------------------------------------------------------
 # Attach: one browser instead of two
 # ---------------------------------------------------------------------------
 

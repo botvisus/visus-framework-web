@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import os
-from typing import Any, cast
 
 from visus.web import Engine, launch
 from visus.web.api.browser import Browser
 from visus.web.api.context import Context
-from visus.web.api.locator import Locator
 from visus.web.api.page import Page
 from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
+from visus.web.ops.targeting import make_locator
+
+__all__ = ["Session", "make_locator"]
 
 
 class Session:
@@ -139,22 +140,3 @@ class Session:
         self._active_handle = None
 
 
-def make_locator(
-    page: Page,
-    *,
-    selector: str | None = None,
-    role: str | None = None,
-    name: str | None = None,
-    text: str | None = None,
-    exact: bool = False,
-    frame: str | None = None,
-) -> Locator:
-    """Resolve a locator from the given target params."""
-    root: Any = page if frame is None else page.frame_locator(frame)
-    if role is not None:
-        return cast(Locator, root.get_by_role(role, name=name, exact=exact))
-    if text is not None:
-        return cast(Locator, root.get_by_text(text, exact=exact))
-    if selector is not None:
-        return cast(Locator, root.locator(selector))
-    raise ValueError("provide one of: role, text, selector")

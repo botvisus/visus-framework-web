@@ -39,43 +39,22 @@ from visus.web.api.page import Page
 from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
 from visus.web.cli import session_client
 from visus.web.cli.codegen import generate_line
+from visus.web.ops.targeting import StaleFieldIndexError, make_locator, resolve_field
+from visus.web.ops.targeting import any_match_visible as _any_match_visible
 
-
-def _any_match_visible(loc: Locator) -> bool:
-    """True if at least one element the locator matches is visible.
-
-    Local copy of the MCP helper: tolerant of mid-navigation errors (treated as
-    "not yet visible") and of locators that match several elements.
-    """
-    try:
-        return any(loc.nth(i).is_visible() for i in range(loc.count()))
-    except errors.VisusWebError:
-        return False
-
-
-def make_locator(
-    page: Page,
-    *,
-    selector: str | None = None,
-    role: str | None = None,
-    name: str | None = None,
-    text: str | None = None,
-    exact: bool = False,
-    frame: str | None = None,
-) -> Locator:
-    """Resolve a locator from the given target params.
-
-    Local copy of the MCP helper (the cli must not import the ``mcp`` package, as
-    the ``mcp`` extra may be absent).
-    """
-    root: Any = page if frame is None else page.frame_locator(frame)
-    if role is not None:
-        return cast(Locator, root.get_by_role(role, name=name, exact=exact))
-    if text is not None:
-        return cast(Locator, root.get_by_text(text, exact=exact))
-    if selector is not None:
-        return cast(Locator, root.locator(selector))
-    raise ValueError("provide one of: index, role, text, selector")
+# `StaleFieldIndexError` and `make_locator` are re-exported, not used here: PLAN 3
+# named the exception `session_server.StaleFieldIndexError` and tests/main.py
+# import `make_locator` from this module. Listing them in __all__ is what tells
+# ruff's F401 they are a deliberate re-export.
+__all__ = [
+    "SessionHandler",
+    "SessionLockedError",
+    "StaleFieldIndexError",
+    "main",
+    "make_locator",
+    "serve",
+    "session_file",
+]
 
 
 def _norm_rect(rect: Any) -> dict[str, float] | None:
@@ -112,17 +91,6 @@ def _cookie_matches(
     if path is not None and cookie.get("path") != path:
         return False
     return True
-
-
-class StaleFieldIndexError(RuntimeError):
-    """Raised when a cached field index no longer belongs to the current page.
-
-    Index targeting re-resolves a stored selector against whatever page is loaded
-    now. Generated selectors intentionally fall back to generic forms
-    (``button.btn.primary``, ``input[type="email"]``, a bare tag), each of which
-    matches *something* on a different page — so without this guard a stale index
-    clicks the wrong element and reports success.
-    """
 
 
 # Ops that change what the agent is looking at. Only these get a `page` footer;
@@ -492,23 +460,7 @@ class SessionHandler:
     # --- targeting -------------------------------------------------------
     def _resolve_field(self, index: int) -> Locator:
         """Re-resolve a cached field for an action via the foundation contract."""
-        if index < 0 or index >= len(self._fields):
-            raise IndexError(
-                f"field index {index} out of range "
-                f"(have {len(self._fields)}; run list_fields first)"
-            )
-        if self._fields_url is not None:
-            current = self.page().url
-            if current != self._fields_url:
-                raise StaleFieldIndexError(
-                    f"field indexes were captured on {self._fields_url}, "
-                    f"page is now {current} — run list-fields again"
-                )
-        field = self._fields[index]
-        root: Any = self.page()
-        for sel in field.frame:
-            root = root.frame_locator(sel)
-        return cast(Locator, root.locator(field.locator, deep=field.deep))
+        return resolve_field(self.page(), self._fields, index, fields_url=self._fields_url)
 
     @staticmethod
     def _has_target(args: dict[str, Any]) -> bool:

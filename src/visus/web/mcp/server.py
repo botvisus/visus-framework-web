@@ -10,26 +10,12 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from visus.web import errors
 from visus.web.api.assertions import expect
-from visus.web.api.locator import Locator
 from visus.web.mcp.session import Session, make_locator
+from visus.web.ops.targeting import any_match_visible as _any_match_visible
 
 mcp = FastMCP("visus-web")
 _session = Session()
-
-
-def _any_match_visible(loc: Locator) -> bool:
-    """True if at least one element the locator matches is visible.
-
-    Tolerant of mid-navigation errors (treated as "not yet visible") and of
-    locators that match several elements — so an agent can wait by a loose
-    target (e.g. text=) even when a hidden duplicate sorts first in the DOM.
-    """
-    try:
-        return any(loc.nth(i).is_visible() for i in range(loc.count()))
-    except errors.VisusWebError:
-        return False
 
 
 def _acted(message: str) -> str:

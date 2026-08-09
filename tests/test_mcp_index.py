@@ -87,3 +87,52 @@ def test_target_falls_back_to_role_and_selector(srv):  # type: ignore[no-untyped
     server.browser_navigate(f"{base_url}/forms.html")
     assert server._session.target({"role": "textbox", "name": "Username"}).count() == 1
     assert server._session.target({"selector": "#user"}).count() == 1
+
+
+@pytest.mark.browser
+def test_action_tools_accept_an_index(srv):  # type: ignore[no-untyped-def]
+    """The whole point: `browser_fill(index=N, ...)` with no hand-built frame chain."""
+    server, base_url = srv
+    server.browser_navigate(f"{base_url}/fields.html")
+    fields = server.browser_list_fields(include_hidden=True)
+    by_locator = {f["locator"]: f for f in fields}
+    idx = by_locator["#iframeinput"]["index"]
+
+    assert server.browser_fill("student", index=idx).startswith("filled with 'student'")
+    assert server._session.field_locator(idx).input_value() == "student"
+    assert server.browser_count(index=idx) == 1
+    server.browser_clear(index=idx)
+    assert server._session.field_locator(idx).input_value() == ""
+
+
+@pytest.mark.browser
+def test_a_stale_index_is_refused_by_an_action_tool(srv):  # type: ignore[no-untyped-def]
+    server, base_url = srv
+    server.browser_navigate(f"{base_url}/fields.html")
+    server.browser_list_fields(include_hidden=True)
+    server.browser_navigate(f"{base_url}/forms.html")
+
+    from visus.web.ops.targeting import StaleFieldIndexError
+
+    with pytest.raises(StaleFieldIndexError, match="run list-fields again"):
+        server.browser_click(index=0)
+
+
+def test_target_payload_renames_text_to_the_daemon_key() -> None:
+    from visus.web.mcp import server
+
+    payload = server._target_payload(
+        index=None, selector=None, role="button", name="OK", text="Go"
+    )
+    assert payload["target_text"] == "Go"
+    assert "text" not in payload
+
+
+def test_run_uses_the_local_callable_while_detached() -> None:
+    from visus.web.mcp import server
+
+    assert server._remote is None
+    assert server._run("title", {}, lambda: "local title") == {
+        "ok": True,
+        "result": "local title",
+    }

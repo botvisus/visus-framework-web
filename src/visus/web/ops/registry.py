@@ -87,3 +87,32 @@ LOCAL_ONLY_TOOLS: frozenset[str] = frozenset(
         "browser_close",
     }
 )
+
+INDEXABLE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Every tool that resolves an element. `index` re-resolves a cached field
+        # through its iframe chain and shadow `deep` flag, which no combination of
+        # selector/role/text can express from outside the frame (D12).
+        "browser_click",
+        "browser_dblclick",
+        "browser_fill",
+        "browser_press",
+        "browser_hover",
+        "browser_check",
+        "browser_uncheck",
+        "browser_select_option",
+        "browser_drag",
+        "browser_focus",
+        "browser_clear",
+        "browser_set_input_files",
+        "browser_get_text",
+        "browser_get_attribute",
+        "browser_count",
+        "browser_wait_for",
+        "browser_expect_text",
+        "browser_screenshot",
+        "browser_read_text",
+        "browser_solve_captcha",
+        "browser_find_image",
+    }
+)

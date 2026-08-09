@@ -61,3 +61,28 @@ def test_the_four_mcp_only_holes_are_closed() -> None:
     ):
         op = registry.TOOL_OPS[tool]
         assert hasattr(SessionHandler, f"_op_{op}"), f"{tool} is still MCP-only (needs _op_{op})"
+
+
+def test_every_indexable_tool_accepts_an_index_parameter() -> None:
+    """D12: index targeting is the product's best ergonomics idea, CLI-only until now."""
+    import inspect
+
+    from visus.web.mcp import server
+
+    problems: list[str] = []
+    for name in sorted(registry.INDEXABLE_TOOLS):
+        params = inspect.signature(getattr(server, name)).parameters
+        if "index" not in params:
+            problems.append(f"{name}: no `index` parameter")
+            continue
+        p = params["index"]
+        if p.default is not None:
+            problems.append(f"{name}: `index` must default to None, got {p.default!r}")
+        # mcp/server.py uses `from __future__ import annotations`, so this is a string.
+        if str(p.annotation) != "int | None":
+            problems.append(f"{name}: `index` must be `int | None`, got {p.annotation!r}")
+    assert not problems, problems
+
+
+def test_indexable_tools_are_all_registered_and_daemon_backed() -> None:
+    assert registry.INDEXABLE_TOOLS <= set(registry.TOOL_OPS)

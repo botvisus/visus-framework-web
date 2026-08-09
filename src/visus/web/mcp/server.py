@@ -6,19 +6,78 @@ Run via: uv run visus-web-mcp   (or python -m visus.web.mcp.server)
 
 from __future__ import annotations
 
+import tempfile
 import time
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP, Image
 
 from visus.web.api.assertions import expect
 from visus.web.mcp.session import Session, make_locator
+from visus.web.ops.remote import RemoteDispatcher
 from visus.web.ops.targeting import any_match_visible as _any_match_visible
 
 mcp = FastMCP("visus-web")
 _session = Session()
 
+# Set by browser_attach_session (Task 7). While None, every op runs in this
+# process against this server's own browser.
+_remote: RemoteDispatcher | None = None
 
-def _acted(message: str) -> str:
+
+def _target_payload(
+    *,
+    index: int | None = None,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+) -> dict[str, Any]:
+    """This tool's targeting parameters as the DAEMON's payload.
+
+    One payload shape serves the in-process resolver (``Session.target``) and the
+    remote one (``RemoteDispatcher``), so a tool body never has to know which is
+    in play. The locator-TEXT target is renamed ``text`` -> ``target_text``
+    because the daemon reserves ``text`` for fill's VALUE payload.
+    """
+    return {
+        "index": index,
+        "selector": selector,
+        "role": role,
+        "name": name,
+        "target_text": text,
+        "exact": exact,
+        "frame": frame,
+    }
+
+
+def _run(op: str, args: dict[str, Any], local: Callable[[], Any]) -> dict[str, Any]:
+    """Execute one op and return a daemon-shaped envelope.
+
+    Attached (``browser_attach_session``): the op crosses to the `visus` session
+    daemon, so it drives the SAME browser the shell is driving and comes back
+    with the envelope ``SessionHandler.handle`` builds — ``result`` plus, for a
+    mutating op, ``page`` state and the generated ``code`` line. Detached:
+    *local* runs here against this server's own browser and the envelope is
+    built here. Either way there is exactly one op vocabulary.
+
+    *local* is a callable, not a value, so the local path — which would launch a
+    browser — is never executed while attached.
+    """
+    if _remote is None:
+        return {"ok": True, "result": local()}
+    env = _remote.handle(op, args)
+    if not env.get("ok"):
+        raise RuntimeError(str(env.get("error", "unknown error")))
+    return env
+
+
+def _acted(env: dict[str, Any], message: str) -> str:
     """An action's result plus the page state the agent needs for its next step.
 
     Without this an agent is blind after every action and must spend a whole extra
@@ -146,6 +205,7 @@ def browser_url() -> str:
 
 @mcp.tool()
 def browser_get_text(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -153,17 +213,24 @@ def browser_get_text(
     exact: bool = False,
     frame: str | None = None,
 ) -> str | None:
-    """Return the visible text content of an element."""
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    """Return the visible text content of an element (None when it does not exist)."""
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    return loc.first().text_content()  # tolerate multi-match (agent-friendly read)
+
+    def _local() -> dict[str, Any]:
+        loc = _session.target(args).first()  # tolerate multi-match (agent-friendly read)
+        return {"value": loc.text_content(), "present": loc.count() > 0}
+
+    result: dict[str, Any] = _run("get_text", args, _local)["result"]
+    value: str | None = result["value"]
+    return value
 
 
 @mcp.tool()
 def browser_get_attribute(
     attr_name: str,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -172,15 +239,23 @@ def browser_get_attribute(
     frame: str | None = None,
 ) -> str | None:
     """Return the value of an HTML attribute on an element."""
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    return loc.first().get_attribute(attr_name)  # tolerate multi-match
+    args["attr_name"] = attr_name
+
+    def _local() -> dict[str, Any]:
+        loc = _session.target(args).first()  # tolerate multi-match
+        return {"value": loc.get_attribute(attr_name), "present": loc.count() > 0}
+
+    result: dict[str, Any] = _run("get_attribute", args, _local)["result"]
+    value: str | None = result["value"]
+    return value
 
 
 @mcp.tool()
 def browser_count(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -189,11 +264,11 @@ def browser_count(
     frame: str | None = None,
 ) -> int:
     """Return the count of elements matching the given target."""
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    return loc.count()
+    count: int = _run("count", args, lambda: _session.target(args).count())["result"]
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +278,7 @@ def browser_count(
 
 @mcp.tool()
 def browser_click(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -211,15 +287,15 @@ def browser_click(
     frame: str | None = None,
 ) -> str:
     """Click an element targeted by role+name, text, or css/xpath selector."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).click()
-    return _acted("clicked")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return _acted(_run("click", args, lambda: _session.target(args).click()), "clicked")
 
 
 @mcp.tool()
 def browser_dblclick(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -228,16 +304,17 @@ def browser_dblclick(
     frame: str | None = None,
 ) -> str:
     """Double-click an element."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).dblclick()
-    return _acted("double-clicked")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    env = _run("dblclick", args, lambda: _session.target(args).dblclick())
+    return _acted(env, "double-clicked")
 
 
 @mcp.tool()
 def browser_fill(
     text_value: str,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -246,16 +323,18 @@ def browser_fill(
     frame: str | None = None,
 ) -> str:
     """Fill an input/textarea with the given text_value."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).fill(text_value)
-    return _acted(f"filled with {text_value!r}")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["text"] = text_value
+    env = _run("fill", args, lambda: _session.target(args).fill(text_value))
+    return _acted(env, f"filled with {text_value!r}")
 
 
 @mcp.tool()
 def browser_press(
     key: str,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -264,15 +343,16 @@ def browser_press(
     frame: str | None = None,
 ) -> str:
     """Press a key (e.g. 'Enter', 'Tab', 'Control+a') on the focused element."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).press(key)
-    return _acted(f"pressed {key!r}")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["key"] = key
+    return _acted(_run("press", args, lambda: _session.target(args).press(key)), f"pressed {key!r}")
 
 
 @mcp.tool()
 def browser_hover(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -281,15 +361,15 @@ def browser_hover(
     frame: str | None = None,
 ) -> str:
     """Hover over an element."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).hover()
-    return _acted("hovered")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return _acted(_run("hover", args, lambda: _session.target(args).hover()), "hovered")
 
 
 @mcp.tool()
 def browser_check(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -298,15 +378,15 @@ def browser_check(
     frame: str | None = None,
 ) -> str:
     """Check a checkbox or radio button."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).check()
-    return _acted("checked")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return _acted(_run("check", args, lambda: _session.target(args).check()), "checked")
 
 
 @mcp.tool()
 def browser_uncheck(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -315,16 +395,16 @@ def browser_uncheck(
     frame: str | None = None,
 ) -> str:
     """Uncheck a checkbox."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).uncheck()
-    return _acted("unchecked")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return _acted(_run("uncheck", args, lambda: _session.target(args).uncheck()), "unchecked")
 
 
 @mcp.tool()
 def browser_select_option(
     value: str,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -333,16 +413,19 @@ def browser_select_option(
     frame: str | None = None,
 ) -> str:
     """Select an option from a <select> element by value."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).select_option(value=value)
-    return _acted(f"selected option {value!r}")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["value"] = value
+    env = _run("select", args, lambda: _session.target(args).select_option(value=value))
+    return _acted(env, f"selected option {value!r}")
 
 
 @mcp.tool()
 def browser_drag(
-    target_selector: str,
+    target_selector: str | None = None,
+    target_index: int | None = None,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -350,18 +433,29 @@ def browser_drag(
     exact: bool = False,
     frame: str | None = None,
 ) -> str:
-    """Drag the source element to target_selector (a CSS/XPath selector)."""
-    page = _session.page()
-    src_loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    """Drag the source element onto a target (a CSS/XPath selector, or a field index)."""
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    tgt_loc = page.locator(target_selector)
-    src_loc.drag_to(tgt_loc)
-    return _acted(f"dragged to {target_selector!r}")
+    args["target_selector"] = target_selector
+    args["target_index"] = target_index
+
+    def _local() -> None:
+        src = _session.target(args)
+        if target_selector is not None:
+            src.drag_to(_session.page().locator(target_selector))
+        elif target_index is not None:
+            src.drag_to(_session.field_locator(target_index))
+        else:
+            raise ValueError("provide a drag target: target_selector or target_index")
+
+    where = target_selector if target_selector is not None else f"field {target_index}"
+    return _acted(_run("drag", args, _local), f"dragged to {where!r}")
 
 
 @mcp.tool()
 def browser_focus(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -370,15 +464,15 @@ def browser_focus(
     frame: str | None = None,
 ) -> str:
     """Focus an element."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).focus()
-    return _acted("focused")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return _acted(_run("focus", args, lambda: _session.target(args).focus()), "focused")
 
 
 @mcp.tool()
 def browser_clear(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -387,16 +481,16 @@ def browser_clear(
     frame: str | None = None,
 ) -> str:
     """Clear the value of an input field."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).clear()
-    return _acted("cleared")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    return _acted(_run("clear_input", args, lambda: _session.target(args).clear()), "cleared")
 
 
 @mcp.tool()
 def browser_set_input_files(
     paths: list[str],
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -405,11 +499,12 @@ def browser_set_input_files(
     frame: str | None = None,
 ) -> str:
     """Set file(s) on a file input element. Provide absolute paths."""
-    page = _session.page()
-    make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-    ).set_input_files(paths)
-    return _acted(f"set {len(paths)} file(s)")
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["paths"] = paths
+    env = _run("upload", args, lambda: _session.target(args).set_input_files(paths))
+    return _acted(env, f"set {len(paths)} file(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +515,7 @@ def browser_set_input_files(
 @mcp.tool()
 def browser_wait_for(
     state: str = "visible",
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -429,24 +525,32 @@ def browser_wait_for(
     timeout: int | None = None,
 ) -> str:
     """Wait for an element to reach a state: 'visible' or 'hidden'."""
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    ms = 5000 if timeout is None else timeout
-    want_visible = state != "hidden"
-    deadline = time.monotonic() + ms / 1000.0
-    while True:
-        if _any_match_visible(loc) == want_visible:
-            return f"element is {state}"
-        if time.monotonic() >= deadline:
-            raise AssertionError(f"wait_for: no element became {state} within {ms}ms")
-        time.sleep(0.1)
+    args["state"] = state
+    args["timeout"] = timeout
+
+    def _local() -> str:
+        loc = _session.target(args)
+        ms = 5000 if timeout is None else timeout
+        want_visible = state != "hidden"
+        deadline = time.monotonic() + ms / 1000.0
+        while True:
+            if _any_match_visible(loc) == want_visible:
+                return f"element is {state}"
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"wait_for: no element became {state} within {ms}ms")
+            time.sleep(0.1)
+
+    waited: str = _run("wait", args, _local)["result"]
+    return waited
 
 
 @mcp.tool()
 def browser_expect_text(
     expected_text: str,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -456,15 +560,22 @@ def browser_expect_text(
     timeout: int | None = None,
 ) -> str:
     """Assert that an element contains the expected text. Returns 'PASSED' or 'FAILED: ...'."""
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    try:
-        expect(loc.first()).to_have_text(expected_text, timeout=timeout)
-        return "PASSED"
-    except AssertionError as exc:
-        return f"FAILED: {exc}"
+    args["expected_text"] = expected_text
+    args["timeout"] = timeout
+
+    def _local() -> str:
+        loc = _session.target(args)
+        try:
+            expect(loc.first()).to_have_text(expected_text, timeout=timeout)
+            return "PASSED"
+        except AssertionError as exc:
+            return f"FAILED: {exc}"
+
+    verdict: str = _run("expect_text", args, _local)["result"]
+    return verdict
 
 
 # ---------------------------------------------------------------------------
@@ -633,15 +744,26 @@ def browser_clear_cookies() -> str:
 @mcp.tool()
 def browser_screenshot(
     full_page: bool = False,
+    index: int | None = None,
     selector: str | None = None,
 ) -> Image:
     """Take a screenshot of the page or a specific element. Returns a PNG image."""
-    page = _session.page()
-    if selector is not None:
-        data = page.locator(selector).screenshot()
-    else:
-        data = page.screenshot(full_page=full_page)
-    return Image(data=data, format="png")
+    args = _target_payload(index=index, selector=selector)
+    args["full_page"] = full_page
+    if _remote is not None:
+        # The daemon writes PNGs to disk and returns the path. It is discovered
+        # through `.visus/` beside this process's cwd, so both processes are on
+        # the same filesystem and a temp-file hand-off is sound.
+        tmp = Path(tempfile.gettempdir()) / f"visus-mcp-{uuid.uuid4().hex}.png"
+        args["path"] = str(tmp)
+        _run("screenshot", args, lambda: None)
+        try:
+            return Image(data=tmp.read_bytes(), format="png")
+        finally:
+            tmp.unlink(missing_ok=True)
+    if index is not None or selector is not None:
+        return Image(data=_session.target(args).screenshot(), format="png")
+    return Image(data=_session.page().screenshot(full_page=full_page), format="png")
 
 
 @mcp.tool()
@@ -680,6 +802,7 @@ def browser_evaluate(
 
 @mcp.tool()
 def browser_read_text(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -691,15 +814,16 @@ def browser_read_text(
 
     Requires the [vision] extra (rapidocr-onnxruntime + opencv).
     """
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    return loc.ocr_text()
+    read: str = _run("read_text", args, lambda: _session.target(args).ocr_text())["result"]
+    return read
 
 
 @mcp.tool()
 def browser_solve_captcha(
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -708,17 +832,20 @@ def browser_solve_captcha(
     frame: str | None = None,
 ) -> str:
     """OCR-solve a text CAPTCHA shown in the targeted element and return the solution."""
-    page = _session.page()
-    loc = make_locator(
-        page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
     )
-    return page.solve_captcha(loc)
+    solved: str = _run(
+        "solve_captcha", args, lambda: _session.page().solve_captcha(_session.target(args))
+    )["result"]
+    return solved
 
 
 @mcp.tool()
 def browser_find_image(
     template_path: str,
     confidence: float = 0.8,
+    index: int | None = None,
     selector: str | None = None,
     role: str | None = None,
     name: str | None = None,
@@ -731,29 +858,34 @@ def browser_find_image(
     Returns a dict with {found, x, y, confidence} or {found: False}.
     Requires the [vision] extra.
     """
-    import numpy as np
-    from PIL import Image as PILImage
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["template_path"] = template_path
+    args["confidence"] = confidence
 
-    from visus.web.vision import find_image
+    def _local() -> dict[str, Any]:
+        import io
 
-    page = _session.page()
-    if selector is not None or role is not None or text is not None:
-        loc = make_locator(
-            page, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
-        )
-        screenshot_bytes = loc.screenshot()
-    else:
-        screenshot_bytes = page.screenshot()
+        import numpy as np
+        from PIL import Image as PILImage
 
-    import io
+        from visus.web.vision import find_image
 
-    source_img = np.array(PILImage.open(io.BytesIO(screenshot_bytes)).convert("RGB"))
-    template_img = np.array(PILImage.open(template_path).convert("RGB"))
+        page = _session.page()
+        if any(args.get(key) is not None for key in ("index", "selector", "role", "target_text")):
+            screenshot_bytes = _session.target(args).screenshot()
+        else:
+            screenshot_bytes = page.screenshot()
+        source_img = np.array(PILImage.open(io.BytesIO(screenshot_bytes)).convert("RGB"))
+        template_img = np.array(PILImage.open(template_path).convert("RGB"))
+        match = find_image(source_img, template_img, confidence=confidence)
+        if match is None:
+            return {"found": False}
+        return {"found": True, "x": match.x, "y": match.y, "confidence": match.confidence}
 
-    match = find_image(source_img, template_img, confidence=confidence)
-    if match is None:
-        return {"found": False}
-    return {"found": True, "x": match.x, "y": match.y, "confidence": match.confidence}
+    found: dict[str, Any] = _run("find_image", args, _local)["result"]
+    return found
 
 
 # ---------------------------------------------------------------------------

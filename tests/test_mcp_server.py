@@ -79,6 +79,8 @@ _EXPECTED_TOOLS = [
     "browser_read_text",
     "browser_solve_captcha",
     "browser_find_image",
+    "browser_click_image",
+    "browser_click_ocr_text",
     # Lifecycle
     "browser_close",
     # Tracing
@@ -185,5 +187,5 @@ async def test_skill_resource_and_prompt_are_registered() -> None:
 
 
 def test_registering_the_skill_did_not_change_the_tool_count() -> None:
-    assert len(_get_tool_names()) == 50
+    assert len(_get_tool_names()) == 52
 

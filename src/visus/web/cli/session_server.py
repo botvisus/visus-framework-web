@@ -110,7 +110,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "state_load",
         "type", "key_down", "key_up",
         "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
-        "click_image",
+        "click_image", "click_ocr_text",
         "storage_set", "storage_delete", "storage_clear",
         "cookie_set", "cookie_delete",
     }
@@ -1666,6 +1666,44 @@ class SessionHandler:
         y = origin_y + match.center_y / ratio
         page.mouse.click(x, y)
         return {"x": round(x, 1), "y": round(y, 1), "confidence": round(match.confidence, 4)}
+
+    def _op_click_ocr_text(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Click the centre of RENDERED text located by OCR.
+
+        For text that exists as pixels and not as a DOM node — canvas-drawn
+        labels, an embedded PDF, a chart legend, an image button. Matching is a
+        case-insensitive substring by default because OCR routinely merges or
+        splits neighbouring words; pass ``exact_text`` to require the whole run.
+        A target scopes the search to one element and its box is added back so the
+        click lands in page coordinates.
+        """
+        from visus.web.vision import find_text
+
+        needle = str(args.get("ocr_text") or "")
+        exact = bool(args.get("exact_text", False))
+        page = self.page()
+        origin_x = origin_y = 0.0
+        if self._has_target(args):
+            loc = self._target(args)
+            shot = loc.screenshot()
+            box = loc.bounding_box()
+            if box is not None:
+                origin_x, origin_y = float(box["x"]), float(box["y"])
+        else:
+            shot = page.screenshot()
+        found = find_text(shot, needle, exact=exact)
+        if found is None:
+            raise LookupError(f"no rendered text matching {needle!r} was found on the page")
+        ratio = self._device_pixel_ratio()
+        x = origin_x + found.center_x / ratio
+        y = origin_y + found.center_y / ratio
+        page.mouse.click(x, y)
+        return {
+            "x": round(x, 1),
+            "y": round(y, 1),
+            "text": found.text,
+            "confidence": round(found.confidence, 4),
+        }
 
     def _op_tabs(self, args: dict[str, Any]) -> dict[str, Any]:
         """List every open tab/window with its title/url and the active marker.

@@ -989,12 +989,29 @@ def click(
     image: str = typer.Option(
         None, "--image", help="Click the centre of this template PNG (needs the [vision] extra)."
     ),
+    ocr_text: str = typer.Option(
+        None,
+        "--ocr-text",
+        help="Click rendered text found by OCR (needs the [vision] extra).",
+    ),
     confidence: float = typer.Option(0.8, "--confidence", "-c", help="Match threshold (0-1)."),
     button: str = _BUTTON_OPT,
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
     """Click a field by index, by --selector/--role/--text, or by --image."""
+    if ocr_text is not None:
+        ocr_args: dict[str, Any] = {"ocr_text": ocr_text, "exact_text": False}
+        if index is not None or selector or role or text:
+            ocr_args.update(_target_args(index, selector, role, name, text))
+        env = _send_env("click_ocr_text", ocr_args)
+        r = env["result"]
+        message = (
+            f"clicked text {r['text']!r} at ({r['x']}, {r['y']}) "
+            f"confidence={r['confidence']:.3f}"
+        )
+        output.emit_envelope({**env, "result": message})
+        return
     if image is not None:
         image_args: dict[str, Any] = {
             "template_path": str(Path(image).resolve()),

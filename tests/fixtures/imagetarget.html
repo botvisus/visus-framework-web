@@ -15,10 +15,16 @@
       g.fillRect(0, 0, 520, 220);
 
       // OCR target: large black text on white, top-left.
+      //
+      // The word is assembled from two halves ON PURPOSE, and must not appear
+      // whole anywhere in this file. A <script> element's own source IS text
+      // content, so a get_by_text() lookup for the label would match the script
+      // tag — and the test asserting "no DOM node carries this word" would lie.
+      var LABEL = 'SUB' + 'MIT';
       g.fillStyle = '#000000';
       g.font = '48px monospace';
       g.textBaseline = 'top';
-      g.fillText('SUBMIT', 30, 30);
+      g.fillText(LABEL, 30, 30);
 
       // Template-match target: a high-contrast block with a white bar through it,
       // bottom-right. Deliberately patterned — TM_CCOEFF_NORMED needs internal

@@ -1034,6 +1034,128 @@ def browser_find_image(
     return found
 
 
+def _click_vision_match(args: dict[str, Any], *, kind: str) -> dict[str, Any]:
+    """Locate a template image or rendered text in this process's browser and click it.
+
+    The detached twin of the daemon's ``_op_click_image`` / ``_op_click_ocr_text``:
+    same coordinate maths (screenshot pixels -> CSS pixels via devicePixelRatio,
+    plus the scoping element's own box), so a flow behaves identically whether the
+    MCP server is attached or running its own browser.
+    """
+    from visus.web.vision import find_image, find_text
+
+    page = _session.page()
+    origin_x = origin_y = 0.0
+    scoped = any(args.get(key) is not None for key in ("index", "selector", "role", "target_text"))
+    if scoped:
+        loc = _session.target(args)
+        shot = loc.screenshot()
+        box = loc.bounding_box()
+        if box is not None:
+            origin_x, origin_y = float(box["x"]), float(box["y"])
+    else:
+        shot = page.screenshot()
+
+    try:
+        ratio = float(page.evaluate("() => window.devicePixelRatio"))  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 — an unreadable ratio is 1:1
+        ratio = 1.0
+    if ratio <= 0:
+        ratio = 1.0
+
+    if kind == "image":
+        match = find_image(shot, args["template_path"], confidence=args["confidence"])
+        if match is None:
+            raise LookupError(
+                f"template {args['template_path']!r} not found on the page "
+                f"at confidence >= {args['confidence']}"
+            )
+        x = origin_x + match.center_x / ratio
+        y = origin_y + match.center_y / ratio
+        page.mouse.click(x, y)
+        return {"x": round(x, 1), "y": round(y, 1), "confidence": round(match.confidence, 4)}
+
+    found_text = find_text(shot, args["ocr_text"], exact=bool(args.get("exact_text", False)))
+    if found_text is None:
+        raise LookupError(f"no rendered text matching {args['ocr_text']!r} was found on the page")
+    x = origin_x + found_text.center_x / ratio
+    y = origin_y + found_text.center_y / ratio
+    page.mouse.click(x, y)
+    return {
+        "x": round(x, 1),
+        "y": round(y, 1),
+        "text": found_text.text,
+        "confidence": round(found_text.confidence, 4),
+    }
+
+
+@mcp.tool()
+def browser_click_image(
+    template_path: str,
+    confidence: float = 0.8,
+    index: int | None = None,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+) -> str:
+    """Click the centre of a template image found on the page (or in an element).
+
+    Use when the thing to press has no accessibility tree: a canvas app, an
+    embedded PDF viewer, a chart, an image map. Give a target (index / selector /
+    role / text) to scope the search to one element. Requires the [vision] extra.
+    """
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["template_path"] = template_path
+    args["confidence"] = confidence
+
+    def _local() -> dict[str, Any]:
+        return _click_vision_match(args, kind="image")
+
+    result: dict[str, Any] = _run("click_image", args, _local)["result"]
+    return (
+        f"clicked image at ({result['x']}, {result['y']}) confidence={result['confidence']:.3f}"
+    )
+
+
+@mcp.tool()
+def browser_click_ocr_text(
+    ocr_text: str,
+    exact_text: bool = False,
+    index: int | None = None,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+) -> str:
+    """Click rendered text located by OCR — text that exists as pixels, not as a node.
+
+    For canvas-drawn labels, embedded PDFs, chart legends and image buttons.
+    Substring and case-insensitive by default; set exact_text to require the whole
+    recognised run. Requires the [vision] extra.
+    """
+    args = _target_payload(
+        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+    )
+    args["ocr_text"] = ocr_text
+    args["exact_text"] = exact_text
+
+    def _local() -> dict[str, Any]:
+        return _click_vision_match(args, kind="text")
+
+    result: dict[str, Any] = _run("click_ocr_text", args, _local)["result"]
+    return (
+        f"clicked text {result['text']!r} at ({result['x']}, {result['y']}) "
+        f"confidence={result['confidence']:.3f}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tracing: the single-file HTML report
 # ---------------------------------------------------------------------------

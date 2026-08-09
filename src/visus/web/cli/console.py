@@ -28,6 +28,7 @@ commands:
   list [full] [--boxes] enumerate interactive fields (`full` adds CSS/XPATH)
   click TARGET [btn]   click the target (btn: left|middle|right)
   click-image f.png [c] click the centre of a template image (vision)
+  click-text text...   click rendered text located by OCR (vision)
   fill TARGET text     fill the target with text
   check TARGET         check the target
   uncheck TARGET       uncheck the target
@@ -357,6 +358,12 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 },
             )
             return f"clicked image at ({r['x']}, {r['y']}) confidence={r['confidence']:.3f}"
+        if cmd == "click-text":
+            r = send("click_ocr_text", {"ocr_text": " ".join(rest), "exact_text": False})
+            return (
+                f"clicked text {r['text']!r} at ({r['x']}, {r['y']}) "
+                f"confidence={r['confidence']:.3f}"
+            )
         if cmd == "fill":
             tgt, tail = _target(rest)
             return _act("fill", {**tgt, "text": " ".join(tail)})

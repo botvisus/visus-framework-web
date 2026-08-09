@@ -111,7 +111,7 @@ scratch, fully typed, with **no Playwright dependency**. On top of the test-auto
 - **👁️ Vision plugin (`[vision]`)** — `read_text` / `solve_captcha` (RapidOCR) and `find_image` /
   `find_all_images` (OpenCV), plus `locator.ocr_text()` / `locator.find_image()` /
   `page.solve_captcha()`.
-- **🧩 MCP server (`[mcp]`)** — `visus-web-mcp` exposes **50 tools** (navigation, accessibility
+- **🧩 MCP server (`[mcp]`)** — `visus-web-mcp` exposes **52 tools** (navigation, accessibility
   snapshot, all actions, tabs, dialogs, cookies, network/console capture, screenshot, evaluate,
   vision) to AI agents.
 - **⌨️ Full-featured CLI (`[cli]`)** — the `visus` command mirrors the whole surface in the shell
@@ -207,7 +207,7 @@ with launch(headless=True) as browser:
 
 ## Drive it from any MCP agent
 
-`visus-web` ships a **Model Context Protocol** server exposing **50 tools** so an AI agent
+`visus-web` ships a **Model Context Protocol** server exposing **52 tools** so an AI agent
 (Claude Code / Desktop, Cursor) can drive the browser end to end. Each tool carries a docstring that
 teaches the agent *when and how* to use it, so it never has to read source.
 
@@ -232,7 +232,7 @@ Wire it into your MCP client:
 }
 ```
 
-**Tool groups (50 tools):**
+**Tool groups (52 tools):**
 
 | Group | Tools |
 |---|---|
@@ -245,7 +245,7 @@ Wire it into your MCP client:
 | Network / console *(Chromium)* | `browser_network_requests`, `browser_console_messages` |
 | Cookies | `browser_get_cookies`, `browser_add_cookies`, `browser_clear_cookies` |
 | Media / JS | `browser_screenshot`, `browser_evaluate` |
-| Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha`, `browser_find_image` |
+| Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha`, `browser_find_image`, `browser_click_image`, `browser_click_ocr_text` |
 | Tracing | `browser_tracing_start`, `browser_tracing_stop`, `browser_tracing_report` — record a run and write a single-file HTML report (screenshots embedded, no viewer needed). |
 | Lifecycle | `browser_close` |
 | Attach | `browser_attach_session`, `browser_detach_session` — drive the `visus session` browser from MCP instead of a second, separate one. |
@@ -357,6 +357,7 @@ rename the session after the browser channel; the name always comes from `--sess
 | Command | What it does |
 |---|---|
 | `visus click [idx] [target] [--button <b>]` / `visus click --image <png> [-c 0.8]` | Click a field (`--button left`/`middle`/`right`). **`--image`** clicks the CENTRE of a matched template PNG instead of an element — for a canvas app, an embedded PDF viewer or a widget with no accessibility tree, where role/name/text/selector can reach the container and nothing inside it. Scope the search to one element by adding an ordinary target. Needs the `[vision]` extra. |
+| `visus click --ocr-text "<text>"` | Click text that is only rendered pixels — canvas labels, embedded PDFs, chart legends. Substring and case-insensitive: OCR routinely merges or splits neighbouring words. |
 | `visus dblclick [idx] [target] [--button <b>]` | Double-click a field. |
 | `visus mousemove <x> <y>` | Move the pointer to absolute viewport coordinates. |
 | `visus mousedown [--button <b>]` / `visus mouseup [--button <b>]` | Press / release a mouse button at the pointer. |
@@ -1050,7 +1051,7 @@ visus-framework-web/
 │   ├── backends/               # Selenium engine (all selenium.* confined here) + browser drivers
 │   ├── cli/                    # the `visus` CLI + persistent session daemon
 │   ├── skills/visus-web/       # the shipped agent skill (installed by `visus install --skills`)
-│   ├── mcp/                    # the visus-web-mcp server (50 tools)
+│   ├── mcp/                    # the visus-web-mcp server (52 tools)
 │   └── observability/          # run recording + HTML report rendering
 ├── examples/                   # demo_rpa.py, login.py, login_rpa.py, login_mcp.py, dolar.py
 ├── .claude/skills/             # developing-visus-web (contributor guide, not shipped)

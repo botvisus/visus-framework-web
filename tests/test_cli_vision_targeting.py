@@ -173,3 +173,75 @@ def test_repl_click_image_dispatches(tmp_path: Path) -> None:
 
 def test_repl_help_lists_click_image() -> None:
     assert "click-image" in console.dispatch("help", lambda op, args: None)
+
+
+@pytest.mark.browser
+def test_click_ocr_text_presses_text_painted_on_a_canvas(base_url: str) -> None:
+    """Rendered text is a target even when no DOM node carries it."""
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/imagetarget.html"
+    )
+    try:
+        # The word exists only as pixels: no element contains it as text.
+        assert h.handle("count", {"target_text": "SUBMIT"})["result"] == 0
+
+        resp = h.handle("click_ocr_text", {"ocr_text": "SUBMIT"})
+        assert resp["ok"] is True, resp
+        assert "SUBMIT" in resp["result"]["text"].upper()
+        assert h.handle("get_text", {"selector": "#clicked"})["result"]["value"] == "text"
+    finally:
+        h.close()
+
+
+@pytest.mark.browser
+def test_click_ocr_text_not_found_is_an_actionable_error(base_url: str) -> None:
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/imagetarget.html"
+    )
+    try:
+        resp = h.handle("click_ocr_text", {"ocr_text": "Nonexistent Label"})
+        assert resp["ok"] is False
+        assert "no rendered text matching" in resp["error"]
+        assert "Nonexistent Label" in resp["error"]
+        assert h.handle("get_text", {"selector": "#clicked"})["result"]["value"] == "none"
+    finally:
+        h.close()
+
+
+def test_click_ocr_text_is_a_mutating_op() -> None:
+    assert "click_ocr_text" in session_server._MUTATING_OPS
+
+
+def test_cli_click_ocr_text_sends_the_needle(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, Any]] = []
+
+    def fake(op: str, args: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+        sent.append((op, args))
+        return {"ok": True, "result": {"x": 9.0, "y": 8.0, "text": "SUBMIT", "confidence": 0.91}}
+
+    monkeypatch.setattr(session_client, "send_envelope", fake)
+    r = runner.invoke(app, ["click", "--ocr-text", "SUBMIT"])
+    assert r.exit_code == 0, r.output
+    assert sent[0][0] == "click_ocr_text"
+    assert sent[0][1]["ocr_text"] == "SUBMIT"
+    assert "clicked text 'SUBMIT' at (9.0, 8.0)" in r.output
+
+
+def test_repl_click_text_dispatches() -> None:
+    sent: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        sent.append((op, args))
+        return {"x": 1.0, "y": 2.0, "text": "Sign in", "confidence": 0.8}
+
+    out = console.dispatch("click-text Sign in", send)
+    assert sent[0] == ("click_ocr_text", {"ocr_text": "Sign in", "exact_text": False})
+    assert "clicked text 'Sign in' at (1.0, 2.0)" in out
+
+
+def test_mcp_vision_click_tools_are_registered_and_daemon_backed() -> None:
+    from visus.web.ops import registry
+
+    assert registry.TOOL_OPS["browser_click_image"] == "click_image"
+    assert registry.TOOL_OPS["browser_click_ocr_text"] == "click_ocr_text"
+    assert {"browser_click_image", "browser_click_ocr_text"} <= registry.INDEXABLE_TOOLS

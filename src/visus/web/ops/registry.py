@@ -69,6 +69,8 @@ TOOL_OPS: dict[str, str] = {
     "browser_read_text": "read_text",
     "browser_solve_captcha": "solve_captcha",
     "browser_find_image": "find_image",
+    "browser_click_image": "click_image",
+    "browser_click_ocr_text": "click_ocr_text",
 }
 
 SESSIONLESS_TOOLS: frozenset[str] = frozenset(
@@ -124,6 +126,8 @@ INDEXABLE_TOOLS: frozenset[str] = frozenset(
         "browser_read_text",
         "browser_solve_captcha",
         "browser_find_image",
+        "browser_click_image",
+        "browser_click_ocr_text",
         # PLAN 5 Task 12 made `eval` element-scopable on both surfaces; `index` is
         # the one target form it could not express until now.
         "browser_evaluate",

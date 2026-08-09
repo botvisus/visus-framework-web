@@ -386,6 +386,7 @@ command accepts `--json`.
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far (Chromium). |
 | `visus requests [--filter <s>] [--json]` | Network responses captured so far (Chromium). |
 | `visus request <N> [--json]` | One captured response in full, including its body. |
+| `visus network start` / `stop` / `export -o <json>` | Capture what the page itself sends — request bodies, JSONP, `sendBeacon`, pixel pings — and export it scrubbed. Complements `visus requests`, which reads the CDP response log. |
 
 ### Capture / vision / utilities
 

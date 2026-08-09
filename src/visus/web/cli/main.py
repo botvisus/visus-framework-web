@@ -1725,6 +1725,40 @@ def request(
 
 
 # ---------------------------------------------------------------------------
+# Full traffic capture (request bodies, JSONP, beacons, pixel pings)
+# ---------------------------------------------------------------------------
+
+network_app = typer.Typer(
+    help="Capture what the page itself sends (complements `visus requests`)."
+)
+app.add_typer(network_app, name="network")
+
+
+@network_app.command("start")
+def network_start() -> None:
+    """Start capturing the page's own traffic (install the hook before you interact)."""
+    _send("network_capture_start", {})
+    output.emit({"started": True}, table="capture started")
+
+
+@network_app.command("stop")
+def network_stop() -> None:
+    """Stop capturing and report how many entries were recorded."""
+    result = _send("network_capture_stop", {})
+    output.emit(result, table=f"capture stopped ({result['captured']} entr(y|ies))")
+
+
+@network_app.command("export")
+def network_export(
+    output_file: str = typer.Option("capture.json", "-o", "--output"),
+) -> None:
+    """Write the captured traffic to JSON: `{target_url, entries}`, secrets redacted."""
+    # Resolve against the CLIENT's cwd — the daemon's may differ.
+    result = _send("network_capture_export", {"path": str(Path(output_file).resolve())})
+    output.emit(result, table=f"saved {result['path']} ({result['entries']} entries)")
+
+
+# ---------------------------------------------------------------------------
 # Vision (requires the [vision] extra)
 # ---------------------------------------------------------------------------
 

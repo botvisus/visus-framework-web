@@ -210,6 +210,10 @@ class SessionHandler:
         # locality), so the handler owns at most one and flushes it on close().
         self._recorder: Any = None
         self._trace_zip: str | None = None
+        # NetworkCapture is created with use_cdp=False on purpose: the delegate
+        # already drains driver.get_log("performance") for page.network_requests(),
+        # and that read is DESTRUCTIVE — two drainers would silently split the log.
+        self._capture: Any = None
         self._stop: threading.Event | None = None
         # One WebDriver, one thread per connection in serve(): every op body runs
         # under this mutex. RLock (not Lock) so an op may re-enter handle().
@@ -357,6 +361,7 @@ class SessionHandler:
         self._browser = None
         self._context = None
         self._page = None
+        self._capture = None  # a capture without a browser is meaningless
         self._invalidate_fields()
 
     def _invalidate_fields(self) -> None:
@@ -1343,6 +1348,48 @@ class SessionHandler:
             "resource_type": r.resource_type,
             "body": body,
         }
+
+    def _op_network_capture_start(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Install the JS traffic hook on the current page.
+
+        Complements ``network_requests``: that op reads the delegate's CDP
+        buffer (every response, incl. assets and redirect legs); this one records
+        what the PAGE initiated — request bodies, JSONP ``<script>``,
+        ``sendBeacon`` and ``<img>`` pings — which CDP response logging cannot
+        give. ``use_cdp=False`` keeps the two off the same destructive
+        ``get_log("performance")`` stream.
+
+        Idempotent: starting twice rebinds and re-arms without losing the buffer.
+        """
+        from visus.web.network import NetworkCapture
+
+        page = self.page()
+        if self._capture is None:
+            self._capture = NetworkCapture(page, use_cdp=False)
+            self._capture.start()
+        else:
+            self._capture.rebind(page)
+        return {"started": True}
+
+    def _op_network_capture_stop(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Uninstall the hook and report how many entries were captured."""
+        if self._capture is None:
+            raise RuntimeError("no capture is running — run `visus network start` first")
+        self._capture.rebind(self.page())
+        captured = len(self._capture.get_requests())
+        self._capture.stop()
+        self._capture = None
+        return {"stopped": True, "captured": captured}
+
+    def _op_network_capture_export(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Write the captured traffic as ``{target_url, entries}`` JSON (scrubbed)."""
+        if self._capture is None:
+            raise RuntimeError("no capture is running — run `visus network start` first")
+        path = str(args.get("path") or "capture.json")
+        self._capture.rebind(self.page())
+        entries = len(self._capture.get_requests())
+        self._capture.export_enriched(path)
+        return {"path": str(Path(path).resolve()), "entries": entries}
 
     # --- vision (requires the [vision] extra) ----------------------------
     def _op_read_text(self, args: dict[str, Any]) -> str:

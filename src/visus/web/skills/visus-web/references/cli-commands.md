@@ -113,6 +113,7 @@ through `visus eval`, whose quotes PowerShell mangles.
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far. `LEVEL` filters case-insensitively on `SEVERE` / `WARNING` / `INFO`. Chromium engines only. |
 | `visus requests [--filter <s>] [-F <s>] [--json]` | Network responses captured so far, numbered. `--filter` is a plain substring test on the URL. Chromium only. |
 | `visus request <N> [--json]` | One captured response in full — method, URL, status, resource type and the response **body**, which the MCP surface does not expose. `N` is the index from `visus requests`. A body evicted after a navigation prints `(body unavailable)` rather than failing. |
+| `visus network start` / `visus network stop` / `visus network export [-o <json>]` | A **second, complementary** capture. `visus requests` reads the CDP response log: every response, including assets and redirect legs. `network` installs a JS hook and records what the **page itself sent** — `fetch`/`XHR` **request bodies**, JSONP `<script>`, `sendBeacon` and `<img>` pings — none of which a response log can show. `export` writes `{target_url, entries}` with auth headers redacted. The two never starve each other: the hook capture runs with `use_cdp=False`, because `driver.get_log("performance")` is destructive and two drainers would split it. |
 
 ### Capture / vision / utilities
 

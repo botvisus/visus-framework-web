@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -258,3 +259,190 @@ def test_requests_op_against_a_real_page(base_url: str) -> None:
         assert "Username" in (one["body"] or "")
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# NetworkCapture: start / stop / export
+# ---------------------------------------------------------------------------
+
+
+class _CapturePage:
+    """Page stub that records every evaluate -- the hook install is an evaluate."""
+
+    def __init__(self, url: str = "http://x/") -> None:
+        self.url = url
+        self.evaluated: list[str] = []
+
+    def evaluate(self, expression: str, arg: object = None) -> object:
+        self.evaluated.append(expression)
+        if expression.startswith("() => JSON"):  # the _READ_JS drain
+            return json.dumps(
+                [
+                    {
+                        "url": "http://x/api",
+                        "method": "POST",
+                        "status": 200,
+                        "reqBody": '{"q": 1}',
+                        "respBody": '{"ok": true}',
+                        "headers": {"authorization": "Bearer s3cret"},
+                        "resourceType": "fetch",
+                    }
+                ]
+            )
+        return True  # the _HOOK_JS install
+
+
+def test_rebind_repoints_and_rearms_the_hook() -> None:
+    from visus.web.network import NetworkCapture
+
+    first, second = _CapturePage("http://a/"), _CapturePage("http://b/")
+    cap = NetworkCapture(first, use_cdp=False)
+    cap.start()
+    assert len(first.evaluated) == 1  # the hook install
+
+    cap.rebind(second)
+    assert cap.page is second
+    assert len(second.evaluated) == 1  # re-armed on the new page
+
+    # Before start(), rebind must not install anything.
+    third = _CapturePage("http://c/")
+    idle = NetworkCapture(third, use_cdp=False)
+    idle.rebind(_CapturePage("http://d/"))
+    assert third.evaluated == []
+
+
+def test_op_network_capture_lifecycle_and_export(tmp_path: Path) -> None:
+    page = _CapturePage()
+    h = _handler(page)
+
+    started = h.handle("network_capture_start", {})
+    assert started["ok"] is True, started
+    assert started["result"] == {"started": True}
+
+    out_file = tmp_path / "capture.json"
+    exported = h.handle("network_capture_export", {"path": str(out_file)})["result"]
+    assert exported["path"] == str(out_file.resolve())
+    assert exported["entries"] == 1
+
+    doc = json.loads(out_file.read_text(encoding="utf-8"))
+    assert doc["target_url"] == "http://x/"
+    entry = doc["entries"][0]
+    assert entry["reqBody"] == '{"q": 1}'
+    assert entry["headers"]["authorization"] == "REDACTED"  # scrubbed on the way out
+
+    stopped = h.handle("network_capture_stop", {})["result"]
+    assert stopped == {"stopped": True, "captured": 1}
+
+
+def test_op_network_export_without_a_capture_is_a_clean_error(tmp_path: Path) -> None:
+    h = _handler(_CapturePage())
+    bad = h.handle("network_capture_export", {"path": str(tmp_path / "c.json")})
+    assert bad["ok"] is False
+    assert "visus network start" in bad["error"]
+
+
+def test_close_drops_the_capture() -> None:
+    h = _handler(_CapturePage())
+    h.handle("network_capture_start", {})
+    assert h._capture is not None
+    h.close()
+    assert h._capture is None
+
+
+def test_cli_network_commands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_send(op: str, args: dict[str, Any] | None = None) -> Any:
+        calls.append((op, args or {}))
+        if op == "network_capture_export":
+            return {"path": str(tmp_path / "capture.json"), "entries": 12}
+        if op == "network_capture_stop":
+            return {"stopped": True, "captured": 12}
+        return {"started": True}
+
+    monkeypatch.setattr(session_client, "send", fake_send)
+    assert runner.invoke(app, ["network", "start"]).exit_code == 0
+    r = runner.invoke(app, ["network", "export", "-o", str(tmp_path / "capture.json")])
+    assert r.exit_code == 0, r.output
+    assert "12" in r.output
+    assert runner.invoke(app, ["network", "stop"]).exit_code == 0
+    assert calls[0] == ("network_capture_start", {})
+    assert calls[1] == (
+        "network_capture_export",
+        {"path": str((tmp_path / "capture.json").resolve())},
+    )
+    assert calls[2] == ("network_capture_stop", {})
+
+
+def test_repl_network_branches() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        if op == "network_capture_export":
+            return {"path": "capture.json", "entries": 3}
+        if op == "network_capture_stop":
+            return {"stopped": True, "captured": 3}
+        return {"started": True}
+
+    console.dispatch("network start", send)
+    console.dispatch("network export capture.json", send)
+    console.dispatch("network stop", send)
+    assert calls[0] == ("network_capture_start", {})
+    assert calls[1][0] == "network_capture_export"
+    assert calls[1][1]["path"] == str(Path("capture.json").resolve())
+    assert calls[2] == ("network_capture_stop", {})
+    assert "network" in console.dispatch("help", send)
+
+
+@pytest.mark.browser
+def test_network_capture_export_against_a_real_page(base_url: str, tmp_path: Path) -> None:
+    """The JS hook records the REQUEST body -- the thing `visus requests` cannot show."""
+    import time
+
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/network.html"
+    )
+    try:
+        assert h.handle("network_capture_start", {})["ok"] is True
+        # Two fetches: the POST proves the hook records the REQUEST body (which the
+        # CDP response log, and therefore `visus requests`, can never show); the GET
+        # proves it records the RESPONSE body. The fixture server only implements
+        # do_GET, so the POST answers 501 -- irrelevant, the request side is the test.
+        h.handle(
+            "eval",
+            {
+                "expression": "() => { window.__t = 0;"
+                " fetch('/forms.html', {method: 'POST', body: 'q=visus'})"
+                " .then(r => r.text()).then(() => { window.__t += 1; });"
+                " fetch('/forms.html').then(r => r.text())"
+                " .then(() => { window.__t += 1; }); return true; }"
+            },
+        )
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if h.handle("eval", {"expression": "() => window.__t === 2"})["result"]["result"]:
+                break
+            time.sleep(0.1)
+
+        out_file = tmp_path / "capture.json"
+        exported = h.handle("network_capture_export", {"path": str(out_file)})
+        assert exported["ok"] is True, exported
+        assert exported["result"]["entries"] >= 2
+    finally:
+        h.close()
+
+    doc = json.loads(out_file.read_text(encoding="utf-8"))
+    assert doc["target_url"].endswith("/network.html")
+    posted = [e for e in doc["entries"] if e["method"] == "POST"]
+    assert posted, doc["entries"]
+    assert posted[0]["reqBody"] == "q=visus"
+    got = [
+        e
+        for e in doc["entries"]
+        if e["method"] == "GET" and e["url"].endswith("/forms.html")
+    ]
+    assert got, doc["entries"]
+    # forms.html's <label for="user">Username</label> -- the response body really
+    # came back through the hook, not just the request line.
+    assert "Username" in (got[0]["respBody"] or "")

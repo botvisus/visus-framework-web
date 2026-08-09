@@ -89,6 +89,7 @@ tracing-stop [html]  stop; write the zip (+ an HTML report if given)
 logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
 requests [FILTER]    captured network responses (substring URL filter)
 request N            one captured response, with its body
+network SUB [path]   full traffic capture: start|stop|export [path]
 dialog [dismiss]     handle the next dialog (accept by default)
 screenshot [path]    save a screenshot (default screenshot.png)
 export-script [path] print (or save) this session as a runnable visus.web script

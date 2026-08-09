@@ -226,6 +226,31 @@ class NetworkCapture:
         self._cdp_active = False
         self._started = False
 
+    def rebind(self, page: Any) -> None:
+        """Point this capture at *page* and re-arm the JS hook on it.
+
+        A long-lived driver (the CLI daemon) breaks two assumptions this class
+        makes when it is used as a short-lived ``start() → drive → export()``
+        block:
+
+        * ``self.page`` is bound once in ``__init__``, but the daemon builds a
+          NEW ``Page`` object whenever the active tab changes, so the capture
+          would keep evaluating against the old tab;
+        * the hook lives in the JS world and a navigation wipes
+          ``window.__vcm_installed``.
+
+        Re-arming is free — the hook returns early when it is already installed
+        — and harmless before :meth:`start`, where it is skipped entirely. A
+        page that is mid-navigation simply gets re-armed on the next call.
+        """
+        self.page = page
+        if not self._started:
+            return
+        try:
+            self.page.evaluate(_HOOK_JS)
+        except Exception:  # noqa: BLE001 — mid-navigation: the next rebind re-arms it
+            pass
+
     # ------------------------------------------------------------------
     # CDP performance-log draining
     # ------------------------------------------------------------------

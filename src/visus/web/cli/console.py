@@ -77,6 +77,7 @@ commands:
   logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
   requests [FILTER]    captured network responses (substring URL filter)
   request N            one captured response, with its body
+  network SUB [path]   full traffic capture: start|stop|export [path]
   dialog [dismiss]     handle the next dialog (accept by default)
   screenshot [path]    save a screenshot (default screenshot.png)
   export-script [path] print (or save) this session as a runnable visus.web script
@@ -607,6 +608,19 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 f"status : {r.get('status', '')}\n\n"
                 + (body if body is not None else "(body unavailable)")
             )
+        if cmd == "network":
+            sub = rest[0].lower() if rest else ""
+            if sub == "start":
+                send("network_capture_start", {})
+                return "capture started"
+            if sub == "stop":
+                stopped = send("network_capture_stop", {})
+                return f"capture stopped ({stopped['captured']} entries)"
+            if sub == "export":
+                target = str(Path(rest[1] if len(rest) > 1 else "capture.json").resolve())
+                saved = send("network_capture_export", {"path": target})
+                return f"saved {saved['path']} ({saved['entries']} entries)"
+            return "usage: network start|stop|export [path]"
         if cmd == "dialog":
             accept = not (rest and rest[0].lower() in ("dismiss", "cancel", "no"))
             return _act("dialog", {"accept": accept, "prompt_text": None})

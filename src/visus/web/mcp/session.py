@@ -91,7 +91,17 @@ class Session:
         self._fields_url = self.page().url
 
     def field_locator(self, index: int) -> Locator:
-        """Re-resolve cached field *index* — iframe chain and shadow ``deep`` included."""
+        """Re-resolve cached field *index* — iframe chain and shadow ``deep`` included.
+
+        Bounds-checked BEFORE ``page()`` is touched: ``page()`` lazily launches a
+        browser, and an out-of-range index is an argument error that must not
+        cost one.
+        """
+        if index < 0 or index >= len(self._fields):
+            raise IndexError(
+                f"field index {index} out of range "
+                f"(have {len(self._fields)}; run list_fields first)"
+            )
         return resolve_field(self.page(), self._fields, index, fields_url=self._fields_url)
 
     def target(self, args: dict[str, Any]) -> Locator:
@@ -105,6 +115,10 @@ class Session:
         """
         if args.get("index") is not None:
             return self.field_locator(int(args["index"]))
+        if all(args.get(key) is None for key in ("selector", "role", "target_text")):
+            # Validate before page(): a missing target is an argument error, and
+            # page() would lazily LAUNCH A BROWSER just to report it.
+            raise ValueError("provide one of: index, role, text, selector")
         return make_locator(
             self.page(),
             selector=args.get("selector"),

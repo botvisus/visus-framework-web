@@ -239,7 +239,11 @@ def test_snapshot_forwards_scope_depth_and_refs(monkeypatch: pytest.MonkeyPatch)
         or {"elements": [], "url": "u", "title": "t"},
     )
     assert runner.invoke(app, ["snapshot", "#main", "--depth", "3", "--no-refs"]).exit_code == 0
-    assert calls[-1] == ("snapshot", {"selector": "#main", "depth": 3, "refs": False})
+    # `boxes` joined the payload in PLAN 5 Task 11; it is off unless --boxes is given.
+    assert calls[-1] == (
+        "snapshot",
+        {"selector": "#main", "depth": 3, "refs": False, "boxes": False},
+    )
 
 
 def test_snapshot_filename_writes_yaml(

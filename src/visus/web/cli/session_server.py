@@ -206,6 +206,10 @@ class SessionHandler:
         # `tab_follow` flips it to MANUAL, matching the MCP server's default and
         # giving an agent a predictable context that a popup cannot steal.
         self._follow: bool = True
+        # A tracing session is process-global (tracing._STATE has no thread
+        # locality), so the handler owns at most one and flushes it on close().
+        self._recorder: Any = None
+        self._trace_zip: str | None = None
         self._stop: threading.Event | None = None
         # One WebDriver, one thread per connection in serve(): every op body runs
         # under this mutex. RLock (not Lock) so an op may re-enter handle().
@@ -333,7 +337,21 @@ class SessionHandler:
             return self._page
         return Page(SeleniumPageDelegate(driver, handle), self._page._defaults)
 
+    def _stop_tracing_if_running(self) -> None:
+        """Flush a live tracing session so shutdown never orphans its log handler."""
+        if self._recorder is None:
+            return
+        from visus.web import tracing
+
+        try:
+            tracing.stop_recording(self._trace_zip, None)
+        except Exception:  # noqa: BLE001 — shutdown must not fail on a trace flush
+            pass
+        self._recorder = None
+        self._trace_zip = None
+
     def close(self) -> None:
+        self._stop_tracing_if_running()
         if self._browser is not None:
             self._browser.close()
         self._browser = None
@@ -1166,6 +1184,49 @@ class SessionHandler:
         if self._has_target(args):
             return {"result": self._target(args).first().evaluate(expression, arg)}
         return {"result": self.page().evaluate(expression, arg)}
+
+    # --- tracing ---------------------------------------------------------
+    def _op_tracing_start(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Start recording every action into an in-memory Recorder.
+
+        This is what makes ``VISUS_WEB_TRACING`` meaningful from the shell:
+        ``api/_steps.run_step`` only records when tracing is enabled AND a
+        Recorder is installed, and nothing outside ``tracing.record()`` ever
+        installed one before this op existed.
+
+        ``screenshots=False`` turns off the per-action PNG — every shot is held
+        in memory until the zip is written, so a long run should opt out.
+        """
+        from visus.web import tracing
+
+        if self._recorder is not None:
+            raise RuntimeError(
+                f"tracing is already recording (run_id {self._recorder.run_id}) — "
+                "run `visus tracing-stop` first"
+            )
+        zip_path = args.get("zip_path")
+        self._trace_zip = str(Path(zip_path).resolve()) if zip_path else None
+        self._recorder = tracing.start_recording(
+            screenshot_each_action=bool(args.get("screenshots", True))
+        )
+        return {"run_id": self._recorder.run_id, "zip_path": self._trace_zip}
+
+    def _op_tracing_stop(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Write the trace zip (and optionally the HTML report) and stop recording."""
+        from visus.web import tracing
+
+        if self._recorder is None:
+            raise RuntimeError("tracing is not recording — run `visus tracing-start` first")
+        summary = self._recorder.summary()
+        zip_path = args.get("zip_path") or self._trace_zip or "run.zip"
+        report = args.get("report")
+        written = tracing.stop_recording(str(Path(zip_path).resolve()), report)
+        self._recorder = None
+        self._trace_zip = None
+        out: dict[str, Any] = dict(written)
+        out["actions"] = summary["total"]
+        out["failures"] = summary["failures"]
+        return out
 
     # --- web storage (localStorage / sessionStorage) ----------------------
     # Each helper is a one-arg arrow function: Page.evaluate wraps the

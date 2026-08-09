@@ -296,6 +296,65 @@ def codegen(
 
 
 # ---------------------------------------------------------------------------
+# Tracing & reports
+# ---------------------------------------------------------------------------
+
+
+@app.command("tracing-start")
+def tracing_start(
+    output_zip: str = typer.Option("run.zip", "-o", "--output", help="Where to write the trace."),
+    screenshots: bool = typer.Option(
+        True, "--screenshots/--no-screenshots", help="Capture a PNG per action (held in memory)."
+    ),
+) -> None:
+    """Record every session action into a trace (stop with `visus tracing-stop`)."""
+    # Resolve against the CLIENT's cwd — the daemon's may differ.
+    result = _send(
+        "tracing_start",
+        {"zip_path": str(Path(output_zip).resolve()), "screenshots": screenshots},
+    )
+    output.emit(result, table=f"tracing run {result['run_id']} → {result['zip_path']}")
+
+
+@app.command("tracing-stop")
+def tracing_stop(
+    output_zip: str = typer.Option(
+        None, "-o", "--output", help="Override the path chosen at tracing-start."
+    ),
+    report_html: str = typer.Option(
+        None, "--report", help="Also render a single-file HTML report to this path."
+    ),
+) -> None:
+    """Stop recording, write the trace zip (and optionally the HTML report)."""
+    args: dict[str, Any] = {"report": str(Path(report_html).resolve()) if report_html else None}
+    if output_zip:
+        args["zip_path"] = str(Path(output_zip).resolve())
+    result = _send("tracing_stop", args)
+    lines = [
+        f"tracing run {result['run_id']} stopped: "
+        f"{result['actions']} action(s), {result['failures']} failure(s)",
+        f"trace  : {result.get('zip', '')}",
+    ]
+    if result.get("report"):
+        lines.append(f"report : {result['report']}")
+    output.emit(result, table="\n".join(lines))
+
+
+@app.command()
+def report(
+    trace_zip: str = typer.Argument(..., help="A trace written by `visus tracing-stop`."),
+    output_html: str = typer.Option("report.html", "-o", "--output"),
+) -> None:
+    """Render a self-contained HTML report from a trace zip (no session needed)."""
+    from visus.web import tracing
+
+    path = tracing.render_report(
+        str(Path(trace_zip).resolve()), str(Path(output_html).resolve())
+    )
+    output.emit(path, table=f"saved {path}")
+
+
+# ---------------------------------------------------------------------------
 # Persistent session: daemon + thin client commands + REPL
 # ---------------------------------------------------------------------------
 

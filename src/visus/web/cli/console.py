@@ -72,6 +72,8 @@ commands:
   state-load file      restore a snapshot (navigate to the origin first)
   eval expr            evaluate a JS expression
   eval-on TGT expr     evaluate `(el, arg) => …` on one element
+  tracing-start [zip]  record every action (default run.zip)
+  tracing-stop [html]  stop; write the zip (+ an HTML report if given)
   logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
   requests [FILTER]    captured network responses (substring URL filter)
   request N            one captured response, with its body
@@ -561,6 +563,22 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             return str(
                 send("eval", {**ev_target, "expression": " ".join(ev_tail)}).get("result")
             )
+        if cmd == "tracing-start":
+            tr = send(
+                "tracing_start",
+                {
+                    "zip_path": str(Path(rest[0] if rest else "run.zip").resolve()),
+                    "screenshots": True,
+                },
+            )
+            return f"tracing run {tr['run_id']} → {tr['zip_path']}"
+        if cmd == "tracing-stop":
+            tr = send("tracing_stop", {"report": str(Path(rest[0]).resolve()) if rest else None})
+            line = (
+                f"tracing run {tr['run_id']} stopped: "
+                f"{tr['actions']} action(s), {tr['failures']} failure(s) → {tr.get('zip', '')}"
+            )
+            return line + (f"\nreport : {tr['report']}" if tr.get("report") else "")
         if cmd == "logs":
             messages = send("console_messages", {"level": rest[0] if rest else None}).get(
                 "messages", []

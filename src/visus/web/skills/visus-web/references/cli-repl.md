@@ -84,6 +84,8 @@ state-save [file]    save cookies + web storage (default storage-state.json)
 state-load file      restore a snapshot (navigate to the origin first)
 eval expr            evaluate a JS expression on the page
 eval-on TGT expr     evaluate `(el, arg) => …` on one element
+tracing-start [zip]  record every action (default run.zip)
+tracing-stop [html]  stop; write the zip (+ an HTML report if given)
 logs [LEVEL]         browser console messages (SEVERE/WARNING/INFO)
 requests [FILTER]    captured network responses (substring URL filter)
 request N            one captured response, with its body

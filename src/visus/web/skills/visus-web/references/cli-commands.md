@@ -135,6 +135,9 @@ through `visus eval`, whose quotes PowerShell mangles.
 |---|---|
 | `visus codegen <URL> -o <file> --engine <e>` | Record interactions in a headed browser and generate `visus.web` code. |
 | `visus generate-locator [idx] [target] [--raw]` | The copy-paste `visus.web` expression for **one** element. By index it is `Field.code` verbatim — byte-for-byte the VISUS column of `visus list-fields` — plus that field's css and xpath. By `--selector`/`--role`/`--text` it is built to mirror the CLI's own resolution order (role, then text, then selector), so the printed line reaches the element the CLI would act on. `--raw` prints the expression alone, ready to pipe. |
+| `visus tracing-start [-o <zip>] [--no-screenshots]` | Record every session action — per-action screenshot, correlated logs, and an ARIA snapshot at the point of failure. `--no-screenshots` matters on a long run: every shot is held in memory until the zip is written. **`VISUS_WEB_TRACING=1` alone records nothing** — the runtime needs an installed recorder as well, and this is the command that installs one. |
+| `visus tracing-stop [-o <zip>] [--report <html>]` | Stop recording and write the trace zip; `--report` also renders the single-file HTML report. Prints the action and failure counts. |
+| `visus report <trace.zip> [-o <html>]` | Render the HTML report from a trace zip. *One-off*: needs no running session. |
 | `visus doctor --engine <e>` | Check a browser + driver launch correctly. |
 | `visus install --engine <e>` | Resolve/download the browser driver via Selenium Manager. |
 | `visus install --skills` / `--skills=agents` | Install the bundled agent skill into `./.claude/` or `./.agents/`. |

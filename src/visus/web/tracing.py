@@ -6,6 +6,8 @@ import os
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -27,6 +29,85 @@ class _Tracing:
 
 
 _STATE = _Tracing()
+
+
+@dataclass
+class _RecordingSession:
+    """The global state ``start_recording`` took over, so ``stop`` can give it back."""
+
+    recorder: Recorder
+    prev_enabled: bool
+    prev_recorder: Recorder | None
+    prev_sink: Any
+
+
+_SESSION: _RecordingSession | None = None
+
+
+def start_recording(**opts: Any) -> Recorder:
+    """Begin a tracing session WITHOUT a ``with`` block, and return the Recorder.
+
+    :func:`record` is a context manager: its restore lives in a ``finally``,
+    which is exactly right for library code and unusable for a long-lived
+    process where "start" and "stop" arrive as two separate commands. This is
+    the same body split in two — it enables tracing AND installs a live
+    :class:`~visus.web.observability.recorder.Recorder`, which is what
+    ``api/_steps.run_step`` requires before it will record anything
+    (``VISUS_WEB_TRACING`` alone only satisfies half of that check).
+
+    Raises :class:`RuntimeError` if a session is already recording: two live
+    recorders would both attach a handler to the ROOT logger and only one of
+    them could ever be detached.
+    """
+    global _SESSION
+    from visus.web.observability.recorder import Recorder
+
+    if _SESSION is not None:
+        raise RuntimeError(
+            f"a tracing session is already recording (run_id {_SESSION.recorder.run_id})"
+        )
+    prev_enabled, prev_recorder, prev_sink = _STATE.enabled, _STATE.recorder, _STATE.step_sink
+    enable(**opts)
+    rec = Recorder()
+    _STATE.recorder = rec
+    _SESSION = _RecordingSession(
+        recorder=rec,
+        prev_enabled=prev_enabled,
+        prev_recorder=prev_recorder,
+        prev_sink=prev_sink,
+    )
+    return rec
+
+
+def stop_recording(zip_path: str | None = None, report: str | None = None) -> dict[str, str]:
+    """End the session started by :func:`start_recording` and restore prior state.
+
+    Writes the zip when *zip_path* is given, and the HTML report when *report*
+    is too. With no *zip_path* it only releases the recorder's root-logger
+    handler — use that when a run should be discarded rather than saved.
+
+    Returns ``{"run_id": ...}`` plus ``"zip"`` / ``"report"`` when written.
+    Raises :class:`RuntimeError` when nothing is recording.
+    """
+    global _SESSION
+    session = _SESSION
+    if session is None:
+        raise RuntimeError("no tracing session is recording — call start_recording() first")
+    # Restore FIRST, so a failing write cannot leave the globals pointing at a
+    # recorder that has already been detached.
+    _SESSION = None
+    _STATE.recorder = session.prev_recorder
+    _STATE.enabled = session.prev_enabled
+    _STATE.step_sink = session.prev_sink
+    out: dict[str, str] = {"run_id": session.recorder.run_id}
+    if zip_path is None:
+        session.recorder.close()
+        return out
+    session.recorder.write_zip(zip_path)
+    out["zip"] = str(Path(zip_path).resolve())
+    if report:
+        out["report"] = render_report(zip_path, report)
+    return out
 
 
 def enable(**opts: Any) -> None:

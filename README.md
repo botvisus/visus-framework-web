@@ -408,6 +408,9 @@ command accepts `--json`.
 |---|---|
 | `visus codegen <URL> -o <file> --engine <e>` | Record interactions in a headed browser and generate `visus.web` code. |
 | `visus generate-locator [idx] [target] [--raw]` | Print the copy-paste `visus.web` expression for one element (plus its css/xpath by index). |
+| `visus tracing-start -o <zip> [--no-screenshots]` | Record every session action (screenshots, logs, ARIA snapshot on failure). |
+| `visus tracing-stop [-o <zip>] [--report <html>]` | Stop recording; write the trace and optionally a single-file HTML report. |
+| `visus report <trace.zip> -o <html>` | Render a self-contained HTML report from a trace (no session needed). |
 | `visus doctor --engine <e>` | Check a browser + driver launch correctly. |
 | `visus install --engine <e>` | Resolve/download the browser driver via Selenium Manager. |
 | `visus install --skills` / `--skills=agents` | Install the bundled agent skill into `./.claude/` or `./.agents/`. |
@@ -905,7 +908,7 @@ Default timeouts (`visus.web.config.Defaults`, all in ms): `action_timeout_ms = 
 | `VISUS_WEB_REMOTE_URL` | CLI session | — | Selenium Grid / Remote WebDriver URL for the daemon. |
 | `VISUS_WEB_SLOW_MO` | CLI session | `0` | Delay every daemon action by this many milliseconds. |
 | `VISUS_WEB_TOKEN` | CLI session | auto | Auth token for the local daemon socket. |
-| `VISUS_WEB_TRACING` | tracing | off | Enable tracing globally without code. |
+| `VISUS_WEB_TRACING` | tracing | off | Pre-enables the tracing flag. **A recorder is still required**: use `tracing.record(...)` in code, or `visus tracing-start` from the shell. On its own it records nothing. |
 | `VISUS_WEB_EDGE_BINARY` | `edge_ie` | default install path | Path to `msedge.exe`. |
 | `VISUS_WEB_IE_DRIVER` | `edge_ie` | auto | Explicit IEDriverServer path (wins over auto-resolve). |
 | `VISUS_WEB_IE_DRIVER_VERSION` | `edge_ie` | `4.0.0` | Pinned IEDriverServer version (4.8+ can't attach to modern Edge). |

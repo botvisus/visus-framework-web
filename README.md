@@ -362,6 +362,7 @@ rename the session after the browser channel; the name always comes from `--sess
 | `visus keydown <key>` / `visus keyup <key>` | Hold / release a modifier across several actions. |
 | `visus hover` / `visus focus [idx] [target]` | Hover / focus a field. |
 | `visus drag <src> <dst>` / `… --to-selector` | Drag a source element onto a target. |
+| `visus drop [idx] [target] --path <f>` / `--data <t> --data-type <ct>` | Drop a file or payload onto an element from outside the page (dropzones with no file input). |
 | `visus upload [idx] <paths…>` | Set file(s) on a file input. |
 
 ### Wait / assert

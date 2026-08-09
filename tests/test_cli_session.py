@@ -414,7 +414,7 @@ def test_mutating_ops_cover_every_state_changing_op() -> None:
     expected = frozenset(
         {
             "click", "dblclick", "fill", "check", "uncheck", "select", "press",
-            "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
+            "hover", "focus", "clear_input", "drag", "drop", "upload", "goto", "back",
             "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
             "add_cookies", "clear_cookies", "eval", "route", "unroute", "run_code",
             "state_load",

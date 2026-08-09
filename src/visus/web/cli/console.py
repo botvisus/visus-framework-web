@@ -43,6 +43,7 @@ commands:
   dblclick TARGET [btn] double-click the target (btn: left|middle|right)
   focus TARGET         focus the target
   clear-input TARGET   clear the target's value
+  drop TARGET text...  drop a text payload onto the target (files: use `visus drop --path`)
   upload TARGET p...   set file(s) on a file input (paths resolved locally)
   drag TARGET TARGET   drag the first target onto the second
   goto url             navigate to url
@@ -391,6 +392,11 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         if cmd == "clear-input":
             tgt, _ = _target(rest)
             return _act("clear_input", tgt)
+        if cmd == "drop":
+            tgt, tail = _target(rest)
+            r = send("drop", {**tgt, "data": " ".join(tail)})
+            dropped = r.get("dropped", {})
+            return f"dropped {dropped.get('files', 0)} file(s), types {dropped.get('types', [])}"
         if cmd == "upload":
             tgt, tail = _target(rest)
             if not tail:

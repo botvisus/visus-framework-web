@@ -136,7 +136,7 @@ class StaleFieldIndexError(RuntimeError):
 _MUTATING_OPS: frozenset[str] = frozenset(
     {
         "click", "dblclick", "fill", "check", "uncheck", "select", "press",
-        "hover", "focus", "clear_input", "drag", "upload", "goto", "back",
+        "hover", "focus", "clear_input", "drag", "drop", "upload", "goto", "back",
         "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
         "add_cookies", "clear_cookies", "eval", "route", "unroute", "run_code",
         "state_load",
@@ -185,6 +185,29 @@ def _jsonable(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, dict):
         return {str(k): _jsonable(v, depth=depth + 1) for k, v in value.items()}
     return repr(value)
+
+
+# Locator.evaluate calls the expression as (element, arg) — see
+# SeleniumPageDelegate.locator_evaluate. A DataTransfer is built here rather
+# than in Python because a File object cannot cross the WebDriver boundary.
+_DROP_JS = r"""(el, a) => {
+  const dt = new DataTransfer();
+  if (a.file) {
+    const bin = atob(a.file.b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    dt.items.add(new File([arr], a.file.name,
+                          {type: a.file.type || 'application/octet-stream'}));
+  }
+  if (a.data !== null && a.data !== undefined) {
+    dt.setData(a.dataType || 'text/plain', a.data);
+  }
+  const init = {bubbles: true, cancelable: true, composed: true, dataTransfer: dt};
+  for (const type of ['dragenter', 'dragover', 'drop']) {
+    el.dispatchEvent(new DragEvent(type, init));
+  }
+  return {files: dt.files.length, types: Array.from(dt.types)};
+}"""
 
 
 class SessionHandler:
@@ -1005,6 +1028,25 @@ class SessionHandler:
         if target_selector is not None:
             return f"dragged to {target_selector!r}"
         return f"dragged to field {args['target_index']}"
+
+    def _op_drop(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Drop a file or a data payload onto the target from OUTSIDE the page.
+
+        The case neither ``drag`` nor ``upload`` covers: a dropzone with no
+        ``<input type=file>`` only reacts to a ``DragEvent`` carrying a
+        ``DataTransfer``, which nothing on the page can produce.
+        """
+        file = args.get("file")
+        data = args.get("data")
+        if file is None and data is None:
+            raise ValueError("drop: provide a payload — --path <file> or --data <text>")
+        payload = {
+            "file": file,
+            "data": data,
+            "dataType": args.get("data_type") or "text/plain",
+        }
+        result = self._target(args).evaluate(_DROP_JS, payload)
+        return {"dropped": result}
 
     def _op_upload(self, args: dict[str, Any]) -> str:
         paths = args.get("paths") or []

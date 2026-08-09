@@ -73,6 +73,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus keydown <key>` / `visus keyup <key>` | Hold a modifier down across several commands and release it — e.g. `keydown Shift`, some clicks, `keyup Shift`. |
 | `visus hover` / `visus focus [idx] [target]` | Hover / focus a field. |
 | `visus drag <src> <dst>` / `… --to-selector` | Drag a source element onto a target. |
+| `visus drop [idx] [target] --path <f>` / `--data <t> [--data-type <ct>]` | The THIRD case, which neither `drag` nor `upload` reaches: a dropzone with no `<input type=file>`, which only reacts to a `DragEvent` carrying a `DataTransfer` from outside the page. `--path` reads the file on the client (so the path is relative to your cwd), base64s it, and rebuilds a real `File` in the page; `--data` drops text under `--data-type` (default `text/plain`). Fires `dragenter`, `dragover`, `drop` in order and reports how many files and which types landed. |
 | `visus upload [idx] <paths…>` | Set file(s) on a file input. |
 
 ### Wait / assert

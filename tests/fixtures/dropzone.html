@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head><title>dropzone fixture</title></head>
+  <body>
+    <!-- Deliberately NO <input type=file>: this is the component `upload`
+         cannot reach, and the only way in is a DragEvent carrying a
+         DataTransfer built outside the page. -->
+    <div id="zone" style="width:220px;height:120px;border:2px dashed #888">Drop here</div>
+    <pre id="out">idle</pre>
+    <script>
+      var zone = document.getElementById('zone');
+      var out = document.getElementById('out');
+      function swallow(e) { e.preventDefault(); e.stopPropagation(); }
+      zone.addEventListener('dragenter', swallow);
+      zone.addEventListener('dragover', swallow);
+      zone.addEventListener('drop', function (e) {
+        swallow(e);
+        var dt = e.dataTransfer;
+        var files = Array.prototype.map.call(dt.files, function (f) {
+          return f.name + ':' + f.size + ':' + f.type;
+        });
+        out.textContent = JSON.stringify({ files: files, text: dt.getData('text/plain') });
+      });
+    </script>
+  </body>
+</html>

@@ -1485,6 +1485,54 @@ def drag(
     output.emit_envelope(_send_env("drag", args))
 
 
+@app.command()
+def drop(
+    index: int = typer.Argument(None, help="Dropzone field index from the last list-fields."),
+    selector: str = typer.Option(None, "--selector", "-s"),
+    role: str = typer.Option(None, "--role"),
+    name: str = typer.Option(None, "--name"),
+    text: str = typer.Option(None, "--text"),
+    path: str = typer.Option(None, "--path", help="File to drop onto the target."),
+    data: str = typer.Option(None, "--data", help="Text payload to drop instead of a file."),
+    data_type: str = typer.Option(
+        "text/plain", "--data-type", help="MIME type for --data (default text/plain)."
+    ),
+) -> None:
+    """Drop a file or a payload onto an element from outside the page.
+
+    For dropzones with no `<input type=file>`, which `visus upload` cannot reach::
+
+        visus drop --selector "#zone" --path ./report.csv
+        visus drop 4 --data '{"id":1}' --data-type application/json
+    """
+    import base64
+    import mimetypes
+
+    from visus.web.cli import output
+
+    if path is None and data is None:
+        output.emit_error("nothing to drop — pass --path <file> or --data <text>")
+    if path is not None and data is not None:
+        output.emit_error("pass --path or --data, not both")
+    args = _target_args(index, selector, role, name, text)
+    if path is not None:
+        # Read on the CLIENT side so the path resolves against the user's cwd.
+        source = Path(path)
+        args["file"] = {
+            "name": source.name,
+            "type": mimetypes.guess_type(source.name)[0] or "application/octet-stream",
+            "b64": base64.b64encode(source.read_bytes()).decode("ascii"),
+        }
+    else:
+        args["data"] = data
+        args["data_type"] = data_type
+    result = _send("drop", args).get("dropped", {})
+    output.emit(
+        result,
+        table=f"dropped {result.get('files', 0)} file(s), types {result.get('types', [])}",
+    )
+
+
 # Module-level singleton default (B008: a function call cannot be a mutable
 # list-typed default inline; reading it from a module variable is the fix).
 _UPLOAD_PATHS_ARG = typer.Argument(None, help="One or more file paths to upload.")

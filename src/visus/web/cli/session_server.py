@@ -231,6 +231,7 @@ class SessionHandler:
         slow_mo: int = 0,
         allow_run_code: bool = False,
         debugger_address: str | None = None,
+        device: str | None = None,
     ) -> None:
         self._engine = engine or os.environ.get("VISUS_WEB_ENGINE", "chrome")
         if headless is None:
@@ -249,6 +250,7 @@ class SessionHandler:
         # the user's own window, so only `detach` may end such a session.
         self._attached = debugger_address is not None
         self._detached = False
+        self._device = device
         self._browser: Browser | None = None
         self._context: Context | None = None
         self._page: Page | None = None
@@ -313,6 +315,18 @@ class SessionHandler:
                 # new_context() here would spawn a SECOND WebDriver/browser window
                 # (the daemon is headed) — that was the "2 browsers" bug.
                 self._page = self._browser.new_page()
+                # BEFORE the initial goto: a device session whose first load saw a
+                # desktop viewport would render (and cache) the wrong layout.
+                if self._device:
+                    from visus.web.api.devices import get_device
+
+                    preset = get_device(self._device)
+                    self._page.set_device_metrics(
+                        preset.width,
+                        preset.height,
+                        device_scale_factor=preset.device_scale_factor,
+                        mobile=preset.mobile,
+                    )
                 if self._url:
                     self._page.goto(self._url)
                     # Record it by hand: this navigation does NOT go through
@@ -1753,6 +1767,7 @@ class SessionHandler:
             "headless": self._headless,
             "allow_run_code": self._allow_run_code,
             "attached": self._attached,
+            "device": self._device,
             "follow": self._follow,
             "user_data_dir": self._user_data_dir,
             "remote_url": self._remote_url,
@@ -2108,6 +2123,7 @@ def serve(
             "user_data_dir": handler._user_data_dir,
             "remote_url": handler._remote_url,
             "slow_mo": handler._slow_mo,
+            "device": handler._device,
             "allow_run_code": handler._allow_run_code,
             "started_at": time.time(),
         }
@@ -2256,6 +2272,7 @@ def main(argv: list[str] | None = None) -> None:
         "0", "", "false", "False", "no"
     )
     debugger_address = os.environ.get("VISUS_WEB_DEBUGGER_ADDRESS") or None
+    device = os.environ.get("VISUS_WEB_DEVICE") or None
 
     log_dir = Path.cwd() / ".visus"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -2278,6 +2295,7 @@ def main(argv: list[str] | None = None) -> None:
         slow_mo=slow_mo,
         allow_run_code=allow_run_code,
         debugger_address=debugger_address,
+        device=device,
     )
     try:
         serve(handler, token=token, idle_timeout=_idle_timeout_from_env(), name=name)

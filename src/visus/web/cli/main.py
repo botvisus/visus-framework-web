@@ -104,6 +104,43 @@ def version() -> None:
     output.emit(__version__)
 
 
+@app.command()
+def devices() -> None:
+    """List the device presets `session start --device` accepts."""
+    from visus.web.api.devices import DEVICES
+    from visus.web.cli import output
+
+    rows = [
+        {
+            "name": d.name,
+            "width": d.width,
+            "height": d.height,
+            "device_scale_factor": d.device_scale_factor,
+            "mobile": d.mobile,
+        }
+        for d in DEVICES.values()
+    ]
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
+    for column in ("NAME", "WIDTH", "HEIGHT", "DPR", "MOBILE"):
+        table.add_column(column, no_wrap=True)
+    for row in rows:
+        table.add_row(
+            str(row["name"]),
+            str(row["width"]),
+            str(row["height"]),
+            str(row["device_scale_factor"]),
+            "yes" if row["mobile"] else "no",
+        )
+    console_obj = Console()
+    with console_obj.capture() as cap:
+        console_obj.print(table)
+    output.emit(rows, table=cap.get().rstrip("\n"))
+
+
 def _read_clipboard() -> str | None:
     """Best-effort read of the OS clipboard (so 'Copy element' → translate just works)."""
     import subprocess
@@ -546,6 +583,9 @@ def _render_value(result: Any) -> str:
 # Module-level singletons (B008: a typer.Option() call cannot be an inline
 # default when it is shared across commands; reading it from a module variable
 # is the fix — same pattern as _UPLOAD_PATHS_ARG).
+_MOBILE_OPT = typer.Option(
+    False, "--mobile", help="Shorthand for --device 'iPhone 15' (see `visus devices`)."
+)
 _EXACT_OPT = typer.Option(False, "--exact", help="Match --role/--text exactly, not by substring.")
 _FRAME_OPT = typer.Option(None, "--frame", help="CSS selector of the iframe holding the target.")
 _BUTTON_OPT = typer.Option(
@@ -593,13 +633,27 @@ def _target_args(
 @session_app.command("start")
 def session_start(
     url: str = typer.Argument(None, help="URL to open once the browser starts."),
-    engine: str = typer.Option("chrome", "--engine", "-e"),
+    engine: str = typer.Option(
+        "chrome", "--engine", "-e", "--browser", help="chrome | edge | firefox | edge_ie."
+    ),
     headless: bool = typer.Option(False, "--headless", help="Run headless (default: headed)."),
     user_data_dir: str = typer.Option(
         None,
         "--user-data-dir",
         help="Reuse a persistent browser profile — cookies and logins survive runs.",
     ),
+    persistent: bool = typer.Option(
+        False,
+        "--persistent",
+        help="Keep the profile in .visus/profiles/<session> so logins survive runs.",
+    ),
+    profile: str = typer.Option(
+        None, "--profile", help="Alias of --user-data-dir: a profile directory you own."
+    ),
+    device: str = typer.Option(
+        None, "--device", help="Emulate a device viewport (see `visus devices`)."
+    ),
+    mobile: bool = _MOBILE_OPT,
     remote_url: str = typer.Option(
         None,
         "--remote-url",
@@ -620,13 +674,38 @@ def session_start(
     ),
 ) -> None:
     """Start a persistent browser session (detached daemon)."""
+    from visus.web.api.devices import DEFAULT_MOBILE, get_device
     from visus.web.cli import session_client
+
+    chosen = [flag for flag, on in (("--persistent", persistent), ("--profile", profile)) if on]
+    if user_data_dir and chosen:
+        output.emit_error(f"pass --user-data-dir or {chosen[0]}, not both")
+    if persistent and profile:
+        output.emit_error("pass --persistent or --profile, not both")
+    if persistent:
+        # The same directory `visus session delete-data` is entitled to remove.
+        user_data_dir = str(session_client.profile_dir())
+    elif profile:
+        user_data_dir = profile
+
+    if mobile and not device:
+        device = DEFAULT_MOBILE
+    if device:
+        try:
+            get_device(device)  # fail here, not on the daemon's first action
+        except ValueError as exc:
+            output.emit_error(str(exc))
+        if engine not in ("chrome", "edge"):
+            output.emit_error(
+                f"device emulation is a CDP feature — it needs chrome or edge, not {engine!r}"
+            )
 
     try:
         info = session_client.start_daemon(
             engine,
             headless,
             url,
+            device=device,
             user_data_dir=user_data_dir,
             remote_url=remote_url,
             slow_mo=slow_mo,

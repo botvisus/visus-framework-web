@@ -305,7 +305,7 @@ command accepts `--json`.
 
 | Command | What it does |
 |---|---|
-| `visus session start [URL] --engine <e> --headless --user-data-dir <dir> --remote-url <url> --slow-mo <ms> --idle-timeout <seconds> --allow-run-code` | Start the persistent browser daemon (headed by default); optionally on a persistent profile, a Selenium Grid, slowed down, self-reaping when idle, or with `run-code` enabled. `--idle-timeout` (omit = never) stops the daemon after that many idle seconds; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
+| `visus session start [URL] --engine/--browser <e> --headless --persistent --profile <dir> --user-data-dir <dir> --remote-url <url> --slow-mo <ms> --device <d> --mobile --idle-timeout <seconds> --allow-run-code` | Start the persistent browser daemon (headed by default). `--idle-timeout` (omit = never) stops the daemon after that many idle seconds; also settable via `VISUS_WEB_IDLE_TIMEOUT`. |
 | `visus session stop` | Stop the session (closes the browser). |
 | `visus session attach --cdp <host:port> [URL] --engine <chrome\|edge>` | Attach to a browser that is already running (your logged-in Chrome, or a container exposing CDP). |
 | `visus session detach` | End an attached session and leave the browser open (`attach` sessions only). |
@@ -318,6 +318,12 @@ command accepts `--json`.
 | `visus session export-script [-o FILE]` | Emit everything the session did as a runnable `visus.web` script. Prints it by default; `-o` writes it to a file. |
 | `visus repl [URL] --engine <e> --headless` | Open an interactive REPL attached to the session. |
 | `visus console [URL]` | Deprecated alias for `visus repl` (prints a notice on stderr). |
+
+`--persistent` stores the profile in `.visus/profiles/<session>` (git-ignored, and the only
+directory `visus session delete-data` will remove). `--profile <dir>` points at a directory you
+own — visus never deletes it. `--device` / `--mobile` emulate the **viewport** (size, pixel
+ratio, the mobile flag) via CDP, so they need chrome or edge; the user-agent string is not
+changed.
 
 An attached session has no performance/console log history: those are enabled when a browser is
 *launched*, which visus did not do. `visus requests` and `visus logs` therefore stay empty on an
@@ -451,6 +457,7 @@ real request never leaves the browser, so there is nothing to strip from it.
 | `visus mcp` | Start the MCP server over stdio (same as `visus-web-mcp`). |
 | `visus run <script.py>` | Run a Python script with the active interpreter. |
 | `visus version` | Print the `visus.web` version. |
+| `visus devices [--json]` | List the device presets `--device` accepts. |
 
 </details>
 
@@ -942,6 +949,7 @@ Default timeouts (`visus.web.config.Defaults`, all in ms): `action_timeout_ms = 
 | `VISUS_WEB_USER_DATA_DIR` | CLI session | — | Persistent browser profile directory for the daemon. |
 | `VISUS_WEB_REMOTE_URL` | CLI session | — | Selenium Grid / Remote WebDriver URL for the daemon. |
 | `VISUS_WEB_SLOW_MO` | CLI session | `0` | Delay every daemon action by this many milliseconds. |
+| `VISUS_WEB_DEVICE` | CLI session | — | Device preset emulated at session start (see `visus devices`). |
 | `VISUS_WEB_ALLOW_RUN_CODE` | CLI session | off | `"1"` lets `visus run-code` execute Python in the live session. |
 | `VISUS_WEB_DEBUGGER_ADDRESS` | CLI session | — | Attach to this DevTools address instead of launching a browser. |
 | `VISUS_WEB_TOKEN` | CLI session | auto | Auth token for the local daemon socket. |

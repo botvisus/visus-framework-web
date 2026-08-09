@@ -218,6 +218,47 @@ class PageAssertions:
 
         self._poll(check, f"to_have_title({title!r})", timeout)
 
+    def to_match_aria_snapshot(
+        self,
+        expected: Sequence[dict[str, str | re.Pattern[str]]],
+        *,
+        selector: str | None = None,
+        timeout: int | None = None,
+    ) -> None:
+        """Assert the page's accessibility snapshot contains *expected*, in order.
+
+        *expected* is a list of ``{"role": ..., "name": ...}`` rows — exactly the
+        shape :meth:`Page.snapshot` returns, so a captured snapshot can be pasted
+        straight into a test. Matching is a SUBSEQUENCE: every expected row must
+        appear in the live snapshot in the given order, and any extra live rows
+        are ignored, so an assertion stays readable and survives unrelated page
+        growth. ``name`` may be a compiled regex for unstable values (counts,
+        timestamps). ``selector`` scopes the comparison to one region.
+        """
+
+        def matches(want: dict[str, str | re.Pattern[str]], got: dict[str, object]) -> bool:
+            for key, value in want.items():
+                actual = str(got.get(key, ""))
+                if isinstance(value, re.Pattern):
+                    if not value.search(actual):
+                        return False
+                elif actual != value:
+                    return False
+            return True
+
+        def check() -> tuple[bool, object]:
+            rows = self._page.snapshot(selector)
+            cursor = 0
+            for want in expected:
+                while cursor < len(rows) and not matches(want, rows[cursor]):
+                    cursor += 1
+                if cursor == len(rows):
+                    return (False, rows)
+                cursor += 1
+            return (True, rows)
+
+        self._poll(check, f"to_match_aria_snapshot({list(expected)!r})", timeout)
+
 
 @overload
 def expect(target: Locator, message: str | None = None) -> LocatorAssertions: ...

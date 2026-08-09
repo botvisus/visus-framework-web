@@ -379,6 +379,7 @@ command accepts `--json`.
 | `visus cookies [--json]` | List cookies. |
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus state-save [FILE]` / `visus state-load <FILE>` | Save / restore cookies + web storage (skip a login next run). |
+| `visus storage list/get/set/delete/clear [--session-storage]` | Read/write the origin's localStorage (or sessionStorage). |
 | `visus eval "<fn>" [arg] [target] [--json]` | Evaluate JS. On the page `'() => document.title'`; on an element `'(el) => el.id' -s "#u"`. |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far (Chromium). |
 | `visus requests [--filter <s>] [--json]` | Network responses captured so far (Chromium). |

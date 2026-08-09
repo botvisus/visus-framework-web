@@ -96,6 +96,16 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus state-save [FILE]` | Snapshot cookies **and** localStorage/sessionStorage to JSON (default `storage-state.json`). Paths resolve against the client's cwd. |
 | `visus state-load <FILE>` | Restore a `state-save` snapshot — the login-reuse flow. **Navigate to the target origin first** (`visus goto <url>`): cookies only apply to the loaded domain and web storage is per-origin. |
+| `visus storage list [--session-storage]` | Every key/value in the origin's storage. |
+| `visus storage get <key> [--session-storage]` | One value. Exits 1 when the key is absent, and carries a `present` flag — so a stored empty string and a missing key never print the same blank line. |
+| `visus storage set <key> <value> [--session-storage]` | Write one value. |
+| `visus storage delete <key> [--session-storage]` | Remove one key. |
+| `visus storage clear [--session-storage]` | Empty **one** store — clearing sessionStorage never touches localStorage. |
+
+`--session-storage` (on all five) switches from localStorage to sessionStorage;
+the switch is spelled out because `--session` / `-S` is reserved for named
+sessions. Reaching web storage any other way means a hand-written JS closure
+through `visus eval`, whose quotes PowerShell mangles.
 | `visus eval "<fn>" [arg] [target] [--json]` | Evaluate JS and print the result. With **no** target it runs on the page and is called as `(fn)(arg)`. With a target (`-i N`, `-s`, `--role`, `--text`) it runs on that ELEMENT and is called as `(fn)(element, arg)` — how you read `id`/`class`/`dataset` or any property `list-fields` does not return. The MCP `browser_evaluate` tool takes the same target parameters. |
 | `visus logs [LEVEL] [--json]` | Browser console messages captured so far. `LEVEL` filters case-insensitively on `SEVERE` / `WARNING` / `INFO`. Chromium engines only. |
 | `visus requests [--filter <s>] [-F <s>] [--json]` | Network responses captured so far, numbered. `--filter` is a plain substring test on the URL. Chromium only. |

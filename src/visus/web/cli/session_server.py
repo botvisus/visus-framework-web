@@ -116,6 +116,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "add_cookies", "clear_cookies", "eval", "state_load",
         "type", "key_down", "key_up",
         "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
+        "storage_set", "storage_delete", "storage_clear",
     }
 )
 
@@ -1038,6 +1039,62 @@ class SessionHandler:
         if self._has_target(args):
             return {"result": self._target(args).first().evaluate(expression, arg)}
         return {"result": self.page().evaluate(expression, arg)}
+
+    # --- web storage (localStorage / sessionStorage) ----------------------
+    # Each helper is a one-arg arrow function: Page.evaluate wraps the
+    # expression as ``(<expr>)(arg)``, so the whole payload travels in one dict.
+    _STORAGE_LIST_JS = (
+        "(a) => { const st = a.session ? sessionStorage : localStorage;"
+        " const out = []; for (let i = 0; i < st.length; i++)"
+        " { const k = st.key(i); out.push({name: k, value: st.getItem(k)}); }"
+        " return out; }"
+    )
+    _STORAGE_GET_JS = (
+        "(a) => { const st = a.session ? sessionStorage : localStorage;"
+        " const v = st.getItem(a.key); return {value: v, present: v !== null}; }"
+    )
+    _STORAGE_SET_JS = (
+        "(a) => { const st = a.session ? sessionStorage : localStorage;"
+        " st.setItem(a.key, a.value); return true; }"
+    )
+    _STORAGE_DELETE_JS = (
+        "(a) => { const st = a.session ? sessionStorage : localStorage;"
+        " const had = st.getItem(a.key) !== null; st.removeItem(a.key); return had; }"
+    )
+    _STORAGE_CLEAR_JS = (
+        "(a) => { const st = a.session ? sessionStorage : localStorage;"
+        " const n = st.length; st.clear(); return n; }"
+    )
+
+    @staticmethod
+    def _storage_kind(args: dict[str, Any]) -> str:
+        return "sessionStorage" if args.get("session") else "localStorage"
+
+    def _op_storage_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Every key/value in the current origin's local or session storage."""
+        payload = {"session": bool(args.get("session"))}
+        items = self.page().evaluate(self._STORAGE_LIST_JS, payload)
+        return {"kind": self._storage_kind(args), "items": items}
+
+    def _op_storage_get(self, args: dict[str, Any]) -> dict[str, Any]:
+        """One key. ``present`` distinguishes a stored ``""`` from a missing key."""
+        payload = {"session": bool(args.get("session")), "key": str(args.get("key", ""))}
+        return cast("dict[str, Any]", self.page().evaluate(self._STORAGE_GET_JS, payload))
+
+    def _op_storage_set(self, args: dict[str, Any]) -> str:
+        key, value = str(args.get("key", "")), str(args.get("value", ""))
+        payload = {"session": bool(args.get("session")), "key": key, "value": value}
+        self.page().evaluate(self._STORAGE_SET_JS, payload)
+        return f"{self._storage_kind(args)}[{key!r}] = {value!r}"
+
+    def _op_storage_delete(self, args: dict[str, Any]) -> dict[str, Any]:
+        payload = {"session": bool(args.get("session")), "key": str(args.get("key", ""))}
+        return {"deleted": bool(self.page().evaluate(self._STORAGE_DELETE_JS, payload))}
+
+    def _op_storage_clear(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Clear ONE store — clearing sessionStorage never touches localStorage."""
+        payload = {"session": bool(args.get("session"))}
+        return {"cleared": int(cast(int, self.page().evaluate(self._STORAGE_CLEAR_JS, payload)))}
 
     # --- devtools: console / network -------------------------------------
     def _op_console_messages(self, args: dict[str, Any]) -> dict[str, Any]:

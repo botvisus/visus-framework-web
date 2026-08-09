@@ -74,6 +74,8 @@ expect TARGET text   assert the target contains text (PASSED/FAILED)
 cookies              list cookies for the context
 add-cookies json     add cookies from a JSON list
 clear-cookies        clear every cookie in the context
+storage SUB [k] [v]  localStorage: list|get k|set k v|delete k|clear
+session-storage SUB  the same five subcommands on sessionStorage
 state-save [file]    save cookies + web storage (default storage-state.json)
 state-load file      restore a snapshot (navigate to the origin first)
 eval expr            evaluate a JS expression on the page

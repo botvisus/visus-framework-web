@@ -485,3 +485,169 @@ def test_resize_changes_the_real_viewport(base_url: str) -> None:
         assert inner["result"]["result"] == 900
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# web storage
+# ---------------------------------------------------------------------------
+
+
+class _StoragePage:
+    """Evaluates the storage helpers against two in-memory dicts."""
+
+    url = "http://x/"
+
+    def __init__(self) -> None:
+        self.local: dict[str, str] = {"token": "abc", "empty": ""}
+        self.session: dict[str, str] = {"tab": "1"}
+        self.seen: list[str] = []
+
+    def evaluate(self, expression: str, arg: object = None) -> object:
+        self.seen.append(expression)
+        a = arg if isinstance(arg, dict) else {}
+        store = self.session if a.get("session") else self.local
+        key = str(a.get("key", ""))
+        if "st.key(" in expression:
+            return [{"name": k, "value": v} for k, v in store.items()]
+        if "setItem" in expression:
+            store[key] = str(a.get("value", ""))
+            return True
+        if "removeItem" in expression:
+            had = key in store
+            store.pop(key, None)
+            return had
+        if "st.clear()" in expression:
+            n = len(store)
+            store.clear()
+            return n
+        v = store.get(key)
+        return {"value": v, "present": v is not None}
+
+
+def test_op_storage_round_trip_on_local_and_session() -> None:
+    page = _StoragePage()
+    h = _handler(page)
+
+    listed = h.handle("storage_list", {})["result"]
+    assert listed["kind"] == "localStorage"
+    assert {i["name"] for i in listed["items"]} == {"token", "empty"}
+
+    assert h.handle("storage_get", {"key": "token"})["result"] == {
+        "value": "abc",
+        "present": True,
+    }
+    # An empty value and a missing key must be distinguishable.
+    assert h.handle("storage_get", {"key": "empty"})["result"] == {"value": "", "present": True}
+    assert h.handle("storage_get", {"key": "nope"})["result"] == {
+        "value": None,
+        "present": False,
+    }
+
+    assert h.handle("storage_set", {"key": "k", "value": "v"})["result"] == (
+        "localStorage['k'] = 'v'"
+    )
+    assert page.local["k"] == "v"
+    assert h.handle("storage_delete", {"key": "k"})["result"] == {"deleted": True}
+    assert h.handle("storage_delete", {"key": "k"})["result"] == {"deleted": False}
+
+    assert h.handle("storage_list", {"session": True})["result"]["kind"] == "sessionStorage"
+    assert h.handle("storage_get", {"key": "tab", "session": True})["result"]["value"] == "1"
+    assert h.handle("storage_clear", {"session": True})["result"] == {"cleared": 1}
+    assert page.session == {}
+    assert page.local  # clearing sessionStorage must not touch localStorage
+
+
+def test_cli_storage_subcommands(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_send(op: str, args: dict[str, Any] | None = None) -> Any:
+        calls.append((op, args or {}))
+        if op == "storage_list":
+            return {"kind": "localStorage", "items": [{"name": "token", "value": "abc"}]}
+        if op == "storage_get":
+            return {"value": "abc", "present": True}
+        if op == "storage_delete":
+            return {"deleted": True}
+        if op == "storage_clear":
+            return {"cleared": 3}
+        return "localStorage['k'] = 'v'"
+
+    monkeypatch.setattr(session_client, "send", fake_send)
+    assert runner.invoke(app, ["storage", "list"]).exit_code == 0
+    r_get = runner.invoke(app, ["storage", "get", "token"])
+    assert r_get.exit_code == 0 and "abc" in r_get.output
+    assert runner.invoke(app, ["storage", "set", "k", "v"]).exit_code == 0
+    assert runner.invoke(app, ["storage", "delete", "k"]).exit_code == 0
+    assert runner.invoke(app, ["storage", "clear", "--session-storage"]).exit_code == 0
+    assert calls[0] == ("storage_list", {"session": False})
+    assert calls[1] == ("storage_get", {"key": "token", "session": False})
+    assert calls[2] == ("storage_set", {"key": "k", "value": "v", "session": False})
+    assert calls[3] == ("storage_delete", {"key": "k", "session": False})
+    assert calls[4] == ("storage_clear", {"session": True})
+
+
+def test_cli_storage_get_missing_key_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        session_client, "send", lambda op, args=None: {"value": None, "present": False}
+    )
+    r = runner.invoke(app, ["storage", "get", "nope"])
+    assert r.exit_code == 1
+
+
+def test_repl_storage_branches() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        if op == "storage_list":
+            return {"kind": "localStorage", "items": []}
+        if op == "storage_get":
+            return {"value": "abc", "present": True}
+        return {"deleted": True, "cleared": 0}
+
+    console.dispatch("storage list", send)
+    console.dispatch("storage get token", send)
+    console.dispatch("storage set k some value", send)
+    console.dispatch("session-storage delete tab", send)
+    assert calls[0] == ("storage_list", {"session": False})
+    assert calls[1] == ("storage_get", {"key": "token", "session": False})
+    assert calls[2] == ("storage_set", {"key": "k", "value": "some value", "session": False})
+    assert calls[3] == ("storage_delete", {"key": "tab", "session": True})
+    assert "storage" in console.dispatch("help", send)
+
+
+@pytest.mark.browser
+def test_storage_ops_against_a_real_page(base_url: str) -> None:
+    """storage.html seeds token=seed-local and tab=seed-session on every load."""
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/storage.html"
+    )
+    try:
+        assert h.handle("storage_get", {"key": "token"})["result"] == {
+            "value": "seed-local",
+            "present": True,
+        }
+        assert h.handle("storage_get", {"key": "tab", "session": True})["result"] == {
+            "value": "seed-session",
+            "present": True,
+        }
+        assert h.handle("storage_get", {"key": "absent"})["result"]["present"] is False
+
+        h.handle("storage_set", {"key": "token", "value": "written"})
+        assert h.handle("storage_get", {"key": "token"})["result"]["value"] == "written"
+
+        names = {
+            i["name"] for i in h.handle("storage_list", {})["result"]["items"]
+        }
+        assert "token" in names
+
+        assert h.handle("storage_delete", {"key": "token"})["result"] == {"deleted": True}
+        assert h.handle("storage_get", {"key": "token"})["result"]["present"] is False
+
+        cleared = h.handle("storage_clear", {"session": True})["result"]["cleared"]
+        assert cleared >= 1
+        assert h.handle("storage_get", {"key": "tab", "session": True})["result"][
+            "present"
+        ] is False
+    finally:
+        h.close()

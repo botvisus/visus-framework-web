@@ -1374,6 +1374,71 @@ def clear_cookies() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Web storage (localStorage / sessionStorage)
+# ---------------------------------------------------------------------------
+
+storage_app = typer.Typer(help="Read and write localStorage / sessionStorage.")
+app.add_typer(storage_app, name="storage")
+
+# `--session` / `-S` is reserved for named sessions, so the switch is spelled out.
+_SESSION_STORAGE_OPT = typer.Option(
+    False, "--session-storage", help="Use sessionStorage instead of localStorage."
+)
+
+
+@storage_app.command("list")
+def storage_list(session: bool = _SESSION_STORAGE_OPT) -> None:
+    """List every key/value in the current origin's storage."""
+    result = _send("storage_list", {"session": session})
+    items = result.get("items", [])
+    table = (
+        "(empty)"
+        if not items
+        else "\n".join(f"{i.get('name', '')}={i.get('value', '')}" for i in items)
+    )
+    output.emit(items, table=table)
+
+
+@storage_app.command("get")
+def storage_get(
+    key: str = typer.Argument(..., help="Storage key."),
+    session: bool = _SESSION_STORAGE_OPT,
+) -> None:
+    """Print one storage value (exits 1 when the key is absent)."""
+    result = _send("storage_get", {"key": key, "session": session})
+    if not result.get("present"):
+        output.emit_error(f"no such key: {key!r}")
+    output.emit(result.get("value"))
+
+
+@storage_app.command("set")
+def storage_set(
+    key: str = typer.Argument(..., help="Storage key."),
+    value: str = typer.Argument(..., help="Value to store."),
+    session: bool = _SESSION_STORAGE_OPT,
+) -> None:
+    """Write one storage value."""
+    output.emit(_send("storage_set", {"key": key, "value": value, "session": session}))
+
+
+@storage_app.command("delete")
+def storage_delete(
+    key: str = typer.Argument(..., help="Storage key."),
+    session: bool = _SESSION_STORAGE_OPT,
+) -> None:
+    """Remove one storage key."""
+    result = _send("storage_delete", {"key": key, "session": session})
+    output.emit(result, table="deleted" if result.get("deleted") else "no such key")
+
+
+@storage_app.command("clear")
+def storage_clear(session: bool = _SESSION_STORAGE_OPT) -> None:
+    """Clear the whole store for the current origin."""
+    result = _send("storage_clear", {"session": session})
+    output.emit(result, table=f"cleared {result.get('cleared', 0)} key(s)")
+
+
+# ---------------------------------------------------------------------------
 # Storage state (cookies + localStorage/sessionStorage)
 # ---------------------------------------------------------------------------
 

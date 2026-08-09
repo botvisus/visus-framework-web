@@ -62,6 +62,8 @@ commands:
   cookies              list cookies for the context
   add-cookies json     add cookies from a JSON list
   clear-cookies        clear every cookie in the context
+  storage SUB [k] [v]  localStorage: list|get k|set k v|delete k|clear
+  session-storage SUB  the same five subcommands on sessionStorage
   state-save [file]    save cookies + web storage (default storage-state.json)
   state-load file      restore a snapshot (navigate to the origin first)
   eval expr            evaluate a JS expression
@@ -486,6 +488,34 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             return _act("add_cookies", {"cookies": parsed})
         if cmd == "clear-cookies":
             return _act("clear_cookies", {})
+        if cmd in ("storage", "session-storage"):
+            if not rest:
+                return "usage: storage list|get KEY|set KEY VALUE|delete KEY|clear"
+            in_session = cmd == "session-storage"
+            sub, tail = rest[0].lower(), rest[1:]
+            if sub == "list":
+                listed = send("storage_list", {"session": in_session})
+                items = listed.get("items", [])
+                if not items:
+                    return "(empty)"
+                return "\n".join(f"{i.get('name', '')}={i.get('value', '')}" for i in items)
+            if sub == "clear":
+                cleared = send("storage_clear", {"session": in_session})["cleared"]
+                return f"cleared {cleared} key(s)"
+            if sub == "get":
+                got = send("storage_get", {"key": tail[0], "session": in_session})
+                return str(got["value"]) if got.get("present") else f"no such key: {tail[0]!r}"
+            if sub == "set":
+                return str(
+                    send(
+                        "storage_set",
+                        {"key": tail[0], "value": " ".join(tail[1:]), "session": in_session},
+                    )
+                )
+            if sub == "delete":
+                gone = send("storage_delete", {"key": tail[0], "session": in_session})
+                return "deleted" if gone.get("deleted") else "no such key"
+            return f"unknown storage subcommand {sub!r} (list|get|set|delete|clear)"
         if cmd == "state-save":
             path = str(Path(rest[0] if rest else "storage-state.json").resolve())
             r = send("state_save", {"path": path})

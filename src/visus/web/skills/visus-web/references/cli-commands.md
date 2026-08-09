@@ -59,7 +59,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 
 | Command | What it does |
 |---|---|
-| `visus click [idx] [target] [--button <b>] [-b <b>]` | Click a field. `--button` is `left` (default), `middle` or `right` — a right click opens the page's context menu, a middle click is open-in-new-tab. A non-left click goes through the pointer device at the target's centre, because the auto-waiting click path is left-button only. |
+| `visus click [idx] [target] [--button <b>]` / `visus click --image <png> [-c 0.8]` | Click a field. `--button` is `left` (default), `middle` or `right` — a right click opens the page's context menu, a middle click is open-in-new-tab. A non-left click goes through the pointer device at the target's centre, because the auto-waiting click path is left-button only. **`--image`** clicks the CENTRE of a matched template PNG instead of an element — for a canvas app, an embedded PDF viewer or a widget with no accessibility tree, where role/name/text/selector can reach the container and nothing inside it. Scope the search to one element by adding an ordinary target. Needs the `[vision]` extra. |
 | `visus dblclick [idx] [target] [--button <b>]` | Double-click a field. |
 | `visus mousemove <x> <y>` | Move the pointer to absolute **viewport** coordinates. |
 | `visus mousedown [--button <b>]` / `visus mouseup [--button <b>]` | Press / release a mouse button at the current pointer position — a drag is `mousemove`, `mousedown`, `mousemove`, `mouseup`. |

@@ -110,6 +110,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "state_load",
         "type", "key_down", "key_up",
         "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
+        "click_image",
         "storage_set", "storage_delete", "storage_clear",
         "cookie_set", "cookie_delete",
     }
@@ -1611,6 +1612,60 @@ class SessionHandler:
         if match is None:
             return {"found": False}
         return {"found": True, "x": match.x, "y": match.y, "confidence": match.confidence}
+
+    def _device_pixel_ratio(self) -> float:
+        """CSS pixels per screenshot pixel (1.0 on a standard-DPI display).
+
+        A screenshot is captured in DEVICE pixels while the mouse device speaks
+        CSS viewport pixels, so on a HiDPI display a match at screenshot (400,200)
+        must be clicked at CSS (200,100). An unreadable ratio degrades to 1:1
+        rather than failing the click.
+        """
+        try:
+            value = self.page().evaluate("() => window.devicePixelRatio")
+        except Exception:  # noqa: BLE001 — telemetry, never the result
+            return 1.0
+        try:
+            ratio = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 1.0
+        return ratio if ratio > 0 else 1.0
+
+    def _op_click_image(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Click the centre of a template image found on the page (or in an element).
+
+        The last-resort target. A canvas app, an embedded PDF viewer or a
+        third-party widget with no accessibility tree exposes no role, no name and
+        no stable selector — but it still renders pixels, and those can be matched
+        and pressed. Give a target (index / selector / role / text) to scope the
+        search to one element; the element's own box is then added back so the
+        click lands in page coordinates.
+        """
+        from visus.web.vision import find_image
+
+        template_path = str(args.get("template_path") or "")
+        confidence = float(args.get("confidence", 0.8))
+        page = self.page()
+        origin_x = origin_y = 0.0
+        if self._has_target(args):
+            loc = self._target(args)
+            shot = loc.screenshot()
+            box = loc.bounding_box()
+            if box is not None:
+                origin_x, origin_y = float(box["x"]), float(box["y"])
+        else:
+            shot = page.screenshot()
+        match = find_image(shot, template_path, confidence=confidence)
+        if match is None:
+            raise LookupError(
+                f"template {template_path!r} not found on the page "
+                f"at confidence >= {confidence}"
+            )
+        ratio = self._device_pixel_ratio()
+        x = origin_x + match.center_x / ratio
+        y = origin_y + match.center_y / ratio
+        page.mouse.click(x, y)
+        return {"x": round(x, 1), "y": round(y, 1), "confidence": round(match.confidence, 4)}
 
     def _op_tabs(self, args: dict[str, Any]) -> dict[str, Any]:
         """List every open tab/window with its title/url and the active marker.

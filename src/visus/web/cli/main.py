@@ -986,13 +986,31 @@ def click(
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
     text: str = typer.Option(None, "--text"),
+    image: str = typer.Option(
+        None, "--image", help="Click the centre of this template PNG (needs the [vision] extra)."
+    ),
+    confidence: float = typer.Option(0.8, "--confidence", "-c", help="Match threshold (0-1)."),
     button: str = _BUTTON_OPT,
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
-    """Click a field by index or by --selector/--role/--text."""
+    """Click a field by index, by --selector/--role/--text, or by --image."""
+    if image is not None:
+        image_args: dict[str, Any] = {
+            "template_path": str(Path(image).resolve()),
+            "confidence": confidence,
+        }
+        if index is not None or selector or role or text:
+            image_args.update(_target_args(index, selector, role, name, text))
+        env = _send_env("click_image", image_args)
+        r = env["result"]
+        message = f"clicked image at ({r['x']}, {r['y']}) confidence={r['confidence']:.3f}"
+        output.emit_envelope({**env, "result": message})
+        return
     args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
     if button != "left":
+        # A pixel click always uses the primary button, so this stays in the
+        # NON-image branch.
         args["button"] = button  # keep the default payload minimal
     output.emit_envelope(_send_env("click", args))
 

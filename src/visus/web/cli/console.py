@@ -27,6 +27,7 @@ _HELP = """targets: a field index (`3`), a bare selector (`#submit`, `//button[1
 commands:
   list [full] [--boxes] enumerate interactive fields (`full` adds CSS/XPATH)
   click TARGET [btn]   click the target (btn: left|middle|right)
+  click-image f.png [c] click the centre of a template image (vision)
   fill TARGET text     fill the target with text
   check TARGET         check the target
   uncheck TARGET       uncheck the target
@@ -347,6 +348,15 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         if cmd == "click":
             tgt, tail = _target(rest)
             return _act("click", {**tgt, **_button_arg(tail)})
+        if cmd == "click-image":
+            r = send(
+                "click_image",
+                {
+                    "template_path": str(Path(rest[0]).resolve()),
+                    "confidence": float(rest[1]) if len(rest) > 1 else 0.8,
+                },
+            )
+            return f"clicked image at ({r['x']}, {r['y']}) confidence={r['confidence']:.3f}"
         if cmd == "fill":
             tgt, tail = _target(rest)
             return _act("fill", {**tgt, "text": " ".join(tail)})

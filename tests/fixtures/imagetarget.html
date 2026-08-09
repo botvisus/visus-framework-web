@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <head><title>image target fixture</title></head>
+  <body style="margin:0;background:#fff">
+    <!-- A canvas app. Everything drawn below is PAINTED PIXELS: no roles, no
+         accessible names, no child elements. role/name/text/selector targeting
+         can reach the <canvas> itself and nothing inside it — which is exactly
+         the case `click --image` and `click --ocr-text` exist for. -->
+    <canvas id="app" width="520" height="220"></canvas>
+    <p id="clicked">none</p>
+    <script>
+      var c = document.getElementById('app');
+      var g = c.getContext('2d');
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, 520, 220);
+
+      // OCR target: large black text on white, top-left.
+      g.fillStyle = '#000000';
+      g.font = '48px monospace';
+      g.textBaseline = 'top';
+      g.fillText('SUBMIT', 30, 30);
+
+      // Template-match target: a high-contrast block with a white bar through it,
+      // bottom-right. Deliberately patterned — TM_CCOEFF_NORMED needs internal
+      // variance, a solid block would correlate everywhere.
+      g.fillStyle = '#1b2a4a';
+      g.fillRect(300, 120, 120, 48);
+      g.fillStyle = '#ffffff';
+      g.fillRect(320, 138, 80, 12);
+
+      c.addEventListener('click', function (e) {
+        var r = c.getBoundingClientRect();
+        var x = e.clientX - r.left, y = e.clientY - r.top;
+        var out = 'miss';
+        if (x >= 30 && x <= 230 && y >= 30 && y <= 90) out = 'text';
+        else if (x >= 300 && x <= 420 && y >= 120 && y <= 168) out = 'image';
+        document.getElementById('clicked').textContent = out;
+      });
+    </script>
+  </body>
+</html>

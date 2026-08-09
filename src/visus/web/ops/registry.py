@@ -85,6 +85,10 @@ LOCAL_ONLY_TOOLS: frozenset[str] = frozenset(
         # to `visus session stop`; sending `shutdown` across would kill a browser
         # the user is still using.
         "browser_close",
+        # The attach controls themselves: they decide where ops go, so they can
+        # never be one of the ops that gets sent.
+        "browser_attach_session",
+        "browser_detach_session",
     }
 )
 

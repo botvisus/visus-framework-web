@@ -85,8 +85,19 @@ def _acted(env: dict[str, Any], message: str) -> str:
     """An action's result plus the page state the agent needs for its next step.
 
     Without this an agent is blind after every action and must spend a whole extra
-    tool call on browser_url/browser_title, or act on a stale mental model.
+    tool call on browser_url/browser_title, or act on a stale mental model. When
+    attached, the state comes from the daemon's own envelope (PLAN 4's ``page``
+    key), so it describes the page the action actually produced — no second
+    round-trip, and no chance of reading a different browser.
     """
+    state = env.get("page")
+    if isinstance(state, dict) and state.get("url") is not None:
+        footer = f"\n\n### Page\n- URL: {state['url']}\n- Title: {state.get('title', '')}"
+        if state.get("fields_stale"):
+            footer += "\n- Fields: stale (run browser_list_fields again)"
+        return message + footer
+    if _remote is not None:
+        return message  # attached but the daemon sent no footer: do not guess
     try:
         page = _session.page()
         return f"{message}\n\n### Page\n- URL: {page.url}\n- Title: {page.title()}"
@@ -1021,6 +1032,54 @@ def browser_find_image(
 
     found: dict[str, Any] = _run("find_image", args, _local)["result"]
     return found
+
+
+# ---------------------------------------------------------------------------
+# Attach: one browser instead of two
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def browser_attach_session(project_dir: str | None = None) -> str:
+    """Attach to the `visus` CLI session daemon and drive ITS browser from now on.
+
+    Unattached, this server and the `visus` shell run two independent browsers —
+    different windows, different cookies, different logins — and nothing in the
+    tool output says so. Attached, every tool crosses to the daemon, so the model
+    and the human share one page, one session and one field-index vocabulary.
+
+    `project_dir` is where the search for `.visus/sessions/<name>.json` starts
+    (default: this process's working directory); the search walks upward,
+    git-style. Start the session first with `visus session start <url>`.
+    """
+    global _remote
+    dispatcher = RemoteDispatcher(start_dir=project_dir)
+    info = dispatcher.session()
+    if info is None:
+        where = project_dir or "the current directory"
+        raise RuntimeError(
+            f"no live visus session found (searched upward from {where}) — "
+            "run `visus session start <url>` there first"
+        )
+    _session.close()  # a second live browser would be invisible and unreachable
+    _remote = dispatcher
+    return (
+        f"attached to the visus session (pid {info['pid']}, port {info['port']}) — "
+        "every tool now drives that browser"
+    )
+
+
+@mcp.tool()
+def browser_detach_session() -> str:
+    """Detach from the `visus` CLI session; later tools use this server's own browser.
+
+    The `visus` session keeps running — detaching never closes the user's browser.
+    """
+    global _remote
+    if _remote is None:
+        return "not attached"
+    _remote = None
+    return "detached — subsequent tools use this server's own browser"
 
 
 # ---------------------------------------------------------------------------

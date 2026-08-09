@@ -111,7 +111,7 @@ scratch, fully typed, with **no Playwright dependency**. On top of the test-auto
 - **👁️ Vision plugin (`[vision]`)** — `read_text` / `solve_captcha` (RapidOCR) and `find_image` /
   `find_all_images` (OpenCV), plus `locator.ocr_text()` / `locator.find_image()` /
   `page.solve_captcha()`.
-- **🧩 MCP server (`[mcp]`)** — `visus-web-mcp` exposes **45 tools** (navigation, accessibility
+- **🧩 MCP server (`[mcp]`)** — `visus-web-mcp` exposes **47 tools** (navigation, accessibility
   snapshot, all actions, tabs, dialogs, cookies, network/console capture, screenshot, evaluate,
   vision) to AI agents.
 - **⌨️ Full-featured CLI (`[cli]`)** — the `visus` command mirrors the whole surface in the shell
@@ -207,7 +207,7 @@ with launch(headless=True) as browser:
 
 ## Drive it from any MCP agent
 
-`visus-web` ships a **Model Context Protocol** server exposing **45 tools** so an AI agent
+`visus-web` ships a **Model Context Protocol** server exposing **47 tools** so an AI agent
 (Claude Code / Desktop, Cursor) can drive the browser end to end. Each tool carries a docstring that
 teaches the agent *when and how* to use it, so it never has to read source.
 
@@ -232,7 +232,7 @@ Wire it into your MCP client:
 }
 ```
 
-**Tool groups (45 tools):**
+**Tool groups (47 tools):**
 
 | Group | Tools |
 |---|---|
@@ -247,6 +247,7 @@ Wire it into your MCP client:
 | Media / JS | `browser_screenshot`, `browser_evaluate` |
 | Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha`, `browser_find_image` |
 | Lifecycle | `browser_close` |
+| Attach | `browser_attach_session`, `browser_detach_session` — drive the `visus session` browser from MCP instead of a second, separate one. |
 
 **Recommended agent flow:** `browser_navigate` → `browser_snapshot` (read the role/name table) **or**
 `browser_list_fields` (numbered, with ready-to-use locators) → act with `browser_click` /
@@ -1048,7 +1049,7 @@ visus-framework-web/
 │   ├── backends/               # Selenium engine (all selenium.* confined here) + browser drivers
 │   ├── cli/                    # the `visus` CLI + persistent session daemon
 │   ├── skills/visus-web/       # the shipped agent skill (installed by `visus install --skills`)
-│   ├── mcp/                    # the visus-web-mcp server (45 tools)
+│   ├── mcp/                    # the visus-web-mcp server (47 tools)
 │   └── observability/          # run recording + HTML report rendering
 ├── examples/                   # demo_rpa.py, login.py, login_rpa.py, login_mcp.py, dolar.py
 ├── .claude/skills/             # developing-visus-web (contributor guide, not shipped)

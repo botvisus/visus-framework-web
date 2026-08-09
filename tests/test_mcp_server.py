@@ -81,6 +81,9 @@ _EXPECTED_TOOLS = [
     "browser_find_image",
     # Lifecycle
     "browser_close",
+    # Attach
+    "browser_attach_session",
+    "browser_detach_session",
 ]
 
 
@@ -178,5 +181,5 @@ async def test_skill_resource_and_prompt_are_registered() -> None:
 
 
 def test_registering_the_skill_did_not_change_the_tool_count() -> None:
-    assert len(_get_tool_names()) == 45
+    assert len(_get_tool_names()) == 47
 

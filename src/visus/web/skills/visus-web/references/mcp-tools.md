@@ -5,9 +5,16 @@ pip install "visus-web[mcp]"
 visus-web-mcp          # stdio; `visus mcp` is the same thing
 ```
 
-**45 tools** over its own browser. Note: the MCP server's browser is a
-*different process* from the CLI session daemon, with opposite defaults —
-headless by default, and new tabs are **not** followed automatically.
+**47 tools**. By default they drive the server's OWN browser, a *different
+process* from the CLI session daemon and with opposite defaults — headless, and
+new tabs are **not** followed automatically.
+
+Call `browser_attach_session` to drive the CLI daemon's browser instead. Attached,
+every tool crosses to that daemon, so the model and the human share one page, one
+session and one field-index vocabulary; the server closes its own browser first,
+so there is never a second invisible one. `browser_detach_session` returns to the
+server's own browser and leaves the `visus` session running — and `browser_close`
+detaches rather than closing a browser that is not the server's to close.
 
 The server also serves this skill: resource `visus://skill/SKILL.md`, resource
 template `visus://skill/references/{name}`, and the prompt
@@ -30,7 +37,7 @@ template `visus://skill/references/{name}`, and the prompt
 }
 ```
 
-## The 45 tools, by group
+## The 47 tools, by group
 
 | Group | Tools |
 |---|---|
@@ -45,8 +52,9 @@ template `visus://skill/references/{name}`, and the prompt
 | Media / JS | `browser_screenshot`, `browser_evaluate` |
 | Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha`, `browser_find_image` |
 | Lifecycle | `browser_close` |
+| Attach | `browser_attach_session`, `browser_detach_session` |
 
-That is 4 + 9 + 12 + 2 + 6 + 1 + 2 + 3 + 2 + 3 + 1 = **45**, pinned by
+That is 4 + 9 + 12 + 2 + 6 + 1 + 2 + 3 + 2 + 3 + 1 + 2 = **47**, pinned by
 `tests/test_mcp_server.py`.
 
 **Recommended agent flow:** `browser_navigate` → `browser_snapshot` (read the

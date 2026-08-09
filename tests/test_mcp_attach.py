@@ -83,3 +83,86 @@ def test_run_returns_the_daemon_envelope_when_attached(
 
     monkeypatch.setattr(server, "_remote", _Fake())
     assert server._run("click", {}, lambda: pytest.fail("local path ran")) == env
+
+
+def test_attach_refuses_when_no_session_is_running(tmp_path: Path) -> None:
+    from visus.web.mcp import server
+
+    with pytest.raises(RuntimeError, match="visus session start"):
+        server.browser_attach_session(str(tmp_path))
+    assert server._remote is None
+
+
+def test_detach_is_idempotent() -> None:
+    from visus.web.mcp import server
+
+    server._remote = None
+    assert server.browser_detach_session() == "not attached"
+
+
+def test_acted_prefers_the_daemon_page_footer() -> None:
+    from visus.web.mcp import server
+
+    env = {
+        "ok": True,
+        "result": "clicked",
+        "page": {"url": "http://x/dash", "title": "Dash", "fields_stale": False},
+    }
+    out = server._acted(env, "clicked")
+    assert out.startswith("clicked")
+    assert "### Page" in out
+    assert "- URL: http://x/dash" in out
+    assert "- Title: Dash" in out
+
+
+@pytest.mark.browser
+def test_attached_tools_drive_the_shell_browser(tmp_path: Path) -> None:
+    """The payoff: one browser, one page, one field-index vocabulary."""
+    from visus.web.cli import session_client
+    from visus.web.mcp import server
+
+    page = "data:text/html,<title>shell</title><h1 id=h>shell page</h1>"
+    session_client.start_daemon("chrome", headless=True, url=page, cwd=tmp_path)
+    try:
+        assert "attached to the visus session" in server.browser_attach_session(str(tmp_path))
+        try:
+            # The MCP server now sees the page the SHELL opened — it never
+            # launched a browser of its own.
+            assert server.browser_title() == "shell"
+            assert server.browser_get_text(selector="#h") == "shell page"
+
+            # And the shell sees what MCP does.
+            server.browser_navigate("data:text/html,<title>from-mcp</title>")
+            assert session_client.send("title", start_dir=tmp_path) == "from-mcp"
+
+            # An action carries the daemon's page footer straight through.
+            result = server.browser_evaluate("() => document.title")
+            assert result == "from-mcp"
+        finally:
+            assert "detached" in server.browser_detach_session()
+        assert server._remote is None
+    finally:
+        session_client.stop(start_dir=tmp_path)
+        server._session.close()
+
+
+@pytest.mark.browser
+def test_attach_closes_this_servers_own_browser_first(tmp_path: Path) -> None:
+    """Two live browsers is the bug; attaching must not create one more."""
+    from visus.web.cli import session_client
+    from visus.web.mcp import server
+
+    server.browser_navigate("data:text/html,<title>mcp-own</title>")
+    assert server._session._browser is not None
+
+    session_client.start_daemon(
+        "chrome", headless=True, url="data:text/html,<title>shell</title>", cwd=tmp_path
+    )
+    try:
+        server.browser_attach_session(str(tmp_path))
+        assert server._session._browser is None, "the MCP server's own browser is still alive"
+        assert server.browser_title() == "shell"
+    finally:
+        server.browser_detach_session()
+        session_client.stop(start_dir=tmp_path)
+        server._session.close()

@@ -218,3 +218,54 @@ def test_contributor_recipe_names_the_real_locator_helper() -> None:
 
 def test_contributor_skill_declares_the_full_cli_extra() -> None:
     assert "[cli]` (typer + rich + click)" in DEV_SKILL.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# SKILL.md is the ENTRY POINT. references/ being complete is not enough: an
+# agent reads SKILL.md first, and a capability it never mentions is a capability
+# most agents will never find.
+# ---------------------------------------------------------------------------
+
+#: Headline capabilities that must be discoverable from SKILL.md itself, not only
+#: from references/cli-commands.md. Adding a flagship feature means adding a line
+#: here AND to the skill — that decision should be deliberate, not silent.
+_HEADLINE_CAPABILITIES = [
+    "visus session list",
+    "visus session close-all",
+    "visus session attach",
+    "visus route",
+    "visus run-code",
+    "visus drop",
+    "visus devices",
+    "visus network",
+    "visus requests",
+    "--ocr-text",
+    "--image",
+    "--persistent",
+    "--device",
+    "--allow-run-code",
+]
+
+
+def test_skill_md_advertises_every_headline_capability() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    missing = [cap for cap in _HEADLINE_CAPABILITIES if cap not in text]
+    assert not missing, (
+        f"{len(missing)} headline capability/capabilities are documented only in "
+        f"references/ and never mentioned in SKILL.md, so an agent that reads the "
+        f"entry point will not know they exist: {missing}"
+    )
+
+
+def test_skill_md_states_the_real_command_count() -> None:
+    """A stale count is worse than none: it tells an agent the surface is smaller."""
+    import re
+
+    text = SKILL_MD.read_text(encoding="utf-8")
+    match = re.search(r"\*\*(\d+) commands?\*\*", text)
+    assert match, "SKILL.md no longer states a command count"
+    claimed = int(match.group(1))
+    actual = len(_cli_command_names())
+    assert claimed == actual, (
+        f"SKILL.md claims {claimed} commands; the CLI registers {actual}"
+    )

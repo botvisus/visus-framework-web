@@ -74,10 +74,11 @@ follow). Pick one per task.
 
 ## Commands
 
-**54 commands** total (51 top-level + 3 under `visus session`), covering the
-persistent-session daemon, one-off screenshot/pdf/codegen helpers, and
-`install-skills`. The complete reference — targeting rules, every flag,
-grouped by task — is **[references/cli-commands.md](references/cli-commands.md)**.
+**102 commands** total (83 top-level plus the `session`, `storage`, `network`
+and `route` groups), covering the persistent-session daemon, request mocking,
+vision targeting, one-off screenshot/pdf/codegen helpers, and `install-skills`.
+The complete reference — targeting rules, every flag, grouped by task — is
+**[references/cli-commands.md](references/cli-commands.md)**.
 
 The ones you will use most:
 
@@ -95,6 +96,38 @@ visus expect-text [idx] <text> --timeout <ms>
 visus screenshot -o shot.png [--full-page] [--hires] [-i idx]  # no URL = session
 visus eval "() => document.title" [--json]
 visus cookies [--json] | visus add-cookies '<json>' | visus clear-cookies
+```
+
+Beyond the basics — each of these exists, and none of them is reachable by
+guessing:
+
+```bash
+# Sessions are NAMED. Several can run at once, in one project or across projects.
+visus -S auth session start --persistent --allow-run-code <URL>
+visus session list [--json]          # every session, this project's and others'
+visus session close-all | kill-all | delete-data
+visus session attach --cdp 127.0.0.1:9222   # drive a browser visus did not launch
+
+# Request mocking (Chromium): make a flow deterministic without touching the app.
+visus route "**/api/*" --status 503 --body '{"e":1}' --content-type application/json
+visus route "**/*.{png,jpg}" --abort | visus route-list | visus unroute [PATTERN]
+
+# Network: two complementary layers.
+visus requests [--filter /api/] | visus request <N>   # CDP responses, with bodies
+visus network start | export -o cap.json | stop       # fetch/XHR/sendBeacon bodies
+
+# Vision targeting — for canvas, embedded PDFs, widgets with NO accessibility tree.
+visus click --image button.png [-c 0.9] | visus click --ocr-text "Sign in"
+
+# Emulation and profiles.
+visus devices                        # the presets --device accepts
+visus session start --device "iPhone 15" | --mobile | --persistent
+
+# Drop a file/payload on a dropzone that has no <input type=file>.
+visus drop -s "#zone" --path ./report.csv | --data '{"id":1}'
+
+# Arbitrary Python against the LIVE session (opt-in at session start).
+visus run-code "result = page.url"   # needs session start --allow-run-code
 ```
 
 `--json` is available on `translate`, `session status`, `list-fields`, `tabs`,

@@ -130,6 +130,20 @@ def test_an_option_target_still_wins_over_a_positional_value(
     assert sent[0][1]["text"] == "hello"
 
 
+def test_the_no_target_error_explains_the_shell_ate_it() -> None:
+    """`visus click #submit` unquoted reaches the CLI with NO arguments at all.
+
+    `#` starts a comment in PowerShell and in POSIX shells alike, so the shell
+    deletes the target before visus is spawned. The caller sees "no target"
+    after plainly typing one, and the reason is invisible unless the error says
+    it — this is the single most likely way to arrive at this message.
+    """
+    result = runner.invoke(app, ["click"])
+    assert result.exit_code == 1
+    assert "quote" in result.output.lower(), result.output
+    assert "#" in result.output, result.output
+
+
 def test_two_conflicting_targets_are_refused_not_silently_dropped(
     sent: list[tuple[str, dict[str, Any]]]
 ) -> None:

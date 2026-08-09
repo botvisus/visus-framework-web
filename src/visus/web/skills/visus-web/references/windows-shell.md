@@ -5,9 +5,18 @@ selectors are made of. `visus translate` exists precisely because of this — it
 reads a DevTools "Copy element" blob straight off the clipboard so `<`, `>` and
 `"` never touch the command line.
 
+**Always quote a selector.** An unquoted `#user` is a COMMENT in PowerShell and
+in bash alike: the shell deletes it, `visus` is spawned with no target at all,
+and the error says "no target" about an argument you plainly typed.
+
+```powershell
+visus click #submit      # WRONG — the shell ate the argument
+visus click '#submit'    # right
+```
+
 | Value | PowerShell | cmd.exe | bash / zsh |
 |---|---|---|---|
-| CSS `#user` | `visus click -s '#user'` | `visus click -s "#user"` | `visus click -s '#user'` |
+| CSS `#user` | `visus click '#user'` | `visus click "#user"` | `visus click '#user'` |
 | XPath with quotes | `visus click -s '//button[@id="go"]'` | `visus click -s "//button[@id='go']"` | `visus click -s '//button[@id="go"]'` |
 | JS arrow fn | `visus eval '() => document.title'` | `visus eval "() => document.title"` | `visus eval '() => document.title'` |
 | JSON cookies | `visus add-cookies '[{"name":"a","value":"b","url":"http://x"}]'` | use a here-file, cmd cannot nest quotes | same as PowerShell |

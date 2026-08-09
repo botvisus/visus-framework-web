@@ -783,11 +783,14 @@ def _target_args(
     elif not (selector or role or text):
         output.emit_error(
             "error: no target. Use one of:\n"
+            '  visus <cmd> "#id"                a CSS, XPath or text= selector\n'
             "  visus <cmd> <INDEX>              a number from `visus list-fields`\n"
-            "  visus <cmd> --selector '#id'     a CSS or XPath selector\n"
+            "  visus <cmd> --selector '#id'     the same thing, spelled long\n"
             "  visus <cmd> --role button        an ARIA role (--name refines it)\n"
             "  visus <cmd> --text 'Sign in'     the element's visible text\n"
             "--name alone is NOT a target; it only qualifies --role.\n"
+            "QUOTE the selector: an unquoted #id is a COMMENT in PowerShell and in\n"
+            "bash alike, so the shell deletes it before visus ever sees it.\n"
             "Run `visus list-fields` to see what is on the page."
         )
     else:

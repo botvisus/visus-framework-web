@@ -393,7 +393,7 @@ command accepts `--json`.
 | Command | What it does |
 |---|---|
 | `visus screenshot <URL> -o <png> --full-page --headless --engine <e>` | Screenshot a URL to a PNG (one-off browser). |
-| `visus session-screenshot [idx] -o <png> --full-page` | Screenshot the session's page or a single element. |
+| `visus session-screenshot [idx] -o <png> --full-page [--hires]` | Screenshot the session's page or a single element (`--hires` = DPR 2, better for OCR). |
 | `visus pdf <URL> -o <pdf>` | Print a URL to a PDF (Chromium). |
 | `visus session-pdf -o <pdf>` | Print the **session's** current page to a PDF (keeps login + navigation). |
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |

@@ -877,6 +877,9 @@ def session_screenshot(
     full_page: bool = typer.Option(
         False, "--full-page", help="Capture the full scrollable page, not just the viewport."
     ),
+    hires: bool = typer.Option(
+        False, "--hires", help="Capture at device-pixel-ratio 2 (better for OCR / vision)."
+    ),
     index: int = typer.Argument(None, help="Field index to screenshot (omit = whole page)."),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
@@ -895,6 +898,8 @@ def session_screenshot(
     # lands where the user invoked the command, not under the daemon's base dir.
     abs_output = output.resolve_out(input_path)
     args: dict[str, Any] = {"path": abs_output, "full_page": full_page}
+    if hires:
+        args["hires"] = True  # only sent when asked, so the payload stays minimal
     if index is not None or selector or role or text:
         args.update(_target_args(index, selector, role, name, text, exact=exact, frame=frame))
     saved = _send("screenshot", args)

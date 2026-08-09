@@ -120,7 +120,7 @@ through `visus eval`, whose quotes PowerShell mangles.
 | Command | What it does |
 |---|---|
 | `visus screenshot <URL> -o <png> --full-page --headless --engine <e>` | Screenshot a URL to a PNG (one-off browser). |
-| `visus session-screenshot [idx] -o <png> --full-page` | Screenshot the session's page or a single element. |
+| `visus session-screenshot [idx] -o <png> --full-page [--hires]` | Screenshot the session's page or a single element. `--hires` captures at device-pixel-ratio 2 -- markedly better for `read-text` OCR and for a vision model reading the numbered overlay. The scale is restored to 1x afterwards even if the capture fails. |
 | `visus pdf <URL> -o <pdf>` | Print a URL to a PDF. *One-off browser* — it has none of the session's state. |
 | `visus session-pdf [-o <pdf>]` | Print the **live session's** current page to a PDF, so a page you logged into and navigated to can actually be captured. The path resolves against your cwd; the daemon writes it and returns the absolute path. |
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |

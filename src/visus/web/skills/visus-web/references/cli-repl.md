@@ -91,7 +91,7 @@ requests [FILTER]    captured network responses (substring URL filter)
 request N            one captured response, with its body
 network SUB [path]   full traffic capture: start|stop|export [path]
 dialog [dismiss]     handle the next dialog (accept by default)
-screenshot [path]    save a screenshot (default screenshot.png)
+screenshot [path] [--hires]  save a screenshot (default screenshot.png)
 pdf [path]           print the page to a PDF (default page.pdf)
 export-script [path] print (or save) this session as a runnable visus.web script
 read-text TARGET     OCR the target and print the text

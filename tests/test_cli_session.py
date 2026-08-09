@@ -935,9 +935,11 @@ def test_dispatch_screenshot_resolves_the_path_against_the_client_cwd() -> None:
     assert args == {"path": str(Path("shots/out.png").resolve())}
     assert Path(args["path"]).is_absolute()
 
-    # No argument still means "let the daemon use its default name".
+    # With NO argument the default name is resolved client-side too: letting the
+    # daemon pick it would write screenshot.png into the DAEMON's cwd, which is
+    # the same B9 bug in its default case.
     console.dispatch("screenshot", send)
-    assert calls[-1][1] == {}
+    assert calls[-1][1] == {"path": str(Path("screenshot.png").resolve())}
 
 
 def test_render_value_keeps_null_and_empty_apart() -> None:

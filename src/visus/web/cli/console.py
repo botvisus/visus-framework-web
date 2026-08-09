@@ -79,7 +79,7 @@ commands:
   request N            one captured response, with its body
   network SUB [path]   full traffic capture: start|stop|export [path]
   dialog [dismiss]     handle the next dialog (accept by default)
-  screenshot [path]    save a screenshot (default screenshot.png)
+  screenshot [path] [--hires]  save a screenshot (default screenshot.png)
   pdf [path]           print the page to a PDF (default page.pdf)
   export-script [path] print (or save) this session as a runnable visus.web script
   read-text TARGET     OCR the target and print the text
@@ -630,7 +630,12 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             # daemon's) so the PNG lands where the user is, same fix as
             # main.py's session-screenshot. Reproduced here so this rewrite of
             # `dispatch` cannot silently revert it.
-            shot_args: dict[str, Any] = {"path": str(Path(rest[0]).resolve())} if rest else {}
+            shot_rest = [t for t in rest if t != "--hires"]
+            shot_args: dict[str, Any] = {
+                "path": str(Path(shot_rest[0] if shot_rest else "screenshot.png").resolve())
+            }
+            if "--hires" in rest:
+                shot_args["hires"] = True
             return f"saved {send('screenshot', shot_args)}"
         if cmd == "pdf":
             pdf_path = str(Path(rest[0] if rest else "page.pdf").resolve())

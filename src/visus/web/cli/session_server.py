@@ -692,12 +692,33 @@ class SessionHandler:
         (index/selector/role/target_text) is given, screenshot that element via
         ``Locator.screenshot``; otherwise screenshot the page, honouring
         ``full_page``.
+
+        ``hires`` captures at device-pixel-ratio 2 — markedly better for OCR and
+        for a vision model reading the numbered overlay. There is no
+        "clear override" in the delegate, so the scale is restored by
+        re-overriding at the same size with DPR 1, in a ``finally`` so a failed
+        capture cannot leave the session stuck at 2x.
         """
         path = args.get("path") or "screenshot.png"
-        if self._has_target(args):
-            self._target(args).screenshot(path=path)
-        else:
-            self.page().screenshot(path=path, full_page=bool(args.get("full_page")))
+        page = self.page()
+        hires = bool(args.get("hires"))
+        size: dict[str, Any] | None = None
+        if hires:
+            size = cast(
+                "dict[str, Any]",
+                page.evaluate("() => ({w: window.innerWidth, h: window.innerHeight})"),
+            )
+            page.set_device_metrics(int(size["w"]), int(size["h"]), device_scale_factor=2.0)
+        try:
+            if self._has_target(args):
+                self._target(args).screenshot(path=path)
+            else:
+                page.screenshot(path=path, full_page=bool(args.get("full_page")))
+        finally:
+            if size is not None:
+                page.set_device_metrics(
+                    int(size["w"]), int(size["h"]), device_scale_factor=1.0
+                )
         return str(Path(path).resolve())
 
     def _op_pdf(self, args: dict[str, Any]) -> str:

@@ -1002,3 +1002,119 @@ def test_session_pdf_against_a_real_page(base_url: str, tmp_path: Path) -> None:
     finally:
         h.close()
     assert target.read_bytes().startswith(b"%PDF")
+
+
+# ---------------------------------------------------------------------------
+# --hires
+# ---------------------------------------------------------------------------
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    """Width/height straight out of the PNG IHDR chunk -- no image library needed."""
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+class _HiresPage:
+    url = "http://x/"
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.metrics: list[tuple[int, int, float]] = []
+        self.shots = 0
+        self._fail = fail
+
+    def evaluate(self, expression: str, arg: object = None) -> object:
+        return {"w": 800, "h": 600}
+
+    def set_device_metrics(
+        self, width: int, height: int, *, device_scale_factor: float = 1.0, mobile: bool = False
+    ) -> None:
+        self.metrics.append((width, height, device_scale_factor))
+
+    def screenshot(self, *, path: str | None = None, full_page: bool = False) -> bytes:
+        if self._fail:
+            raise RuntimeError("capture blew up")
+        self.shots += 1
+        if path is not None:
+            Path(path).write_bytes(b"png")
+        return b"png"
+
+
+def test_op_screenshot_hires_sets_then_restores_the_scale(tmp_path: Path) -> None:
+    page = _HiresPage()
+    h = _handler(page)
+    out = h.handle("screenshot", {"path": str(tmp_path / "s.png"), "hires": True})
+    assert out["ok"] is True, out
+    assert page.shots == 1
+    assert page.metrics == [(800, 600, 2.0), (800, 600, 1.0)]
+
+
+def test_op_screenshot_without_hires_touches_no_metrics(tmp_path: Path) -> None:
+    page = _HiresPage()
+    h = _handler(page)
+    h.handle("screenshot", {"path": str(tmp_path / "s.png")})
+    assert page.metrics == []
+
+
+def test_op_screenshot_hires_restores_even_when_the_capture_fails(tmp_path: Path) -> None:
+    page = _HiresPage(fail=True)
+    h = _handler(page)
+    bad = h.handle("screenshot", {"path": str(tmp_path / "s.png"), "hires": True})
+    assert bad["ok"] is False and "capture blew up" in bad["error"]
+    assert page.metrics == [(800, 600, 2.0), (800, 600, 1.0)]
+
+
+def test_cli_session_screenshot_hires(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {})) or str(tmp_path / "s.png"),
+    )
+    assert runner.invoke(app, ["session-screenshot", "-o", str(tmp_path / "s.png")]).exit_code == 0
+    assert (
+        runner.invoke(
+            app, ["session-screenshot", "-o", str(tmp_path / "s.png"), "--hires"]
+        ).exit_code
+        == 0
+    )
+    assert "hires" not in calls[0][1]  # default payload unchanged
+    assert calls[1][1]["hires"] is True
+
+
+def test_repl_screenshot_hires() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return "/abs/s.png"
+
+    console.dispatch("screenshot s.png", send)
+    console.dispatch("screenshot s.png --hires", send)
+    assert "hires" not in calls[0][1]
+    assert calls[1][1]["hires"] is True
+    assert calls[1][1]["path"] == str(Path("s.png").resolve())
+
+
+@pytest.mark.browser
+def test_hires_doubles_the_pixel_dimensions(base_url: str, tmp_path: Path) -> None:
+    normal, hires = tmp_path / "n.png", tmp_path / "h.png"
+    after = tmp_path / "after.png"
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/fields.html"
+    )
+    try:
+        h.handle("resize", {"width": 800, "height": 600})
+        assert h.handle("screenshot", {"path": str(normal)})["ok"] is True
+        assert h.handle("screenshot", {"path": str(hires), "hires": True})["ok"] is True
+        # And the session is back at 1x afterwards.
+        assert h.handle("screenshot", {"path": str(after)})["ok"] is True
+    finally:
+        h.close()
+
+    nw, nh = _png_size(normal)
+    hw, hh = _png_size(hires)
+    aw, _ = _png_size(after)
+    assert hw >= nw * 2 - 2 and hh >= nh * 2 - 2, (nw, nh, hw, hh)
+    assert abs(aw - nw) <= 2, (nw, aw)

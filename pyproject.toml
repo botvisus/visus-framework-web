@@ -103,8 +103,9 @@ cli = [
 # nothing — it polls page.screenshot() — so these are the ASSEMBLY dependencies:
 # imageio-ffmpeg supplies the encoder, pillow the frame handling.
 video = [
-    "imageio-ffmpeg>=0.4.9",
-    "pillow>=10.0.0",
+    "imageio-ffmpeg>=0.4.9,<1",
+    # Same bound as the [vision] extra pins, so the two extras can coexist.
+    "pillow>=10.0.0,<13",
 ]
 docs = [
     "mkdocs>=1.6.0",

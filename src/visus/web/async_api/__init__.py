@@ -581,6 +581,12 @@ class AsyncPage:
         :meth:`list_fields` call — act by number, like the CLI."""
         return AsyncLocator(self._p.field(index))
 
+    async def fields_in_box(
+        self, box: dict[str, float], *, contained: bool = False
+    ) -> list[Field]:
+        """Async mirror of :meth:`visus.web.Page.fields_in_box`."""
+        return await asyncio.to_thread(lambda: self._p.fields_in_box(box, contained=contained))
+
     async def clear_highlights(self) -> None:
         """Remove the numbered field overlay drawn by :meth:`list_fields`."""
         await asyncio.to_thread(self._p.clear_highlights)
@@ -1242,3 +1248,17 @@ class AsyncPageAssertions:
         self, title: str | re.Pattern[str], *, timeout: int | None = None
     ) -> None:
         await asyncio.to_thread(lambda: self._a.to_have_title(title, timeout=timeout))
+
+    async def to_match_aria_snapshot(
+        self,
+        expected: Sequence[dict[str, str | re.Pattern[str]]],
+        *,
+        selector: str | None = None,
+        timeout: int | None = None,
+    ) -> None:
+        """Async mirror of ``PageAssertions.to_match_aria_snapshot``."""
+        await asyncio.to_thread(
+            lambda: self._a.to_match_aria_snapshot(
+                expected, selector=selector, timeout=timeout
+            )
+        )

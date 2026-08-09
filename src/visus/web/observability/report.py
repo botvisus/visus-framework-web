@@ -476,8 +476,8 @@ def _render_html(events: list[dict[str, Any]], screenshots: dict[str, bytes]) ->
 <body>
   <header class="hero">
     <h1>visus.web run report</h1>
-    <p class="lede">A timeline of every action, with durations, backtrack steps and failure
-       screenshots embedded inline.</p>
+    <p class="lede">A timeline of every action, with durations, self-healing retries and
+       failure screenshots embedded inline.</p>
     <div class="run-meta">
       <span class="badge-pill">{run_label}</span>
       <span class="badge-pill">{escape(last_ts)}</span>
@@ -508,7 +508,7 @@ def _render_html(events: list[dict[str, Any]], screenshots: dict[str, bytes]) ->
         <div class="value">{kpis["distinct_pages"]}</div>
       </div>
       <div class="kpi-card">
-        <div class="label">Backtrack steps</div>
+        <div class="label">Self-healing retries</div>
         <div class="value">{kpis["backtrack_steps"]}</div>
       </div>
     </section>
@@ -572,11 +572,16 @@ def _render_task(event: dict[str, Any], screenshots: dict[str, bytes], number: i
     backtrack_steps = int(event.get("backtrack_steps") or 0)
     backtrack_badge = ""
     if backtrack_steps > 0:
-        verb = "recovered after replaying" if success else "backtracked (tried)"
-        rows.append(("backtrack", f"{verb} {backtrack_steps} previous step(s)"))
+        # Self-healing is visible on purpose: a step that only passed on a replay
+        # is not the same as a step that passed first time, and a reader who
+        # cannot see the difference will trust a fragile flow.
+        verb = "self-healed" if success else "self-healing failed"
+        rows.append(
+            ("healing", f"{verb} after having replayed {backtrack_steps} previous step(s)")
+        )
         backtrack_badge = (
             f'<span class="badge-backtrack" title="re-ran {backtrack_steps} previous '
-            f'step(s) before retrying">↻ backtrack ×{backtrack_steps}</span>'
+            f'step(s) and retried">&#8635; self-healed &times;{backtrack_steps}</span>'
         )
     if role:
         rows.append(("role", str(role)))

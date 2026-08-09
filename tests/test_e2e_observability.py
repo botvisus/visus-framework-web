@@ -107,7 +107,7 @@ def test_backtrack_steps_recorded_under_tracing(browser, base_url, tmp_path):
     html_path = tmp_path / "report.html"
     tracing.render_report(str(zip_path), str(html_path))
     html = html_path.read_text(encoding="utf-8")
-    assert "Backtrack steps" in html
+    assert "Self-healing retries" in html
     assert "backtrack cycles" not in html.lower()  # stale prose removed
     assert "badge-backtrack" in html  # the per-action backtrack badge is rendered
 

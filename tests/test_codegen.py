@@ -134,3 +134,66 @@ def test_target_expr_supports_a_text_target() -> None:
     from visus.web.cli.codegen import _target_expr
 
     assert _target_expr({"kind": "text", "value": "Save"}) == "get_by_text('Save')"
+
+
+def test_generate_test_emits_a_runnable_pytest_function() -> None:
+    """The generator's output must be a TEST, not a script — the fixture exists."""
+    from visus.web.cli.codegen import generate_test
+
+    events = [
+        {"action": "fill", "target": {"kind": "role", "role": "textbox", "name": "Username"},
+         "value": "student"},
+        {"action": "click", "target": {"kind": "role", "role": "button", "name": "Submit"}},
+    ]
+    code = generate_test("login", "https://x.test/login", events)
+
+    assert "from visus.web import expect" in code
+    assert "def test_login(visus_page):" in code
+    assert "page = visus_page" in code
+    assert "page.goto('https://x.test/login')" in code
+    assert "page.get_by_role('textbox', name='Username').fill('student')" in code
+    assert "page.get_by_role('button', name='Submit').click()" in code
+    # No launch(): the fixture owns the browser lifetime.
+    assert "launch(" not in code
+    compile(code, "<generated>", "exec")  # it must at least be valid Python
+
+
+def test_generate_test_embeds_expectations_verbatim() -> None:
+    from visus.web.cli.codegen import generate_test
+
+    code = generate_test(
+        "login",
+        "https://x.test/login",
+        [],
+        expectations=[
+            "expect(page).to_have_url('*dashboard*')",
+            "expect(page.get_by_role('heading')).to_contain_text('Welcome')",
+        ],
+    )
+    assert "    expect(page).to_have_url('*dashboard*')" in code
+    assert "    expect(page.get_by_role('heading')).to_contain_text('Welcome')" in code
+    compile(code, "<generated>", "exec")
+
+
+def test_generate_test_sanitises_the_name() -> None:
+    from visus.web.cli.codegen import generate_test
+
+    code = generate_test("should add a to-do!", "https://x.test/", [])
+    assert "def test_should_add_a_to_do(visus_page):" in code
+    compile(code, "<generated>", "exec")
+
+
+def test_generate_test_accepts_another_fixture() -> None:
+    from visus.web.cli.codegen import generate_test
+
+    code = generate_test("x", "https://x.test/", [], fixture="page")
+    assert "def test_x(page):" in code
+    assert "page = page" not in code  # no pointless self-assignment
+
+
+def test_generate_test_with_no_events_is_still_valid() -> None:
+    from visus.web.cli.codegen import generate_test
+
+    code = generate_test("empty", "https://x.test/", [])
+    compile(code, "<generated>", "exec")
+    assert code.endswith("\n")

@@ -155,3 +155,47 @@ def generate_script(url: str, events: list[dict]) -> str:  # type: ignore[type-a
     for ev in events:
         lines.append("    " + generate_line(ev))
     return "\n".join(lines) + "\n"
+
+
+def _test_name(name: str) -> str:
+    """A valid python identifier for a test function, from a free-text scenario name."""
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in name.strip().lower())
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_") or "generated"
+    if cleaned[0].isdigit():
+        cleaned = f"s_{cleaned}"
+    return cleaned
+
+
+def generate_test(
+    name: str,
+    url: str,
+    events: list[dict],  # type: ignore[type-arg]
+    *,
+    expectations: list[str] | None = None,
+    fixture: str = "visus_page",
+) -> str:
+    """Generate a runnable pytest test from a list of recorded events.
+
+    Emits a test function over the packaged ``visus_page`` fixture rather than a
+    ``launch()`` script, so the browser lifetime, the isolated context and the
+    on-failure screenshot all come for free. *expectations* are pasted verbatim
+    as the assertion block — they are written by whoever knows what the scenario
+    is supposed to prove, which the recorder cannot know.
+    """
+    func = _test_name(name)
+    lines = ["from visus.web import expect", "", ""]
+    if fixture == "page":
+        lines.append(f"def test_{func}(page):")
+    else:
+        lines.append(f"def test_{func}({fixture}):")
+        lines.append(f"    page = {fixture}")
+    lines.append(f"    page.goto({url!r})")
+    for event in events:
+        lines.append("    " + generate_line(event))
+    if expectations:
+        lines.append("")
+        for assertion in expectations:
+            lines.append("    " + assertion)
+    return "\n".join(lines) + "\n"

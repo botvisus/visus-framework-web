@@ -286,10 +286,18 @@ def browser_get_text(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str | None:
     """Return the visible text content of an element (None when it does not exist)."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
 
     def _local() -> dict[str, Any]:
@@ -311,10 +319,18 @@ def browser_get_attribute(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str | None:
     """Return the value of an HTML attribute on an element."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["attr_name"] = attr_name
 
@@ -336,10 +352,18 @@ def browser_count(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> int:
     """Return the count of elements matching the given target."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     count: int = _run("count", args, lambda: _session.target(args).count())["result"]
     return count
@@ -359,10 +383,18 @@ def browser_click(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Click an element targeted by role+name, text, or css/xpath selector."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     return _acted(_run("click", args, lambda: _session.target(args).click()), "clicked")
 
@@ -376,10 +408,18 @@ def browser_dblclick(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Double-click an element."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     env = _run("dblclick", args, lambda: _session.target(args).dblclick())
     return _acted(env, "double-clicked")
@@ -395,10 +435,18 @@ def browser_fill(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Fill an input/textarea with the given text_value."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["text"] = text_value
     env = _run("fill", args, lambda: _session.target(args).fill(text_value))
@@ -415,10 +463,18 @@ def browser_press(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Press a key (e.g. 'Enter', 'Tab', 'Control+a') on the focused element."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["key"] = key
     return _acted(_run("press", args, lambda: _session.target(args).press(key)), f"pressed {key!r}")
@@ -433,10 +489,18 @@ def browser_hover(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Hover over an element."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     return _acted(_run("hover", args, lambda: _session.target(args).hover()), "hovered")
 
@@ -450,10 +514,18 @@ def browser_check(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Check a checkbox or radio button."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     return _acted(_run("check", args, lambda: _session.target(args).check()), "checked")
 
@@ -467,10 +539,18 @@ def browser_uncheck(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Uncheck a checkbox."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     return _acted(_run("uncheck", args, lambda: _session.target(args).uncheck()), "unchecked")
 
@@ -485,10 +565,18 @@ def browser_select_option(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Select an option from a <select> element by value."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["value"] = value
     env = _run("select", args, lambda: _session.target(args).select_option(value=value))
@@ -506,10 +594,18 @@ def browser_drag(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Drag the source element onto a target (a CSS/XPath selector, or a field index)."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["target_selector"] = target_selector
     args["target_index"] = target_index
@@ -536,10 +632,18 @@ def browser_focus(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Focus an element."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     return _acted(_run("focus", args, lambda: _session.target(args).focus()), "focused")
 
@@ -553,10 +657,18 @@ def browser_clear(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Clear the value of an input field."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     return _acted(_run("clear_input", args, lambda: _session.target(args).clear()), "cleared")
 
@@ -571,10 +683,18 @@ def browser_set_input_files(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Set file(s) on a file input element. Provide absolute paths."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["paths"] = paths
     env = _run("upload", args, lambda: _session.target(args).set_input_files(paths))
@@ -597,10 +717,18 @@ def browser_wait_for(
     exact: bool = False,
     frame: str | None = None,
     timeout: int | None = None,
+    nth: int | None = None,
 ) -> str:
     """Wait for an element to reach a state: 'visible' or 'hidden'."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["state"] = state
     args["timeout"] = timeout
@@ -632,10 +760,18 @@ def browser_expect_text(
     exact: bool = False,
     frame: str | None = None,
     timeout: int | None = None,
+    nth: int | None = None,
 ) -> str:
     """Assert that an element contains the expected text. Returns 'PASSED' or 'FAILED: ...'."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["expected_text"] = expected_text
     args["timeout"] = timeout
@@ -886,9 +1022,10 @@ def browser_screenshot(
     full_page: bool = False,
     index: int | None = None,
     selector: str | None = None,
+    nth: int | None = None,
 ) -> Image:
     """Take a screenshot of the page or a specific element. Returns a PNG image."""
-    args = _target_payload(index=index, selector=selector)
+    args = _target_payload(index=index, selector=selector, nth=nth)
     args["full_page"] = full_page
     if _remote is not None:
         # The daemon writes PNGs to disk and returns the path. It is discovered
@@ -917,6 +1054,7 @@ def browser_evaluate(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> object:
     """Evaluate a JavaScript function in the browser and return the result.
 
@@ -928,7 +1066,14 @@ def browser_evaluate(
     is how you read id/class/dataset or any property list_fields does not return.
     """
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["expression"] = expression
     args["arg"] = arg
@@ -956,13 +1101,21 @@ def browser_read_text(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """OCR the screenshot of an element and return the recognized text.
 
     Requires the [vision] extra (rapidocr-onnxruntime + opencv).
     """
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     read: str = _run("read_text", args, lambda: _session.target(args).ocr_text())["result"]
     return read
@@ -977,10 +1130,18 @@ def browser_solve_captcha(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """OCR-solve a text CAPTCHA shown in the targeted element and return the solution."""
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     def _local() -> str:
         return _session.page().solve_captcha(_session.target(args))
@@ -1000,6 +1161,7 @@ def browser_find_image(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> dict:  # type: ignore[type-arg]
     """Find a template image inside the screenshot of the targeted element (or full page).
 
@@ -1007,7 +1169,14 @@ def browser_find_image(
     Requires the [vision] extra.
     """
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["template_path"] = template_path
     args["confidence"] = confidence
@@ -1102,6 +1271,7 @@ def browser_click_image(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Click the centre of a template image found on the page (or in an element).
 
@@ -1110,7 +1280,14 @@ def browser_click_image(
     role / text) to scope the search to one element. Requires the [vision] extra.
     """
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["template_path"] = template_path
     args["confidence"] = confidence
@@ -1135,6 +1312,7 @@ def browser_click_ocr_text(
     text: str | None = None,
     exact: bool = False,
     frame: str | None = None,
+    nth: int | None = None,
 ) -> str:
     """Click rendered text located by OCR — text that exists as pixels, not as a node.
 
@@ -1143,7 +1321,14 @@ def browser_click_ocr_text(
     recognised run. Requires the [vision] extra.
     """
     args = _target_payload(
-        index=index, selector=selector, role=role, name=name, text=text, exact=exact, frame=frame
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
     )
     args["ocr_text"] = ocr_text
     args["exact_text"] = exact_text

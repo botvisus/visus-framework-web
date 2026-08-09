@@ -395,6 +395,7 @@ command accepts `--json`.
 | `visus screenshot <URL> -o <png> --full-page --headless --engine <e>` | Screenshot a URL to a PNG (one-off browser). |
 | `visus session-screenshot [idx] -o <png> --full-page` | Screenshot the session's page or a single element. |
 | `visus pdf <URL> -o <pdf>` | Print a URL to a PDF (Chromium). |
+| `visus session-pdf -o <pdf>` | Print the **session's** current page to a PDF (keeps login + navigation). |
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |
 | `visus clear` | Remove the numbered field-highlight overlay. |
 | `visus highlight [idx] [target] [--style <css>] [--hide]` | Box a single element on the live page (`visus clear` erases the numbered overlay). |

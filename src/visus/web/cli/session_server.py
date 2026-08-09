@@ -700,6 +700,17 @@ class SessionHandler:
             self.page().screenshot(path=path, full_page=bool(args.get("full_page")))
         return str(Path(path).resolve())
 
+    def _op_pdf(self, args: dict[str, Any]) -> str:
+        """Print the session's current page to a PDF file (Chromium/W3C print).
+
+        Same contract as ``_op_screenshot``: the client resolves the path
+        against ITS cwd, the daemon writes the file and returns the absolute
+        path it wrote.
+        """
+        path = args.get("path") or "page.pdf"
+        self.page().pdf(path=path)
+        return str(Path(path).resolve())
+
     def _op_clear_highlights(self, args: dict[str, Any]) -> str:
         self.page().clear_highlights()
         return "cleared"

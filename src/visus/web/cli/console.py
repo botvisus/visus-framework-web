@@ -80,6 +80,7 @@ commands:
   network SUB [path]   full traffic capture: start|stop|export [path]
   dialog [dismiss]     handle the next dialog (accept by default)
   screenshot [path]    save a screenshot (default screenshot.png)
+  pdf [path]           print the page to a PDF (default page.pdf)
   export-script [path] print (or save) this session as a runnable visus.web script
   read-text TARGET     OCR the target and print the text
   solve-captcha TARGET OCR-solve a text CAPTCHA in the target
@@ -631,6 +632,9 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
             # `dispatch` cannot silently revert it.
             shot_args: dict[str, Any] = {"path": str(Path(rest[0]).resolve())} if rest else {}
             return f"saved {send('screenshot', shot_args)}"
+        if cmd == "pdf":
+            pdf_path = str(Path(rest[0] if rest else "page.pdf").resolve())
+            return f"saved {send('pdf', {'path': pdf_path})}"
         if cmd == "export-script":
             result = send("export_script", {})
             code = str(result.get("script", ""))

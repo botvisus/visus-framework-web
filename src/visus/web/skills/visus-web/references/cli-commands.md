@@ -121,7 +121,8 @@ through `visus eval`, whose quotes PowerShell mangles.
 |---|---|
 | `visus screenshot <URL> -o <png> --full-page --headless --engine <e>` | Screenshot a URL to a PNG (one-off browser). |
 | `visus session-screenshot [idx] -o <png> --full-page` | Screenshot the session's page or a single element. |
-| `visus pdf <URL> -o <pdf>` | Print a URL to a PDF (Chromium). |
+| `visus pdf <URL> -o <pdf>` | Print a URL to a PDF. *One-off browser* — it has none of the session's state. |
+| `visus session-pdf [-o <pdf>]` | Print the **live session's** current page to a PDF, so a page you logged into and navigated to can actually be captured. The path resolves against your cwd; the daemon writes it and returns the absolute path. |
 | `visus open <URL> --engine <e>` | Open a headed browser at URL until you press Enter. |
 | `visus clear` | Remove the numbered field-highlight overlay drawn by `list-fields --highlight`. |
 | `visus highlight [idx] [target] [--style <css>] [--hide]` | Box **one** element on the live page — what a human needs to see which element the agent chose. `--style` replaces the default border (e.g. `"2px dashed #0a0"`), `--hide` removes the box. Distinct from `visus clear`, which erases the numbered overlay. |

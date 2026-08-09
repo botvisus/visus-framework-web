@@ -901,6 +901,16 @@ def session_screenshot(
     output.emit(saved, table=f"saved {saved}")
 
 
+@app.command("session-pdf")
+def session_pdf(
+    output_file: str = typer.Option("page.pdf", "-o", "--output"),
+) -> None:
+    """Print the session's current page to a PDF (keeps your login and navigation)."""
+    # Resolve the path against the CLIENT's cwd (not the daemon's).
+    result = _send("pdf", {"path": str(Path(output_file).resolve())})
+    output.emit(result, table=f"saved {result}")
+
+
 @app.command("clear")
 def clear_highlights() -> None:
     """Remove the numbered field-highlight overlay."""

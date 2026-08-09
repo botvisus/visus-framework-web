@@ -3,6 +3,7 @@ cookies, generate-locator, session pdf/screenshot."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -927,3 +928,77 @@ def test_generate_locator_matches_the_list_fields_column(base_url: str) -> None:
         assert out["css"] == fields[i]["css"]
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# session pdf
+# ---------------------------------------------------------------------------
+
+
+class _PdfPage:
+    url = "http://x/"
+
+    def __init__(self) -> None:
+        self.written: str | None = None
+
+    def pdf(self, *, path: str | None = None) -> bytes:
+        self.written = path
+        if path is not None:
+            Path(path).write_bytes(b"%PDF-1.4\n")
+        return b"%PDF-1.4\n"
+
+
+def test_op_pdf_writes_and_returns_the_absolute_path(tmp_path: Path) -> None:
+    page = _PdfPage()
+    h = _handler(page)
+    target = tmp_path / "out.pdf"
+    out = h.handle("pdf", {"path": str(target)})
+    assert out["ok"] is True, out
+    assert out["result"] == str(target.resolve())
+    assert page.written == str(target)
+    assert target.read_bytes().startswith(b"%PDF")
+
+
+def test_cli_session_pdf_resolves_against_the_client_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: calls.append((op, args or {})) or str(tmp_path / "out.pdf"),
+    )
+    r = runner.invoke(app, ["session-pdf", "-o", str(tmp_path / "out.pdf")])
+    assert r.exit_code == 0, r.output
+    assert calls[0] == ("pdf", {"path": str((tmp_path / "out.pdf").resolve())})
+    assert "out.pdf" in r.output
+
+
+def test_repl_pdf_resolves_against_the_client_cwd() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        return "/abs/page.pdf"
+
+    out = console.dispatch("pdf report.pdf", send)
+    assert calls[0] == ("pdf", {"path": str(Path("report.pdf").resolve())})
+    assert "saved /abs/page.pdf" == out
+    console.dispatch("pdf", send)
+    assert calls[1][1]["path"].endswith("page.pdf")
+    assert "pdf" in console.dispatch("help", send)
+
+
+@pytest.mark.browser
+def test_session_pdf_against_a_real_page(base_url: str, tmp_path: Path) -> None:
+    target = tmp_path / "page.pdf"
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/forms.html"
+    )
+    try:
+        out = h.handle("pdf", {"path": str(target)})
+        assert out["ok"] is True, out
+        assert out["result"] == str(target.resolve())
+    finally:
+        h.close()
+    assert target.read_bytes().startswith(b"%PDF")

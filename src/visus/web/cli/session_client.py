@@ -32,6 +32,13 @@ _SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 _session_name: str | None = None
 
+# Windows only. Every helper below is a CONSOLE application, and the session
+# daemon runs DETACHED — with no console of its own to lend them, Windows
+# allocates a NEW one per spawn, which the user sees as a black window flashing
+# on essentially every command (`_probe_pid` runs on every `find_session`).
+# `capture_output=True` pipes the output but does not stop the window.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+
 
 def validate_session_name(name: str) -> str:
     """Return *name* when it is a safe session name, else raise :class:`SessionError`."""
@@ -81,6 +88,7 @@ def _probe_pid(pid: int) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                creationflags=_NO_WINDOW,
             ).stdout
         except Exception:
             return False
@@ -275,6 +283,27 @@ def _log_tail(base: Path, *, lines: int = 20) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
+def _daemon_interpreter() -> str:
+    """The interpreter to run the daemon under — ``pythonw.exe`` on Windows.
+
+    MEASURED, not assumed: `session start` created a conhost.exe whose PARENT was
+    the daemon's own python.exe, i.e. the daemon allocated a console for itself
+    and the user saw a black window. DETACHED_PROCESS does not prevent that, and
+    Windows documents CREATE_NO_WINDOW as IGNORED when combined with it — so no
+    flag combination fixes this.
+
+    pythonw.exe is the GUI-subsystem build of the same interpreter: it cannot
+    allocate a console at all. It has no stdout/stderr, which costs nothing here
+    because the daemon's streams already go to DEVNULL and it logs to
+    ``.visus/daemon.log``. Falls back to sys.executable where pythonw is absent
+    (POSIX, and trimmed Windows builds).
+    """
+    if sys.platform != "win32":
+        return sys.executable
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    return str(pythonw) if pythonw.is_file() else sys.executable
+
+
 def start_daemon(
     engine: str = "chrome",
     headless: bool = False,
@@ -347,7 +376,13 @@ def start_daemon(
         start_new_session = True
 
     subprocess.Popen(
-        [sys.executable, "-m", "visus.web.cli.session_server", engine, env["VISUS_WEB_HEADLESS"]]
+        [
+            _daemon_interpreter(),
+            "-m",
+            "visus.web.cli.session_server",
+            engine,
+            env["VISUS_WEB_HEADLESS"],
+        ]
         + ([url] if url else []),
         cwd=str(base),
         env=env,
@@ -452,7 +487,10 @@ def _terminate(pid: int) -> None:
     if sys.platform == "win32":
         try:
             subprocess.run(
-                ["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True,
+                timeout=10,
+                creationflags=_NO_WINDOW,
             )
         except Exception:
             pass

@@ -169,7 +169,15 @@ def _read_clipboard() -> str | None:
         "darwin": ["pbpaste"],
     }.get(sys.platform, ["xclip", "-selection", "clipboard", "-o"])
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout or None
+        # creationflags: powershell/pbpaste are console apps; without this the
+        # Windows shell-out flashes a black window (see session_client._NO_WINDOW).
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        return (
+            subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5, creationflags=no_window
+            ).stdout
+            or None
+        )
     except Exception:
         return None
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import threading
 
 from selenium import webdriver
@@ -45,10 +47,23 @@ def build_options(
     return opts
 
 
+def _quiet(service: Service) -> Service:
+    """Stop the driver executable opening a console window (Windows only).
+
+    The driver is spawned BY the session daemon, which runs DETACHED and so has
+    no console of its own to lend it — Windows then allocates a fresh one, which
+    the user sees as a black window flashing on screen. Selenium forwards
+    ``creation_flags`` straight to ``subprocess.Popen``.
+    """
+    if sys.platform == "win32":
+        service.creation_flags = subprocess.CREATE_NO_WINDOW
+    return service
+
+
 def build_service() -> Service:
     # An explicit driver path always wins (e.g. air-gapped machines).
     path = os.environ.get("VISUS_WEB_IE_DRIVER") or _resolve_ie_driver(_IE_DRIVER_VERSION)
-    return Service(executable_path=path) if path else Service()
+    return _quiet(Service(executable_path=path) if path else Service())
 
 
 def _resolve_ie_driver(version: str) -> str | None:

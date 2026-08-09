@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
@@ -34,9 +37,22 @@ def build_options(
     return opts
 
 
+def _quiet(service: Service) -> Service:
+    """Stop the driver executable opening a console window (Windows only).
+
+    The driver is spawned BY the session daemon, which runs DETACHED and so has
+    no console of its own to lend it — Windows then allocates a fresh one, which
+    the user sees as a black window flashing on screen. Selenium forwards
+    ``creation_flags`` straight to ``subprocess.Popen``.
+    """
+    if sys.platform == "win32":
+        service.creation_flags = subprocess.CREATE_NO_WINDOW
+    return service
+
+
 def build_service() -> Service:
     # No executable_path: Selenium Manager (selenium>=4.6) downloads/resolves geckodriver.
-    return Service()
+    return _quiet(Service())
 
 
 def build_driver(*, options: Options, service: Service) -> webdriver.Firefox:

@@ -741,7 +741,15 @@ def _index_or_value(
     if has_option_target:
         if value is None:
             return None, None, target
-        return (int(target) if target.isdigit() else None), None, value
+        if not target.isdigit():
+            # `visus fill -s "#u" "#v" hello` names two elements. Dropping one
+            # silently is the worst outcome: the command succeeds against an
+            # element the caller never asked for.
+            output.emit_error(
+                f"error: two targets — {target!r} and the --selector/--role/--text option.\n"
+                "Use one: `visus <cmd> <TARGET> <value>` or `visus <cmd> -s <sel> <value>`."
+            )
+        return int(target), None, value
     if value is None:
         # One positional and nothing else. A NUMBER is still a target, so
         # `visus fill 2` reports the missing text rather than a missing target;

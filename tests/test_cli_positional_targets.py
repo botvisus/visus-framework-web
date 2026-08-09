@@ -130,6 +130,17 @@ def test_an_option_target_still_wins_over_a_positional_value(
     assert sent[0][1]["text"] == "hello"
 
 
+def test_two_conflicting_targets_are_refused_not_silently_dropped(
+    sent: list[tuple[str, dict[str, Any]]]
+) -> None:
+    """`visus fill -s "#u" "#v" hello` names two elements. Guessing one is worse
+    than saying so: an agent that is silently ignored chases the wrong element."""
+    result = runner.invoke(app, ["fill", "-s", "#u", "#v", "hello"])
+    assert result.exit_code == 1, result.output
+    assert "two targets" in result.output, result.output
+    assert not sent, "a conflicting invocation must not reach the daemon"
+
+
 def test_a_lone_number_reports_the_missing_value_not_a_missing_target() -> None:
     """`visus fill 2` is field 2 with no text — the error must say which half is missing."""
     result = runner.invoke(app, ["fill", "2"])

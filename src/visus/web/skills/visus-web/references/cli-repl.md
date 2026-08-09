@@ -40,7 +40,7 @@ round trip.
 targets: a field index (`3`), a bare selector (`#submit`, `//button[1]`),
          or flags (`--selector #go`, `--role button --name Save`, `--text Save [--exact]`).
 
-list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
+list [full] [--boxes] enumerate interactive fields (`full` adds CSS/XPATH)
 click TARGET [btn]   click the target (btn: left|middle|right)
 fill TARGET text     fill the target with text
 check TARGET         check the target
@@ -63,7 +63,7 @@ drag TARGET TARGET   drag the first target onto the second
 goto url             navigate to url
 back / forward / reload
 title / url          print the page title / current URL
-snapshot [sel]       list interactive elements (REF/role/name), optionally scoped
+snapshot [sel] [--boxes] interactive elements (REF/role/name), optionally scoped
 find text            grep the snapshot, with 3 rows of context around each hit
 text TARGET          print the target's text content
 attr name TARGET     print the target's attribute value

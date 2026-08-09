@@ -35,6 +35,12 @@ class Field:
     xpath: str = ""
     code: str = ""
     deep: bool = False
+    box: dict[str, float] | None = None
+    """Viewport rect ``{x, y, width, height}`` at enumeration time, or ``None``.
+
+    Same key names as :meth:`Locator.bounding_box`. Frozen at capture: it is the
+    geometry the numbered overlay was drawn from, not a live measurement.
+    """
 
     def to_dict(self) -> dict[str, object]:
         """Return a plain ``dict`` of the field (for JSON / MCP output)."""

@@ -348,26 +348,35 @@ def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
 
 
-def _format_fields(fields: list[dict[str, Any]], *, full: bool = False) -> str:
+def _format_fields(
+    fields: list[dict[str, Any]], *, full: bool = False, boxes: bool = False
+) -> str:
     from visus.web.cli.console import format_fields
 
-    return format_fields(fields, full=full)
+    return format_fields(fields, full=full, boxes=boxes)
 
 
-def _format_snapshot(elements: list[dict[str, Any]]) -> str:
+def _format_snapshot(elements: list[dict[str, Any]], *, boxes: bool = False) -> str:
     """Render snapshot rows as a REF/ROLE/NAME table (REF = a list-fields index)."""
-    from rich import box
+    from rich import box as rich_box
     from rich.console import Console
     from rich.table import Table
 
-    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
+    from visus.web.cli.console import _box_cell
+
+    table = Table(box=rich_box.ASCII, header_style="bold", pad_edge=False)
     table.add_column("REF", justify="right", no_wrap=True)
     table.add_column("ROLE", no_wrap=True)
     table.add_column("NAME", overflow="fold")
+    if boxes:
+        table.add_column("BOX x,y,w,h", no_wrap=True)
     for e in elements:
         ref = e.get("ref")
-        table.add_row("-" if ref is None else str(ref), str(e.get("role", "")),
-                      str(e.get("name", "")))
+        cells = ["-" if ref is None else str(ref), str(e.get("role", "")),
+                 str(e.get("name", ""))]
+        if boxes:
+            cells.append(_box_cell(e.get("box")))
+        table.add_row(*cells)
     console_obj = Console()
     with console_obj.capture() as cap:
         console_obj.print(table)
@@ -561,17 +570,23 @@ def list_fields(
         "divs that would show up in a later screenshot / OCR / template match).",
     ),
     full: bool = typer.Option(False, "--full", help="Also print the CSS and XPATH columns."),
+    boxes: bool = typer.Option(False, "--boxes", help="Include each field's viewport rect."),
 ) -> None:
     """Enumerate interactive fields on the current page (numbered, highlighted)."""
     kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
     result = _send(
         "list_fields",
-        {"kinds": kinds, "include_hidden": show_all, "highlight": highlight},
+        {
+            "kinds": kinds,
+            "include_hidden": show_all,
+            "highlight": highlight,
+            "boxes": boxes,
+        },
     )
     fields = result.get("fields", [])
     if as_json:
         output.set_mode(as_json=True)
-    output.emit(fields, table=_format_fields(fields, full=full))
+    output.emit(fields, table=_format_fields(fields, full=full, boxes=boxes))
 
 
 @app.command()
@@ -979,6 +994,7 @@ def snapshot(
         "--refs/--no-refs",
         help="Number rows with list-fields indexes (re-enumerates the page).",
     ),
+    boxes: bool = typer.Option(False, "--boxes", help="Include each element's viewport rect."),
     as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """List the page's interactive elements as a REF/ROLE/NAME table.
@@ -987,7 +1003,12 @@ def snapshot(
     works. Scope it (`visus snapshot "#main"`), cap it (`--depth 2`), or save it
     (`--filename after-login.yml`) when the page is large.
     """
-    args: dict[str, Any] = {"selector": selector, "depth": depth, "refs": refs}
+    args: dict[str, Any] = {
+        "selector": selector,
+        "depth": depth,
+        "refs": refs,
+        "boxes": boxes,
+    }
     result = _send("snapshot", args)
     elements = result.get("elements", [])
     if as_json:
@@ -1011,7 +1032,7 @@ def snapshot(
     if not elements:
         output.emit(elements, table="(no elements)")
         return
-    output.emit(elements, table=_format_snapshot(elements))
+    output.emit(elements, table=_format_snapshot(elements, boxes=boxes))
 
 
 @app.command("get-attribute")

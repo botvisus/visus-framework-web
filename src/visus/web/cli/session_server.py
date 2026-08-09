@@ -77,6 +77,18 @@ def make_locator(
     raise ValueError("provide one of: index, role, text, selector")
 
 
+def _norm_rect(rect: Any) -> dict[str, float] | None:
+    """Normalise the JS bundle's ``{x,y,w,h}`` to ``bounding_box()``'s key names."""
+    if not isinstance(rect, dict):
+        return None
+    return {
+        "x": float(rect.get("x", 0)),
+        "y": float(rect.get("y", 0)),
+        "width": float(rect.get("w", 0)),
+        "height": float(rect.get("h", 0)),
+    }
+
+
 class StaleFieldIndexError(RuntimeError):
     """Raised when a cached field index no longer belongs to the current page.
 
@@ -520,6 +532,11 @@ class SessionHandler:
             return resp
 
     def _op_list_fields(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Enumerate interactive fields. ``boxes`` keeps each field's viewport rect.
+
+        The rect is stripped by default: it roughly doubles the payload an agent
+        usually reads for index/kind/name only.
+        """
         kinds = args.get("kinds")
         include_hidden = bool(args.get("include_hidden", False))
         highlight = bool(args.get("highlight", True))
@@ -530,7 +547,11 @@ class SessionHandler:
         self._fields = list(fields)
         # Stamp the page identity so a later index op can tell the page moved.
         self._fields_url = page.url
-        return {"fields": [f.to_dict() for f in fields]}
+        rows = [f.to_dict() for f in fields]
+        if not args.get("boxes"):
+            for row in rows:
+                row.pop("box", None)
+        return {"fields": rows}
 
     def _op_click(self, args: dict[str, Any]) -> str:
         """Click the target.
@@ -685,6 +706,9 @@ class SessionHandler:
         live index an action can use immediately — this is what makes ``snapshot``
         addressable instead of a second, incompatible numbering. Pass
         ``refs=False`` for a pure read that leaves the field cache untouched.
+
+        ``boxes`` adds each element's viewport rect as ``box`` (``{x, y, width,
+        height}``); without it the raw bundle ``rect`` is dropped entirely.
         """
         page = self.page()
         depth = args.get("depth")
@@ -694,7 +718,17 @@ class SessionHandler:
             self._fields = list(fields)
             self._fields_url = page.url
         refs = self._snapshot_refs(rows)
-        elements = [{**row, "ref": refs[i]} for i, row in enumerate(rows)]
+        # `boxes` renames the bundle's {x,y,w,h} rect to bounding_box()'s keys;
+        # without it the raw `rect` is stripped, as it was before this task.
+        want_boxes = bool(args.get("boxes"))
+        elements = [
+            {
+                **{k: v for k, v in row.items() if k != "rect"},
+                "ref": refs[i],
+                **({"box": _norm_rect(row.get("rect"))} if want_boxes else {}),
+            }
+            for i, row in enumerate(rows)
+        ]
         return {"elements": elements, "url": page.url, "title": page.title()}
 
     def _op_find(self, args: dict[str, Any]) -> dict[str, Any]:

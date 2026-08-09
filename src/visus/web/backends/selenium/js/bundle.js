@@ -429,7 +429,9 @@
       var d = 0, p = e.parentNode;
       while (p && p !== root && p.nodeType === 1) { d++; p = p.parentNode; }
       if (maxDepth !== null && d > maxDepth) continue;
-      out.push({ role: r, name: accessibleName(e), depth: d });
+      var b = e.getBoundingClientRect();
+      out.push({ role: r, name: accessibleName(e), depth: d,
+                 rect: { x: b.left, y: b.top, w: b.width, h: b.height } });
     }
     return out;
   }

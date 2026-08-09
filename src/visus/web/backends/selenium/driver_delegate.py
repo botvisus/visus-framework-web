@@ -710,6 +710,18 @@ class SeleniumPageDelegate:
         def _pystr(s: str) -> str:
             return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
+        def _box(d: dict[str, object]) -> dict[str, float] | None:
+            """The bundle's ``{x,y,w,h}`` rect, renamed to bounding_box()'s keys."""
+            r = d.get("rect")
+            if not isinstance(r, dict):
+                return None
+            return {
+                "x": float(cast(float, r.get("x", 0))),
+                "y": float(cast(float, r.get("y", 0))),
+                "width": float(cast(float, r.get("w", 0))),
+                "height": float(cast(float, r.get("h", 0))),
+            }
+
         def _code(d: dict[str, object]) -> str:
             # The ready-to-paste visus.web expression, frame-aware so an element
             # inside an iframe is reachable (a bare locator would not be).
@@ -755,6 +767,7 @@ class SeleniumPageDelegate:
                     xpath=cast(str, d.get("xpath") or ""),
                     code=_code(d),
                     deep=bool(d.get("deep", False)),
+                    box=_box(d),
                 )
             )
         return fields

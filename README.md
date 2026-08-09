@@ -324,9 +324,9 @@ command accepts `--json`.
 
 | Command | What it does |
 |---|---|
-| `visus snapshot [SELECTOR] [--depth N] [--filename F] [--no-refs] [--json]` | List interactive elements as a REF/ROLE/NAME table, where REF is the `list-fields` index that acts on that row. Scope with `SELECTOR`, cap with `--depth`, save as YAML with `--filename`. |
+| `visus snapshot [SELECTOR] [--depth N] [--filename F] [--no-refs] [--boxes] [--json]` | List interactive elements as a REF/ROLE/NAME table, where REF is the `list-fields` index that acts on that row. Scope with `SELECTOR`, cap with `--depth`, save as YAML with `--filename` (`--boxes` adds each element's viewport rect as `x,y,w,h`). |
 | `visus find <QUERY> [--regex] [-C N] [-s SEL] [--depth N] [--json]` | Grep the snapshot: matching rows plus `-C` rows of context, each with its REF. |
-| `visus list-fields --kind <k> --all [--highlight] [--full] [--json]` | Enumerate interactive fields, numbered. The overlay is off by default (it would show up in a later screenshot/OCR); `--highlight` draws it. `--full` adds the CSS and XPATH columns. |
+| `visus list-fields --kind <k> --all [--highlight] [--full] [--boxes] [--json]` | Enumerate interactive fields, numbered. The overlay is off by default (it would show up in a later screenshot/OCR); `--highlight` draws it. `--full` adds the CSS and XPATH columns (`--boxes` adds each field's viewport rect as `x,y,w,h`). |
 | `visus get-text [idx] [target]` | Print an element's text content. |
 | `visus get-attribute <attr> [idx] [target]` | Print an element's attribute value. |
 | `visus count [idx] [target]` | Count elements matching the target. |

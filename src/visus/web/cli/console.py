@@ -25,7 +25,7 @@ _HELP = """targets: a field index (`3`), a bare selector (`#submit`, `//button[1
          or flags (`--selector #go`, `--role button --name Save`, `--text Save [--exact]`).
 
 commands:
-  list [full]          enumerate interactive fields (`full` adds CSS/XPATH)
+  list [full] [--boxes] enumerate interactive fields (`full` adds CSS/XPATH)
   click TARGET [btn]   click the target (btn: left|middle|right)
   fill TARGET text     fill the target with text
   check TARGET         check the target
@@ -51,7 +51,7 @@ commands:
   reload               reload the current page
   title                print the page title
   url                  print the current URL
-  snapshot [sel]       list interactive elements (REF/role/name), optionally scoped
+  snapshot [sel] [--boxes] interactive elements (REF/role/name), optionally scoped
   find text            grep the snapshot, with 3 rows of context around each hit
   text TARGET          print the target's text content
   attr name TARGET     print the target's `name` attribute
@@ -154,6 +154,13 @@ def _is_confidence(token: str) -> bool:
         return False
 
 
+def _box_cell(b: Any) -> str:
+    """Render a ``{x,y,width,height}`` rect as a compact ``x,y,w,h`` cell."""
+    if not isinstance(b, dict):
+        return "-"
+    return f"{b['x']:.0f},{b['y']:.0f},{b['width']:.0f},{b['height']:.0f}"
+
+
 _MOUSE_BUTTONS = ("left", "middle", "right")
 
 
@@ -170,7 +177,11 @@ def _button_arg(tokens: list[str]) -> dict[str, Any]:
 
 
 def format_fields(
-    fields: list[dict[str, Any]], *, width: int | None = None, full: bool = False
+    fields: list[dict[str, Any]],
+    *,
+    width: int | None = None,
+    full: bool = False,
+    boxes: bool = False,
 ) -> str:
     """Render fields as a table: #, KIND, NAME, and the ready-to-paste VISUS call.
 
@@ -178,16 +189,18 @@ def format_fields(
     an iframe it is wrapped in ``frame_locator(...)`` so a click/fill actually
     reaches it (a bare css/xpath would not). ``full=True`` adds the CSS and XPATH
     columns; they are off by default because on a large page they triple the
-    output an agent has to read for no gain over the VISUS column. An ASCII box is
-    used so the table renders on any console encoding.
+    output an agent has to read for no gain over the VISUS column. ``boxes``
+    appends the field's viewport rect as ``x,y,w,h`` (from
+    ``visus list-fields --boxes``). An ASCII box is used so the table renders on
+    any console encoding.
     """
     if not fields:
         return "(no fields found)"
-    from rich import box
+    from rich import box as rich_box
     from rich.console import Console
     from rich.table import Table
 
-    table = Table(box=box.ASCII, header_style="bold", pad_edge=False)
+    table = Table(box=rich_box.ASCII, header_style="bold", pad_edge=False)
     table.add_column("#", justify="right", no_wrap=True)
     table.add_column("KIND", no_wrap=True)
     table.add_column("NAME", overflow="fold")
@@ -195,6 +208,8 @@ def format_fields(
     if full:
         table.add_column("CSS", overflow="fold")
         table.add_column("XPATH", overflow="fold")
+    if boxes:
+        table.add_column("BOX x,y,w,h", no_wrap=True)
     for f in fields:
         name = str(f.get("name") or f.get("label") or f.get("placeholder") or "")
         row = [
@@ -205,6 +220,8 @@ def format_fields(
         ]
         if full:
             row.extend([str(f.get("css", "")), str(f.get("xpath", ""))])
+        if boxes:
+            row.append(_box_cell(f.get("box")))
         table.add_row(*row)
     # Console() auto-detects the real terminal width (wide tables use the full
     # screen) and colour (TTY only); capture() preserves both. On a narrow pipe
@@ -303,9 +320,13 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         if cmd in ("quit", "exit", "q"):
             return "__QUIT__"
         if cmd in ("list", "ls"):
-            want_full = bool(rest and rest[0].lower() == "full")
-            result = send("list_fields", {"highlight": False})
-            return format_fields(result.get("fields", []), full=want_full)
+            want_boxes = "--boxes" in rest
+            words = [t for t in rest if t != "--boxes"]
+            want_full = bool(words and words[0].lower() == "full")
+            result = send("list_fields", {"highlight": False, "boxes": want_boxes})
+            return format_fields(
+                result.get("fields", []), full=want_full, boxes=want_boxes
+            )
         if cmd == "click":
             tgt, tail = _target(rest)
             return _act("click", {**tgt, **_button_arg(tail)})
@@ -376,16 +397,24 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
         if cmd == "url":
             return str(send("url", {}))
         if cmd == "snapshot":
+            want_boxes = "--boxes" in rest
+            # `--boxes` is a flag, not the scope selector PLAN 4 reads from rest[0].
+            scope = [t for t in rest if t != "--boxes"]
             snap_args: dict[str, Any] = {
-                "selector": rest[0] if rest else None,
+                "selector": scope[0] if scope else None,
                 "depth": None,
                 "refs": True,
+                "boxes": want_boxes,
             }
             elements = send("snapshot", snap_args).get("elements", [])
             if not elements:
                 return "(no elements)"
             return "\n".join(
                 f"{('-' if e.get('ref') is None else str(e['ref'])):>4}  "
+                f"{str(e.get('role', '')):<16} {str(e.get('name', '')):<32} "
+                f"{_box_cell(e.get('box'))}".rstrip()
+                if want_boxes
+                else f"{('-' if e.get('ref') is None else str(e['ref'])):>4}  "
                 f"{str(e.get('role', '')):<16} {e.get('name', '')}"
                 for e in elements
             )

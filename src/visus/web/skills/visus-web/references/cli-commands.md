@@ -92,7 +92,10 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 | Command | What it does |
 |---|---|
 | `visus dialog --accept/--dismiss --prompt-text <t>` | Handle the next alert/confirm/prompt. |
-| `visus cookies [--json]` | List cookies. |
+| `visus cookies [--domain <d>] [--path <p>] [--json]` | List cookies, optionally filtered. A stored domain may carry a leading dot (`.example.com`); `--domain example.com` matches both spellings. |
+| `visus cookie-get <name> [--domain] [--path]` | Print one cookie's value. Exits 1 when there is no such cookie, and carries a `present` flag so an empty value and a missing cookie stay distinguishable. |
+| `visus cookie-set <name> <value> [--domain] [--path] [--url]` | Set one cookie. `--path` defaults to `/`. |
+| `visus cookie-delete <name> [--domain] [--path]` | Delete cookies by name. **WebDriver has no per-cookie delete**, so this reads the jar, clears it and re-adds the survivors one at a time. `driver.add_cookie` only accepts a cookie for the *currently loaded* document's domain, so a survivor from another domain cannot be put back — the command reports those as `dropped` rather than losing them silently. |
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus state-save [FILE]` | Snapshot cookies **and** localStorage/sessionStorage to JSON (default `storage-state.json`). Paths resolve against the client's cwd. |
 | `visus state-load <FILE>` | Restore a `state-save` snapshot — the login-reuse flow. **Navigate to the target origin first** (`visus goto <url>`): cookies only apply to the loaded domain and web storage is per-origin. |

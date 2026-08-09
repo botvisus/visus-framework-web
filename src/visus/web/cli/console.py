@@ -60,6 +60,9 @@ commands:
   wait TARGET [state]  wait until the target is visible/hidden
   expect TARGET text   assert the target contains text (PASSED/FAILED)
   cookies              list cookies for the context
+  cookie-get name      print one cookie's value
+  cookie-set name val  set one cookie on the current domain
+  cookie-delete name   delete cookies by name (re-adds the survivors)
   add-cookies json     add cookies from a JSON list
   clear-cookies        clear every cookie in the context
   storage SUB [k] [v]  localStorage: list|get k|set k v|delete k|clear
@@ -478,6 +481,27 @@ def dispatch(line: str, send: SendFn, send_env: SendEnvFn | None = None) -> str:
                 f"{c.get('name', '')}={c.get('value', '')}  ({c.get('domain', '')})"
                 for c in items
             )
+        if cmd == "cookie-get":
+            ck = send("cookie_get", {"name": rest[0], "domain": None, "path": None})
+            return str(ck["value"]) if ck.get("present") else f"no such cookie: {rest[0]!r}"
+        if cmd == "cookie-set":
+            return str(
+                send(
+                    "cookie_set",
+                    {
+                        "name": rest[0],
+                        "value": " ".join(rest[1:]),
+                        "path": "/",
+                        "domain": None,
+                    },
+                )
+            )
+        if cmd == "cookie-delete":
+            gone = send("cookie_delete", {"name": rest[0], "domain": None, "path": None})
+            out = f"deleted {gone['deleted']} cookie(s), restored {gone['restored']}"
+            if gone.get("dropped"):
+                out += f" ({gone['dropped']} from other domains could not be restored)"
+            return out
         if cmd == "add-cookies":
             try:
                 parsed = json.loads(" ".join(rest))

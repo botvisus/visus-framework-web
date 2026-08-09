@@ -420,6 +420,7 @@ def test_mutating_ops_cover_every_state_changing_op() -> None:
             "type", "key_down", "key_up",
             "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
             "storage_set", "storage_delete", "storage_clear",
+            "cookie_set", "cookie_delete",
         }
     )
     actual = session_server._MUTATING_OPS

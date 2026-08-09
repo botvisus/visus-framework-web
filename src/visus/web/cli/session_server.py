@@ -89,6 +89,30 @@ def _norm_rect(rect: Any) -> dict[str, float] | None:
     }
 
 
+def _cookie_matches(
+    cookie: dict[str, Any],
+    *,
+    name: str | None,
+    domain: str | None,
+    path: str | None,
+) -> bool:
+    """True when *cookie* satisfies every filter that was given.
+
+    A stored domain may carry a leading dot (``.example.com``) for a
+    subdomain-wide cookie; the comparison strips it so ``--domain example.com``
+    matches both spellings.
+    """
+    if name is not None and cookie.get("name") != name:
+        return False
+    if domain is not None:
+        have = str(cookie.get("domain") or "").lstrip(".")
+        if have != domain.lstrip("."):
+            return False
+    if path is not None and cookie.get("path") != path:
+        return False
+    return True
+
+
 class StaleFieldIndexError(RuntimeError):
     """Raised when a cached field index no longer belongs to the current page.
 
@@ -117,6 +141,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "type", "key_down", "key_up",
         "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
         "storage_set", "storage_delete", "storage_clear",
+        "cookie_set", "cookie_delete",
     }
 )
 
@@ -994,7 +1019,76 @@ class SessionHandler:
 
     # --- cookies (context-level) -----------------------------------------
     def _op_cookies(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"cookies": self.context().cookies()}
+        """List cookies, optionally filtered by ``domain`` and/or ``path``."""
+        domain = args.get("domain")
+        path = args.get("path")
+        cookies = self.context().cookies()
+        if domain is None and path is None:
+            return {"cookies": cookies}
+        return {
+            "cookies": [
+                c for c in cookies if _cookie_matches(c, name=None, domain=domain, path=path)
+            ]
+        }
+
+    def _op_cookie_get(self, args: dict[str, Any]) -> dict[str, Any]:
+        """One cookie by name (optionally scoped by domain/path).
+
+        ``present`` distinguishes a cookie holding ``""`` from no cookie at all.
+        """
+        name = str(args.get("name", ""))
+        matches = [
+            c
+            for c in self.context().cookies()
+            if _cookie_matches(c, name=name, domain=args.get("domain"), path=args.get("path"))
+        ]
+        if not matches:
+            return {"value": None, "present": False, "cookie": None}
+        hit = matches[0]
+        return {"value": hit.get("value", ""), "present": True, "cookie": hit}
+
+    def _op_cookie_set(self, args: dict[str, Any]) -> str:
+        """Set one cookie on the current document's domain."""
+        name = str(args.get("name", ""))
+        cookie: dict[str, Any] = {"name": name, "value": str(args.get("value", ""))}
+        for key in ("domain", "path", "url"):
+            if args.get(key):
+                cookie[key] = args[key]
+        cookie.setdefault("path", "/")
+        self.context().add_cookies([cookie])
+        return f"set cookie {name!r}"
+
+    def _op_cookie_delete(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Delete cookies by name (optionally scoped by domain/path).
+
+        WebDriver has no per-cookie delete, so this reads every cookie, drops
+        the matches, clears the jar and re-adds the survivors ONE AT A TIME.
+        ``driver.add_cookie`` only accepts a cookie for the currently-loaded
+        document's domain, so a survivor from another domain cannot be put back
+        — those are counted in ``dropped`` instead of vanishing silently.
+        """
+        name = str(args.get("name", ""))
+        ctx = self.context()
+        cookies = ctx.cookies()
+        keep = [
+            c
+            for c in cookies
+            if not _cookie_matches(
+                c, name=name, domain=args.get("domain"), path=args.get("path")
+            )
+        ]
+        deleted = len(cookies) - len(keep)
+        if deleted == 0:
+            return {"deleted": 0, "restored": len(keep), "dropped": 0}
+        ctx.clear_cookies()
+        restored = 0
+        for c in keep:
+            try:
+                ctx.add_cookies([c])
+                restored += 1
+            except Exception:  # noqa: BLE001 — a foreign-domain cookie is data, not a crash
+                continue
+        return {"deleted": deleted, "restored": restored, "dropped": len(keep) - restored}
 
     def _op_add_cookies(self, args: dict[str, Any]) -> str:
         cookies = args.get("cookies") or []

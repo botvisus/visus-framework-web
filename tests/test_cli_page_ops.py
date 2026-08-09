@@ -651,3 +651,172 @@ def test_storage_ops_against_a_real_page(base_url: str) -> None:
         ] is False
     finally:
         h.close()
+
+
+# ---------------------------------------------------------------------------
+# cookie-get / cookie-set / cookie-delete, and cookies --domain/--path
+# ---------------------------------------------------------------------------
+
+
+class _CookieContext:
+    def __init__(self) -> None:
+        self.store: list[dict[str, Any]] = [
+            {"name": "sid", "value": "abc", "domain": "example.com", "path": "/"},
+            {"name": "sid", "value": "xyz", "domain": "other.com", "path": "/"},
+            {"name": "pref", "value": "", "domain": "example.com", "path": "/app"},
+        ]
+        self.rejects: set[str] = set()
+
+    def cookies(self) -> list[dict[str, Any]]:
+        return [dict(c) for c in self.store]
+
+    def add_cookies(self, cookies: list[dict[str, Any]]) -> None:
+        for c in cookies:
+            if c.get("domain") in self.rejects:
+                raise RuntimeError(f"cannot set a cookie for {c.get('domain')}")
+            self.store.append(dict(c))
+
+    def clear_cookies(self) -> None:
+        self.store.clear()
+
+
+class _CookiePage:
+    url = "http://example.com/"
+
+
+def _cookie_handler(ctx: _CookieContext) -> session_server.SessionHandler:
+    h = _handler(_CookiePage())
+    h.context = lambda: ctx  # type: ignore[assignment,method-assign,return-value]
+    return h
+
+
+def test_cookie_matches_filters_on_name_domain_and_path() -> None:
+    c = {"name": "sid", "domain": "example.com", "path": "/app"}
+    assert session_server._cookie_matches(c, name="sid", domain=None, path=None) is True
+    assert session_server._cookie_matches(c, name="nope", domain=None, path=None) is False
+    assert session_server._cookie_matches(c, name=None, domain="example.com", path=None) is True
+    # A leading dot on the stored domain must not defeat the filter.
+    assert session_server._cookie_matches(
+        {"name": "sid", "domain": ".example.com", "path": "/"},
+        name=None,
+        domain="example.com",
+        path=None,
+    ) is True
+    assert session_server._cookie_matches(c, name=None, domain=None, path="/app") is True
+    assert session_server._cookie_matches(c, name=None, domain=None, path="/") is False
+
+
+def test_op_cookies_filters_by_domain_and_path() -> None:
+    h = _cookie_handler(_CookieContext())
+    everything = h.handle("cookies", {})["result"]["cookies"]
+    assert len(everything) == 3
+    by_domain = h.handle("cookies", {"domain": "example.com"})["result"]["cookies"]
+    assert {c["name"] for c in by_domain} == {"sid", "pref"}
+    by_path = h.handle("cookies", {"path": "/app"})["result"]["cookies"]
+    assert [c["name"] for c in by_path] == ["pref"]
+
+
+def test_op_cookie_get_distinguishes_empty_from_missing() -> None:
+    h = _cookie_handler(_CookieContext())
+    hit = h.handle("cookie_get", {"name": "sid", "domain": "other.com"})["result"]
+    assert hit == {"value": "xyz", "present": True, "cookie": {
+        "name": "sid", "value": "xyz", "domain": "other.com", "path": "/"
+    }}
+    empty = h.handle("cookie_get", {"name": "pref"})["result"]
+    assert empty["value"] == "" and empty["present"] is True
+    missing = h.handle("cookie_get", {"name": "nope"})["result"]
+    assert missing == {"value": None, "present": False, "cookie": None}
+
+
+def test_op_cookie_set_uses_the_context() -> None:
+    ctx = _CookieContext()
+    h = _cookie_handler(ctx)
+    out = h.handle("cookie_set", {"name": "tok", "value": "1", "path": "/"})["result"]
+    assert out == "set cookie 'tok'"
+    assert any(c["name"] == "tok" and c["path"] == "/" for c in ctx.store)
+
+
+def test_op_cookie_delete_readds_the_survivors_and_reports_drops() -> None:
+    ctx = _CookieContext()
+    ctx.rejects = {"other.com"}  # WebDriver refuses a foreign-domain cookie
+    h = _cookie_handler(ctx)
+    out = h.handle("cookie_delete", {"name": "pref"})["result"]
+    assert out == {"deleted": 1, "restored": 1, "dropped": 1}
+    names = {c["name"] for c in ctx.store}
+    assert names == {"sid"}  # the example.com sid survived; pref is gone
+    assert len(ctx.store) == 1  # the other.com sid could not be restored
+
+
+def test_cli_cookie_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_send(op: str, args: dict[str, Any] | None = None) -> Any:
+        calls.append((op, args or {}))
+        if op == "cookie_get":
+            return {"value": "abc", "present": True, "cookie": {"name": "sid"}}
+        if op == "cookie_delete":
+            return {"deleted": 1, "restored": 2, "dropped": 0}
+        if op == "cookies":
+            return {"cookies": [{"name": "sid", "value": "abc", "domain": "example.com"}]}
+        return "set cookie 'tok'"
+
+    monkeypatch.setattr(session_client, "send", fake_send)
+    r_get = runner.invoke(app, ["cookie-get", "sid", "--domain", "example.com"])
+    assert r_get.exit_code == 0 and "abc" in r_get.output
+    assert runner.invoke(app, ["cookie-set", "tok", "1", "--path", "/api"]).exit_code == 0
+    assert runner.invoke(app, ["cookie-delete", "sid"]).exit_code == 0
+    assert runner.invoke(app, ["cookies", "--domain", "example.com"]).exit_code == 0
+    assert calls[0] == ("cookie_get", {"name": "sid", "domain": "example.com", "path": None})
+    assert calls[1][0] == "cookie_set" and calls[1][1]["path"] == "/api"
+    assert calls[2] == ("cookie_delete", {"name": "sid", "domain": None, "path": None})
+    assert calls[3] == ("cookies", {"domain": "example.com", "path": None})
+
+
+def test_cli_cookie_get_missing_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        session_client,
+        "send",
+        lambda op, args=None: {"value": None, "present": False, "cookie": None},
+    )
+    assert runner.invoke(app, ["cookie-get", "nope"]).exit_code == 1
+
+
+def test_repl_cookie_commands() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def send(op: str, args: dict[str, Any]) -> Any:
+        calls.append((op, args))
+        if op == "cookie_get":
+            return {"value": "abc", "present": True, "cookie": {}}
+        if op == "cookie_delete":
+            return {"deleted": 1, "restored": 0, "dropped": 0}
+        return "set cookie 'tok'"
+
+    assert console.dispatch("cookie-get sid", send) == "abc"
+    console.dispatch("cookie-set tok 1", send)
+    console.dispatch("cookie-delete sid", send)
+    assert calls[0] == ("cookie_get", {"name": "sid", "domain": None, "path": None})
+    assert calls[1] == ("cookie_set", {"name": "tok", "value": "1", "path": "/", "domain": None})
+    assert calls[2] == ("cookie_delete", {"name": "sid", "domain": None, "path": None})
+    assert "cookie-get" in console.dispatch("help", send)
+
+
+@pytest.mark.browser
+def test_cookie_ops_against_a_real_browser(base_url: str) -> None:
+    h = session_server.SessionHandler(
+        engine="chrome", headless=True, url=f"{base_url}/fields.html"
+    )
+    try:
+        assert h.handle("cookie_set", {"name": "tok", "value": "v1", "path": "/"})["ok"] is True
+        got = h.handle("cookie_get", {"name": "tok"})["result"]
+        assert got["present"] is True and got["value"] == "v1"
+
+        assert h.handle("cookie_set", {"name": "other", "value": "v2", "path": "/"})["ok"] is True
+        assert len(h.handle("cookies", {})["result"]["cookies"]) >= 2
+
+        deleted = h.handle("cookie_delete", {"name": "tok"})["result"]
+        assert deleted["deleted"] == 1
+        assert h.handle("cookie_get", {"name": "tok"})["result"]["present"] is False
+        assert h.handle("cookie_get", {"name": "other"})["result"]["present"] is True
+    finally:
+        h.close()

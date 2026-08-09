@@ -376,7 +376,9 @@ command accepts `--json`.
 | Command | What it does |
 |---|---|
 | `visus dialog --accept/--dismiss --prompt-text <t>` | Handle the next alert/confirm/prompt. |
-| `visus cookies [--json]` | List cookies. |
+| `visus cookies [--domain <d>] [--path <p>] [--json]` | List cookies, optionally filtered. |
+| `visus cookie-get <name> [--domain] [--path]` / `visus cookie-set <name> <value>` | Read / write one cookie. |
+| `visus cookie-delete <name> [--domain] [--path]` | Delete cookies by name (re-adds the survivors; reports any it could not restore). |
 | `visus add-cookies '<json>'` / `visus clear-cookies` | Add / clear cookies. |
 | `visus state-save [FILE]` / `visus state-load <FILE>` | Save / restore cookies + web storage (skip a login next run). |
 | `visus storage list/get/set/delete/clear [--session-storage]` | Read/write the origin's localStorage (or sessionStorage). |

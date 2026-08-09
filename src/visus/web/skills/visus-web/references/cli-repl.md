@@ -72,6 +72,9 @@ count TARGET         count elements matching the target
 wait TARGET [state]  wait until the target is visible/hidden
 expect TARGET text   assert the target contains text (PASSED/FAILED)
 cookies              list cookies for the context
+cookie-get name      print one cookie's value
+cookie-set name val  set one cookie on the current domain
+cookie-delete name   delete cookies by name (re-adds the survivors)
 add-cookies json     add cookies from a JSON list
 clear-cookies        clear every cookie in the context
 storage SUB [k] [v]  localStorage: list|get k|set k v|delete k|clear

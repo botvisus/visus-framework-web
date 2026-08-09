@@ -1338,9 +1338,13 @@ def dialog(
 
 
 @app.command()
-def cookies(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) -> None:
-    """List all cookies for the session's context."""
-    result = _send("cookies", {})
+def cookies(
+    as_json: bool = typer.Option(False, "--json", help="Emit JSON."),
+    domain: str = typer.Option(None, "--domain", help="Only cookies for this domain."),
+    path: str = typer.Option(None, "--path", help="Only cookies with this exact path."),
+) -> None:
+    """List cookies for the session's context, optionally filtered."""
+    result = _send("cookies", {"domain": domain, "path": path})
     items = result.get("cookies", [])
     if as_json:
         output.set_mode(as_json=True)
@@ -1348,9 +1352,57 @@ def cookies(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) ->
         output.emit(items, table="(no cookies)")
         return
     table = "\n".join(
-        f"{c.get('name', '')}={c.get('value', '')}  ({c.get('domain', '')})" for c in items
+        f"{c.get('name', '')}={c.get('value', '')}  ({c.get('domain', '')}{c.get('path', '')})"
+        for c in items
     )
     output.emit(items, table=table)
+
+
+@app.command("cookie-get")
+def cookie_get(
+    name: str = typer.Argument(..., help="Cookie name."),
+    domain: str = typer.Option(None, "--domain"),
+    path: str = typer.Option(None, "--path"),
+) -> None:
+    """Print one cookie's value (exits 1 when there is no such cookie)."""
+    result = _send("cookie_get", {"name": name, "domain": domain, "path": path})
+    if not result.get("present"):
+        output.emit_error(f"no such cookie: {name!r}")
+    output.emit(result.get("value"))
+
+
+@app.command("cookie-set")
+def cookie_set(
+    name: str = typer.Argument(..., help="Cookie name."),
+    value: str = typer.Argument(..., help="Cookie value."),
+    domain: str = typer.Option(None, "--domain"),
+    path: str = typer.Option("/", "--path"),
+    url: str = typer.Option(None, "--url", help="Set for this URL instead of a domain/path."),
+) -> None:
+    """Set one cookie on the session's context (current document's domain)."""
+    output.emit(
+        _send(
+            "cookie_set",
+            {"name": name, "value": value, "domain": domain, "path": path, "url": url},
+        )
+    )
+
+
+@app.command("cookie-delete")
+def cookie_delete(
+    name: str = typer.Argument(..., help="Cookie name."),
+    domain: str = typer.Option(None, "--domain"),
+    path: str = typer.Option(None, "--path"),
+) -> None:
+    """Delete cookies by name (WebDriver has no per-cookie delete: see the note)."""
+    result = _send("cookie_delete", {"name": name, "domain": domain, "path": path})
+    table = f"deleted {result['deleted']} cookie(s), restored {result['restored']}"
+    if result.get("dropped"):
+        table += (
+            f" — {result['dropped']} cookie(s) for other domains could not be"
+            " restored (WebDriver only accepts cookies for the loaded domain)"
+        )
+    output.emit(result, table=table)
 
 
 @app.command("add-cookies")

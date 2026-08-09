@@ -3573,3 +3573,59 @@ def test_make_logger_is_idempotent(tmp_path: Path) -> None:
             second.removeHandler(handler)
             handler.close()
     assert log.read_text(encoding="utf-8").count("hello") == 1
+
+
+# ---------------------------------------------------------------------------
+# The natural selector form: `visus fill -s "#u" hello`, not just `--value hello`
+# ---------------------------------------------------------------------------
+
+
+def test_fill_accepts_the_value_positionally_with_a_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`visus fill -s "#u" hello` used to die with "hello is not a valid int".
+
+    The value landed in the `int index` slot, so the documented selector form
+    only worked via `--value`. `press` already solved this with a str target.
+    """
+    calls = _record(monkeypatch)
+    r = runner.invoke(app, ["fill", "--selector", "#u", "hello"])
+    assert r.exit_code == 0, r.output
+    assert calls[-1][0] == "fill"
+    assert calls[-1][1]["selector"] == "#u"
+    assert calls[-1][1]["text"] == "hello"
+    assert "index" not in calls[-1][1]
+
+
+def test_fill_by_index_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _record(monkeypatch)
+    assert runner.invoke(app, ["fill", "7", "hello"]).exit_code == 0
+    assert calls[-1][1]["index"] == 7 and calls[-1][1]["text"] == "hello"
+
+
+def test_select_accepts_the_value_positionally_with_a_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _record(monkeypatch)
+    r = runner.invoke(app, ["select", "--selector", "#s", "US"])
+    assert r.exit_code == 0, r.output
+    assert calls[-1][0] == "select" and calls[-1][1]["value"] == "US"
+
+
+def test_expect_text_accepts_the_text_positionally_with_a_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _record(monkeypatch)
+    r = runner.invoke(app, ["expect-text", "--selector", "h1", "Logged In Successfully"])
+    assert r.exit_code == 0, r.output
+    assert calls[-1][0] == "expect_text"
+    assert calls[-1][1]["expected_text"] == "Logged In Successfully"
+
+
+def test_a_file_named_like_a_digit_still_reaches_the_value_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`visus fill 2` with no second argument is an index, not a value."""
+    _record(monkeypatch)
+    r = runner.invoke(app, ["fill", "2"])
+    assert r.exit_code == 1 and "no text" in r.output

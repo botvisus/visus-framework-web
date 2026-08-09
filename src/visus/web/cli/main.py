@@ -656,6 +656,29 @@ _BUTTON_OPT = typer.Option(
 )
 
 
+def _index_or_value(
+    target: str | None, value: str | None, has_option_target: bool
+) -> tuple[int | None, str | None]:
+    """Split a leading positional into ``(index, value)``.
+
+    `visus fill 7 hello` and `visus fill -s "#u" hello` are both natural, but a
+    typed `index: int` first parameter makes the second one a PARSE error before
+    the body ever runs ("hello is not a valid int"). So the slot is a string, and
+    it counts as an index only when it is all digits — the rule `visus press`
+    already uses. With a --selector/--role/--text target present, a lone
+    positional is the VALUE.
+    """
+    if target is None:
+        return None, value
+    if target.isdigit() and not has_option_target:
+        return int(target), value
+    if has_option_target and value is None:
+        return None, target
+    if target.isdigit():
+        return int(target), value
+    return None, value if value is not None else target
+
+
 def _target_args(
     index: int | None,
     selector: str | None,
@@ -1079,7 +1102,11 @@ def click(
 
 @app.command()
 def fill(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = typer.Argument(
+        None,
+        help="Field index from the last list-fields (a plain number), or the value "
+        "itself when a --selector/--role/--text target is given.",
+    ),
     text: str = typer.Argument(None, help="Text to fill, e.g. `visus fill 7 hello`."),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
@@ -1094,9 +1121,10 @@ def fill(
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
 ) -> None:
-    """Fill a field. By index: `visus fill 7 hello`. By selector: `-s "#u" --value hello`."""
+    """Fill a field. By index: `visus fill 7 hello`. By selector: `-s "#u" hello`."""
+    index, positional = _index_or_value(target, text, bool(selector or role or by_text))
     args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
-    fill_value = text if text is not None else value
+    fill_value = positional if positional is not None else value
     if fill_value is None:
         output.emit_error("error: no text to fill — use `visus fill <index> <text>` or `--value`")
     args["text"] = fill_value
@@ -1135,7 +1163,11 @@ def uncheck(
 
 @app.command()
 def select(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = typer.Argument(
+        None,
+        help="Field index from the last list-fields (a plain number), or the value "
+        "itself when a --selector/--role/--text target is given.",
+    ),
     value: str = typer.Argument(None, help="Option value, e.g. `visus select 5 US`."),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
@@ -1148,8 +1180,9 @@ def select(
     frame: str = _FRAME_OPT,
 ) -> None:
     """Select an option on a <select> field. By index: `visus select 5 US`."""
+    index, positional = _index_or_value(target, value, bool(selector or role or by_text))
     args = _target_args(index, selector, role, name, by_text, exact=exact, frame=frame)
-    val = value if value is not None else option_value
+    val = positional if positional is not None else option_value
     if val is None:
         output.emit_error(
             "error: no option value — use `visus select <index> <value>` or `--value`"
@@ -1810,7 +1843,11 @@ def wait(
 
 @app.command("expect-text")
 def expect_text(
-    index: int = typer.Argument(None, help="Field index from the last list-fields."),
+    target: str = typer.Argument(
+        None,
+        help="Field index from the last list-fields (a plain number), or the value "
+        "itself when a --selector/--role/--text target is given.",
+    ),
     expected: str = typer.Argument(None, help="The expected text."),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
@@ -1824,8 +1861,9 @@ def expect_text(
     frame: str = _FRAME_OPT,
 ) -> None:
     """Assert an element contains text (prints PASSED/FAILED). By index: `expect-text 0 Hi`."""
+    index, positional = _index_or_value(target, expected, bool(selector or role or text))
     args = _target_args(index, selector, role, name, text, exact=exact, frame=frame)
-    want = expected if expected is not None else expected_text
+    want = positional if positional is not None else expected_text
     if want is None:
         output.emit_error(
             "error: no expected text — use `visus expect-text <index> <text>` or --expected"

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from visus.web import Engine, launch
 from visus.web.api.browser import Browser
 from visus.web.api.context import Context
+from visus.web.api.fields import Field
+from visus.web.api.locator import Locator
 from visus.web.api.page import Page
 from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
-from visus.web.ops.targeting import make_locator
+from visus.web.ops.targeting import make_locator, resolve_field
 
 __all__ = ["Session", "make_locator"]
 
@@ -29,6 +32,12 @@ class Session:
         self._follow: bool = False
         self._known_handles: list[str] = []
         self._active_handle: str | None = None
+        # The last browser_list_fields result, so an action tool can act by INDEX
+        # and get the daemon's frame/shadow re-resolution for free. Stamped with
+        # the page it was captured on: a stale index must refuse, never re-resolve
+        # a generic fallback selector against a page it never described.
+        self._fields: list[Field] = []
+        self._fields_url: str | None = None
 
     def _ensure(self) -> None:
         if self._browser is None:
@@ -71,6 +80,41 @@ class Session:
             self._active_handle = None
         return self._follow
 
+    def invalidate_fields(self) -> None:
+        """Drop the cached field list and its page stamp — index targeting is void."""
+        self._fields = []
+        self._fields_url = None
+
+    def cache_fields(self, fields: list[Field]) -> None:
+        """Remember an enumeration so index targeting can re-resolve from it."""
+        self._fields = list(fields)
+        self._fields_url = self.page().url
+
+    def field_locator(self, index: int) -> Locator:
+        """Re-resolve cached field *index* — iframe chain and shadow ``deep`` included."""
+        return resolve_field(self.page(), self._fields, index, fields_url=self._fields_url)
+
+    def target(self, args: dict[str, Any]) -> Locator:
+        """Resolve an action target from the DAEMON's payload keys.
+
+        Deliberately the daemon's spelling — ``index`` first, then
+        ``selector``/``role``/``name``/``target_text``/``exact``/``frame`` — so a
+        single payload dict serves both this in-process resolver and
+        ``RemoteDispatcher``. ``target_text`` (not ``text``) is the locator-text
+        key, because ``text`` is already fill's VALUE payload.
+        """
+        if args.get("index") is not None:
+            return self.field_locator(int(args["index"]))
+        return make_locator(
+            self.page(),
+            selector=args.get("selector"),
+            role=args.get("role"),
+            name=args.get("name"),
+            text=args.get("target_text"),
+            exact=bool(args.get("exact", False)),
+            frame=args.get("frame"),
+        )
+
     def context(self) -> Context:
         self._ensure()
         assert self._context is not None
@@ -82,6 +126,7 @@ class Session:
         p = self._context.new_page()
         self._pages.append(p)
         self._current_idx = len(self._pages) - 1
+        self.invalidate_fields()  # cached indexes belonged to the previous tab
         if url is not None:
             p.goto(url)
         return p
@@ -103,6 +148,7 @@ class Session:
         if index < 0 or index >= len(self._pages):
             raise IndexError(f"tab index {index} out of range (have {len(self._pages)} tabs)")
         self._current_idx = index
+        self.invalidate_fields()  # cached indexes belonged to the previous tab
         return self._pages[index]
 
     def activate(self, handle: str) -> Page:
@@ -112,6 +158,7 @@ class Session:
             if p.handle == handle:
                 p.bring_to_front()
                 self._current_idx = i
+                self.invalidate_fields()  # cached indexes belonged to the previous tab
                 return p
         raise ValueError(f"no open tab with handle {handle!r}")
 
@@ -127,6 +174,7 @@ class Session:
             self.close()
         else:
             self._current_idx = min(idx, len(self._pages) - 1)
+            self.invalidate_fields()  # cached indexes belonged to the closed tab
 
     def close(self) -> None:
         if self._browser is not None:
@@ -138,5 +186,6 @@ class Session:
         self._follow = False
         self._known_handles = []
         self._active_handle = None
+        self.invalidate_fields()
 
 

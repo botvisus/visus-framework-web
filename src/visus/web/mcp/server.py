@@ -107,6 +107,7 @@ def browser_list_fields(
     fields = _session.page().list_fields(
         kinds=parsed, include_hidden=include_hidden, highlight=highlight
     )
+    _session.cache_fields(fields)  # so the action tools can target by `index`
     return [f.to_dict() for f in fields]
 
 

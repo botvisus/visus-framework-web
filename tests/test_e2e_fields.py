@@ -267,3 +267,54 @@ def test_snapshot_of_a_missing_scope_is_empty(browser, base_url: str) -> None:  
     page = browser.new_page()
     page.goto(f"{base_url}/snapshot_tree.html")
     assert page.snapshot("#nope") == []
+
+
+@pytest.mark.browser
+def test_fields_in_box_selects_by_geometry(browser, base_url: str) -> None:  # type: ignore[no-untyped-def]
+    """A rectangle drawn on the page maps to the fields it covers.
+
+    The missing primitive behind `visus annotate`: the user drags a box, and the
+    tool has to say WHICH elements that box means.
+    """
+    page = browser.new_page()
+    page.goto(f"{base_url}/forms.html")
+    fields = page.list_fields(highlight=False)
+    assert all(f.box is not None for f in fields), "PLAN 5's Field.box must be populated"
+
+    target = fields[0]
+    assert target.box is not None
+    box = {
+        "x": target.box["x"] - 4,
+        "y": target.box["y"] - 4,
+        "width": target.box["width"] + 8,
+        "height": target.box["height"] + 8,
+    }
+    inside = page.fields_in_box(box)
+    assert target.index in {f.index for f in inside}
+
+
+@pytest.mark.browser
+def test_fields_in_box_excludes_what_it_does_not_cover(browser, base_url: str) -> None:  # type: ignore[no-untyped-def]
+    page = browser.new_page()
+    page.goto(f"{base_url}/forms.html")
+    page.list_fields(highlight=False)
+    assert page.fields_in_box({"x": -500.0, "y": -500.0, "width": 10.0, "height": 10.0}) == []
+
+
+@pytest.mark.browser
+def test_fields_in_box_contained_is_stricter_than_intersecting(browser, base_url: str) -> None:  # type: ignore[no-untyped-def]
+    """`contained=True` is the un-noisy mode: only fields fully inside the box."""
+    page = browser.new_page()
+    page.goto(f"{base_url}/forms.html")
+    fields = page.list_fields(highlight=False)
+    target = fields[0]
+    assert target.box is not None
+    # A box clipping the field's left half: it intersects, it does not contain.
+    half = {
+        "x": target.box["x"] - 20,
+        "y": target.box["y"],
+        "width": 20 + target.box["width"] / 2,
+        "height": target.box["height"],
+    }
+    assert target.index in {f.index for f in page.fields_in_box(half)}
+    assert target.index not in {f.index for f in page.fields_in_box(half, contained=True)}

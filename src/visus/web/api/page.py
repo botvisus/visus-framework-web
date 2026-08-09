@@ -289,6 +289,34 @@ class Page:
             )
         return self.field_locator(self._last_fields[index])
 
+    def fields_in_box(self, box: dict[str, float], *, contained: bool = False) -> list[Field]:
+        """The enumerated fields covered by a viewport rectangle.
+
+        *box* is ``{"x", "y", "width", "height"}`` in viewport CSS pixels — the
+        same shape :meth:`Locator.bounding_box` returns. By default a field is
+        included when its own box *intersects*; ``contained=True`` keeps only
+        fields fully inside, which is the quieter answer when a human has dragged
+        a rectangle around one control and does not want its neighbours.
+
+        Re-enumerates so the geometry is current; a field with no measurable box
+        (display:none, zero-size) is never included.
+        """
+        left, top = float(box["x"]), float(box["y"])
+        right, bottom = left + float(box["width"]), top + float(box["height"])
+        picked: list[Field] = []
+        for field in self.list_fields(highlight=False):
+            fb = field.box
+            if fb is None or fb["width"] <= 0 or fb["height"] <= 0:
+                continue
+            fl, ft = float(fb["x"]), float(fb["y"])
+            fr, fbm = fl + float(fb["width"]), ft + float(fb["height"])
+            if contained:
+                if fl >= left and ft >= top and fr <= right and fbm <= bottom:
+                    picked.append(field)
+            elif fl < right and fr > left and ft < bottom and fbm > top:
+                picked.append(field)
+        return picked
+
     def clear_highlights(self) -> None:
         """Remove the numbered field overlay drawn by :meth:`list_fields`."""
         self._delegate.clear_highlights()

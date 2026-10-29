@@ -99,7 +99,7 @@ session state (cookies, current page, logged-in state):
 
 | Command | What it launches |
 |---|---|
-| `visus open <URL> --engine <e>` | A headed browser at URL, closed when you press Enter. |
+| `visus open <URL>` | Opens (or navigates) in the session and prints the page, numbered; the browser stays open. `--wait`: a one-off browser closed with Enter. |
 | `visus screenshot <URL> -o <png> --headless --engine <e>` | A one-off browser to capture a PNG. |
 | `visus pdf <URL> -o <pdf>` | A one-off Chromium browser to print a PDF. |
 | `visus codegen <URL> -o <file> --engine <e>` | A headed browser that records your interactions. |

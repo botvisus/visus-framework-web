@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Portal do Fornecedor</title></head>
+<body>
+  <h1>Portal do Fornecedor</h1>
+  <p id="welcome">Bem-vindo ao portal. Aqui você acompanha pedidos, notas fiscais e pagamentos.</p>
+  <form id="login" onsubmit="event.preventDefault(); document.getElementById('status').textContent = 'Entrou como ' + document.getElementById('email').value;">
+    <label for="email">E-mail</label>
+    <input id="email" type="email" placeholder="voce@empresa.com">
+    <label for="senha">Senha</label>
+    <input id="senha" type="password">
+    <label><input id="lembrar" type="checkbox"> Lembrar de mim</label>
+    <button type="submit">Entrar</button>
+  </form>
+  <p id="status"></p>
+</body>
+</html>

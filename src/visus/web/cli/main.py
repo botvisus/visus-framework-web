@@ -441,12 +441,49 @@ def pdf(
 
 
 @app.command()
-def open(url: str, engine: str = "chrome") -> None:  # noqa: A001
-    """Open a headed browser at URL and wait until you press Enter."""
-    with launch(Engine.from_str(engine), headless=False) as b:
-        b.new_page().goto(url)
-        typer.echo("Browser open. Press Enter to close...")
-        input()
+def open(  # noqa: A001
+    url: str = typer.Argument(..., help="URL to open."),
+    engine: str = typer.Option(None, "--engine", "-e", help="chrome | edge | firefox (new session only)."),
+    wait: bool = typer.Option(
+        False, "--wait", help="Old behaviour: a one-off headed browser, closed when you press Enter."
+    ),
+) -> None:
+    """Open URL in the session (starting it if needed) and print the page, numbered.
+
+    The browser stays open across commands — act on it with `click 4`, `fill 2 …`.
+    One command opens the page AND shows what is on it, which is what an agent needs
+    next; `--wait` keeps the old press-Enter-to-close browser.
+    """
+    if wait:
+        with launch(Engine.from_str(engine or "chrome"), headless=False) as b:
+            b.new_page().goto(url)
+            typer.echo("Browser open. Press Enter to close...")
+            input()
+        return
+
+    from visus.web.cli import config as cliconfig
+    from visus.web.cli import session_client
+
+    if session_client.status() is None:
+        cfg = cliconfig.active()
+        try:
+            session_client.start_daemon(engine or cfg.engine or "chrome", bool(cfg.headless), url)
+        except session_client.SessionError as exc:
+            output.emit_error(f"error: {exc}")
+    else:
+        _send("goto", {"url": url})
+    _emit_page()
+
+
+@app.command("text")
+def page_text(
+    max_chars: int = typer.Option(6000, "--max-chars", help="Cut the text after this many characters."),
+) -> None:
+    """Print the page's visible text (no JavaScript eval)."""
+    content = str(_send("get_text", _target_args(None, "body", None, None, None)) or "")
+    if len(content) > max_chars:
+        content = f"{content[:max_chars]}\n… {len(content) - max_chars} more characters"
+    output.emit({"text": content}, table=content)
 
 
 @app.command()
@@ -601,6 +638,22 @@ def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         output.emit_error(f"error: daemon sent a malformed response — {exc}")
     except OSError as exc:
         output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
+
+
+def _emit_page(kinds: list[str] | None = None) -> None:
+    """The page as an agent reads it: settled field list, then title and URL."""
+    from visus.web.cli.compact import format_compact, settle
+
+    def fetch() -> list[dict[str, Any]]:
+        args = {"kinds": kinds, "include_hidden": False, "highlight": False, "boxes": False}
+        return list(_send("list_fields", args).get("fields", []))
+
+    fields = settle(fetch)
+    page_title, page_url = str(_send("title") or ""), str(_send("url") or "")
+    output.emit(
+        {"title": page_title, "url": page_url, "fields": fields},
+        table=format_compact(fields, title=page_title, url=page_url),
+    )
 
 
 def _format_fields(
@@ -1127,9 +1180,15 @@ def list_fields(
     ),
     full: bool = typer.Option(False, "--full", help="Also print the CSS and XPATH columns."),
     boxes: bool = typer.Option(False, "--boxes", help="Include each field's viewport rect."),
+    compact: bool = typer.Option(
+        False, "--compact", help="One line per field — the form an AI agent reads cheapest."
+    ),
 ) -> None:
     """Enumerate interactive fields on the current page (numbered, highlighted)."""
     kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
+    if compact:
+        _emit_page(kinds)
+        return
     result = _send(
         "list_fields",
         {

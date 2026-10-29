@@ -6,7 +6,8 @@ senha `Password123`, publicados na própria página). Depende de internet, entã
 entra na coleta com VISUS_E2E_INTERNET=1 (tests/conftest.py o desmarca sem isso —
 desmarcar, não pular: o repositório proíbe skips):
 
-    VISUS_E2E_INTERNET=1 uv run pytest tests/test_cli_e2e_practice_login.py -m internet --no-cov -n 0
+    set VISUS_E2E_INTERNET=1
+    uv run --all-extras pytest tests/test_cli_e2e_practice_login.py --no-cov -n 0
 """
 
 from __future__ import annotations
@@ -53,13 +54,21 @@ def _logged_in_then_out(logout_target: str) -> None:
 def test_login_e_logout_pelo_numero(live_session: list[str]) -> None:
     page = _ok("open", LOGIN)
     assert "Username" in page and "Password" in page and "Submit" in page, page
-    _batch(["fill", _index_of("Username"), "student"], ["fill", _index_of("Password"), "Password123"], ["click", _index_of("Submit")])
+    _batch(
+        ["fill", _index_of("Username"), "student"],
+        ["fill", _index_of("Password"), "Password123"],
+        ["click", _index_of("Submit")],
+    )
     _logged_in_then_out(_index_of("Log out"))
 
 
 def test_login_e_logout_por_id_e_texto(live_session: list[str]) -> None:
     _ok("open", LOGIN)
-    _batch(["fill", "#username", "student"], ["fill", "#password", "Password123"], ["click", "#submit"])
+    _batch(
+        ["fill", "#username", "student"],
+        ["fill", "#password", "Password123"],
+        ["click", "#submit"],
+    )
     _logged_in_then_out("text=Log out")
 
 
@@ -75,7 +84,11 @@ def test_login_e_logout_por_xpath(live_session: list[str]) -> None:
 
 def test_login_e_logout_por_classe(live_session: list[str]) -> None:
     _ok("open", LOGIN)
-    _batch(["fill", "id=username", "student"], ["fill", "id=password", "Password123"], ["click", "button.btn"])
+    _batch(
+        ["fill", "id=username", "student"],
+        ["fill", "id=password", "Password123"],
+        ["click", "button.btn"],
+    )
     _logged_in_then_out("class=wp-block-button__link")
 
 
@@ -83,7 +96,7 @@ def test_dom_dos_campos_traz_ids_e_classes(live_session: list[str]) -> None:
     _ok("open", LOGIN)
     page = _ok("list-fields", "--compact", "--dom")
     assert "#username" in page and "#password" in page and "#submit" in page, page
-    assert '<input type="text" name="username" id="username"' in page or 'id="username"' in page, page
+    assert 'id="username"' in page, page  # the opening tag, from --dom
 
 
 def test_senha_errada_mostra_o_erro(live_session: list[str]) -> None:

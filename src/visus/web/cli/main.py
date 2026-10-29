@@ -532,6 +532,31 @@ def batch(
         raise typer.Exit(1)
 
 
+@app.command("downloads")
+def downloads(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) -> None:
+    """List this session's completed downloads, newest first.
+
+    The session browser saves them in a TEMPORARY folder that is deleted when the
+    session stops — use `wait-download --save-to DIR` to keep a file.
+    """
+    result = _send("downloads", {})
+    if as_json:
+        output.set_mode(as_json=True)
+    rows = [f"{f['path']}  ({f['size']} bytes)" for f in result.get("files", [])]
+    output.emit(result, table="\n".join(rows) or "no downloads yet")
+
+
+@app.command("wait-download")
+def wait_download(
+    timeout: int = typer.Option(30_000, "--timeout", help="Milliseconds to wait for the download to finish."),
+    last: bool = typer.Option(False, "--last", help="Take the newest completed download, even one already reported."),
+    save_to: str = typer.Option(None, "--save-to", help="Copy the file into this folder (it outlives the session)."),
+) -> None:
+    """Wait for the next download to finish and print its path (after a `click` that downloads)."""
+    result = _send("wait_download", {"timeout": timeout, "last": last, "save_to": save_to})
+    output.emit(result, table=str(result["path"]))
+
+
 @app.command("text")
 def page_text(
     max_chars: int = typer.Option(6000, "--max-chars", help="Cut the text after this many characters."),

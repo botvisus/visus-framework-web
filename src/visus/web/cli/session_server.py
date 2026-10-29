@@ -114,6 +114,10 @@ def _cookie_matches(
 # in tests/test_cli_session.py asserts this set by exact equality, so forgetting
 # to update it turns that test red at the offending plan's own commit gate —
 # that failure is the whole point of the test, not a bug in it.
+# Ops que podem rodar com um diálogo aberto sem fechá-lo: o próprio `dialog`, o
+# encerramento, e o `status` (que então informa o diálogo em vez de ler a página)
+_DIALOG_SAFE_OPS: frozenset[str] = frozenset({"dialog", "shutdown", "status"})
+
 _MUTATING_OPS: frozenset[str] = frozenset(
     {
         "click", "dblclick", "fill", "check", "uncheck", "select", "press",
@@ -237,6 +241,8 @@ class SessionHandler:
         self._context: Context | None = None
         self._page: Page | None = None
         self._fields: list[Field] = []
+        # Downloads já informados ao cliente: `wait-download` devolve só os novos
+        self._seen_downloads: set[str] = set()
         self._fields_url: str | None = None
         self._script: list[str] = []
         self._known_handles: list[str] = []
@@ -564,12 +570,27 @@ class SessionHandler:
         — an agent that never ran ``list-fields`` must not be warned that its
         non-existent indexes went stale.
         """
+        # Um diálogo que o próprio clique abriu: ler a página agora o fecharia
+        pending = self._open_dialog_text()
+        if pending is not None:
+            return {"dialog": pending}
         try:
             page = self.page()
             stale = bool(self._fields) and self.fields_stale()
             return {"url": page.url, "title": page.title(), "fields_stale": stale}
         except Exception:  # noqa: BLE001 — page state is telemetry, not the result
             return {}
+
+    def _open_dialog_text(self) -> str | None:
+        """O texto do alert/confirm/prompt aberto, ou None. Usa só o endpoint do
+        alerta, que NÃO dispara o fechamento automático do ChromeDriver."""
+        driver = self._driver()
+        if driver is None:
+            return None
+        try:
+            return str(driver.switch_to.alert.text)
+        except Exception:  # noqa: BLE001 — NoAlertPresent e afins = nenhum diálogo
+            return None
 
     def _snapshot_refs(self, rows: list[dict[str, Any]]) -> list[int | None]:
         """Map each snapshot row to a ``list_fields`` index — ONE numbering.
@@ -622,6 +643,17 @@ class SessionHandler:
         args = args or {}
         with self._lock:
             self._last_op_at = time.monotonic()
+            # Com um alert/confirm/prompt aberto, QUALQUER comando que toque a página
+            # faz o ChromeDriver fechá-lo em silêncio ("dismiss and notify"): o agente
+            # nunca saberia que houve um diálogo. Recusa e diz como tratá-lo.
+            if op not in _DIALOG_SAFE_OPS:
+                pending = self._open_dialog_text()
+                if pending is not None:
+                    return {
+                        "ok": False,
+                        "error": f"a dialog is open: {pending!r} — handle it first with "
+                        "`visus dialog` (accept) or `visus dialog --dismiss`",
+                    }
             try:
                 method = getattr(self, f"_op_{op}", None)
                 if method is None:
@@ -1203,6 +1235,27 @@ class SessionHandler:
         """Handle the next pending dialog (mirrors browser_handle_dialog exactly)."""
         accept = bool(args.get("accept", True))
         prompt_text = args.get("prompt_text")
+        action = "accepted" if accept else "dismissed"
+        driver = self._driver()
+        if driver is not None:
+            # Direto pelo endpoint do alerta, SEM self.page(): resolver a página lê a
+            # janela, e com o diálogo já aberto o ChromeDriver o fecharia antes daqui
+            deadline = time.monotonic() + 5.0
+            while True:
+                try:
+                    alert = driver.switch_to.alert
+                    msg = str(alert.text)
+                    if prompt_text is not None:
+                        alert.send_keys(str(prompt_text))
+                    if accept:
+                        alert.accept()
+                    else:
+                        alert.dismiss()
+                    return f"{action} 'dialog' dialog: {msg!r}"
+                except Exception:  # noqa: BLE001 — NoAlertPresent: ainda não abriu
+                    if time.monotonic() >= deadline:
+                        raise errors.VisusTimeoutError("no dialog appeared within 5000 ms") from None
+                    time.sleep(0.05)
         page = self.page()
         msg, typ = page._delegate.handle_next_dialog(
             accept=accept,
@@ -1211,6 +1264,57 @@ class SessionHandler:
         )
         action = "accepted" if accept else "dismissed"
         return f"{action} {typ!r} dialog: {msg!r}"
+
+    # --- downloads ---------------------------------------------------------
+    # O navegador da sessão baixa numa pasta TEMPORÁRIA, apagada quando a sessão
+    # fecha: o agente precisa do caminho (e de uma cópia) antes disso.
+    _PARTIAL_DOWNLOAD = (".crdownload", ".tmp", ".part")
+
+    def _completed_downloads(self) -> list[dict[str, Any]]:
+        folder = getattr(self.page()._delegate, "_download_dir", None)
+        if not folder or not os.path.isdir(folder):
+            return []
+        files = []
+        for name in os.listdir(folder):
+            path = os.path.join(folder, name)
+            if name.endswith(self._PARTIAL_DOWNLOAD) or not os.path.isfile(path):
+                continue
+            st = os.stat(path)
+            files.append({"name": name, "path": os.path.abspath(path), "size": st.st_size, "mtime": st.st_mtime})
+        files.sort(key=lambda f: f["mtime"], reverse=True)
+        return files
+
+    def _op_downloads(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Completed downloads of this session, newest first."""
+        files = self._completed_downloads()
+        self._seen_downloads.update(f["path"] for f in files)
+        return {"files": [{k: f[k] for k in ("name", "path", "size")} for f in files]}
+
+    def _op_wait_download(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Wait for a completed download not reported yet (or, with ``last``, take the
+        newest); with ``save_to``, copy it there so it outlives the session."""
+        timeout_ms = int(args.get("timeout") or 30_000)
+        deadline = time.monotonic() + timeout_ms / 1000
+        while True:
+            files = self._completed_downloads()
+            pick = files[0] if args.get("last") and files else next(
+                (f for f in files if f["path"] not in self._seen_downloads), None
+            )
+            if pick is not None:
+                break
+            if time.monotonic() >= deadline:
+                raise errors.VisusTimeoutError(f"no new download completed within {timeout_ms} ms")
+            time.sleep(0.1)
+        self._seen_downloads.add(pick["path"])
+        result = {"name": pick["name"], "path": pick["path"], "size": pick["size"]}
+        save_to = args.get("save_to")
+        if save_to:
+            import shutil
+
+            dest_dir = os.path.abspath(str(save_to))
+            os.makedirs(dest_dir, exist_ok=True)
+            result["path"] = shutil.copy2(pick["path"], os.path.join(dest_dir, pick["name"]))
+        return result
 
     # --- cookies (context-level) -----------------------------------------
     def _op_cookies(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -1835,6 +1939,10 @@ class SessionHandler:
             "slow_mo": self._slow_mo,
             "fields_cached": len(self._fields),
         }
+        pending = self._open_dialog_text() if running else None
+        if pending is not None:
+            info["dialog"] = pending
+            return info
         if running:
             try:
                 p = self._peek_page()

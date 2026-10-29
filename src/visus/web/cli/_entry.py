@@ -21,8 +21,22 @@ _MISSING_MCP = (
 )
 
 
+def _utf8_streams() -> None:
+    """Saída sempre em UTF-8. Lida por um processo pai (um agente de IA, um script),
+    a CLI escreve num pipe — e no Windows o Python usa o codepage local (cp1252/
+    cp850) para pipes, então "não" chegava como lixo do outro lado."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):  # stream já fechado ou não reconfigurável
+                pass
+
+
 def cli_main() -> None:
     """Entry point for the ``visus`` console script."""
+    _utf8_streams()
     try:
         import typer  # noqa: F401
     except ImportError as exc:  # ModuleNotFoundError is a subclass

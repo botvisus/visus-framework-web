@@ -48,6 +48,37 @@ visus fill 2 Password123
 visus click --role button --name Submit  # or target by role/name/selector/text
 ```
 
+## Driving it as an AI agent — fewest tokens, fewest round-trips
+
+One command opens the page **and** shows what is on it; one more fills a whole
+form and shows the result. A number always hits the exact element it was listed
+as (it is resolved through that element's XPath, not re-searched).
+
+```bash
+visus open https://practicetestautomation.com/practice-test-login/
+# Page: Test Login | Practice Test Automation | https://practicetestautomation.com/...
+#   0  input:text #username label='Username'
+#   1  input:password #password label='Password'
+#   2  button #submit label='Submit'
+visus batch '[["fill","0","student"],["fill","1","Password123"],["click","2"]]'
+# in order, stops at the first failure, then prints the NEW page's list once
+visus text --max-chars 2000              # the page's visible text (no eval)
+```
+
+- `visus list-fields --compact` — that same one-line-per-element list, any time;
+  `--dom` adds each element's opening tag (id, class, name…) when you need a
+  selector that outlives the numbers.
+- Any selector the DOM offers works where a number does: `#id`, `.class`,
+  CSS, `//xpath`, `role=button[name="Submit"]`, `id=…`, `class=…`, `text=…`.
+- **A dialog never vanishes silently.** While an alert/confirm/prompt is open
+  every command refuses with its text; answer it with `visus dialog`
+  (`--dismiss`, `--prompt-text`).
+- **Downloads:** after a `click` that downloads, `visus wait-download --save-to
+  DIR` prints the finished file's path (the session's own folder is temporary);
+  `visus downloads` lists them.
+- Output is UTF-8 even through a pipe, and a failure exits non-zero with the
+  reason on stderr.
+
 ## How to name an element
 
 Every command that acts on an element takes the target the same way, and the

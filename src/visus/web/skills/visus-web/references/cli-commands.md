@@ -99,7 +99,9 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 
 | Command | What it does |
 |---|---|
-| `visus dialog --accept/--dismiss --prompt-text <t>` | Handle the next alert/confirm/prompt. |
+| `visus dialog --accept/--dismiss --prompt-text <t>` | Handle the next alert/confirm/prompt. While one is open every other command refuses with its text instead of letting the driver dismiss it silently. |
+| `visus downloads [--json]` | This session's completed downloads, newest first. The session browser saves them in a **temporary** folder deleted when the session stops. |
+| `visus wait-download [--timeout <ms>] [--last] [--save-to <dir>]` | Wait for the next download to finish and print its path (after a `click` that downloads). `--save-to` copies it somewhere that outlives the session; `--last` takes the newest even if already reported. |
 | `visus cookies [--domain <d>] [--path <p>] [--json]` | List cookies, optionally filtered. A stored domain may carry a leading dot (`.example.com`); `--domain example.com` matches both spellings. |
 | `visus cookie-get <name> [--domain] [--path]` | Print one cookie's value. Exits 1 when there is no such cookie, and carries a `present` flag so an empty value and a missing cookie stay distinguishable. |
 | `visus cookie-set <name> <value> [--domain] [--path] [--url]` | Set one cookie. `--path` defaults to `/`. |
@@ -147,6 +149,7 @@ it needs chrome or edge; on Firefox, stub the API from the page with `page.add_i
 | `visus open <URL>` | Open URL in the session (starting it if needed) and print the page as a numbered list. `--wait`: the old one-off browser closed with Enter. |
 | `visus text [--max-chars N]` | The page's visible text, without `eval`. |
 | `visus list-fields --compact` | One line per field — the cheapest page read for an agent. |
+| `visus batch '<json>'` | Several commands in one call, in order, stopping at the first failure: `'[["fill","0","ada"],["click","2"]]'` (each item is a command's own argv). If any can change the page, the numbered list is printed **once** at the end — after a failure too. |
 | `visus clear` | Remove the numbered field-highlight overlay drawn by `list-fields --highlight`. |
 | `visus highlight [idx] [target] [--style <css>] [--hide]` | Box **one** element on the live page — what a human needs to see which element the agent chose. `--style` replaces the default border (e.g. `"2px dashed #0a0"`), `--hide` removes the box. Distinct from `visus clear`, which erases the numbered overlay. |
 | `visus resize <w> <h>` | Resize the window so the **viewport** is exactly w x h CSS pixels. Prints the size actually achieved, not the one requested: a window manager can clamp it (minimum widths, screen size), and echoing the request back would hide that. Use it to reproduce a width-specific layout bug, or to make screenshots deterministic across machines. |

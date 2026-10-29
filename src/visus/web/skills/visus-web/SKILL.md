@@ -141,7 +141,7 @@ follow). Pick one per task.
 
 ## Commands
 
-**102 commands** total (83 top-level plus the `session`, `storage`, `network`
+**106 commands** total (87 top-level plus the `session`, `storage`, `network`
 and `route` groups), covering the persistent-session daemon, request mocking,
 vision targeting, one-off screenshot/pdf/codegen helpers, and `install-skills`.
 The complete reference — targeting rules, every flag, grouped by task — is

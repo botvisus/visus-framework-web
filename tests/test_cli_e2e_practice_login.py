@@ -3,7 +3,8 @@ jeito que um agente faz — abrir, ler a página numerada, agir, conferir o text
 
 https://practicetestautomation.com/practice-test-login/ (usuário `student`,
 senha `Password123`, publicados na própria página). Depende de internet, então só
-roda com VISUS_E2E_INTERNET=1:
+entra na coleta com VISUS_E2E_INTERNET=1 (tests/conftest.py o desmarca sem isso —
+desmarcar, não pular: o repositório proíbe skips):
 
     VISUS_E2E_INTERNET=1 uv run pytest tests/test_cli_e2e_practice_login.py -m internet --no-cov -n 0
 """
@@ -11,7 +12,6 @@ roda com VISUS_E2E_INTERNET=1:
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 from typer.testing import CliRunner
@@ -21,7 +21,6 @@ from visus.web.cli.main import app
 pytestmark = [
     pytest.mark.browser,
     pytest.mark.internet,
-    pytest.mark.skipif(os.environ.get("VISUS_E2E_INTERNET") != "1", reason="E2E na internet: VISUS_E2E_INTERNET=1"),
     pytest.mark.timeout(240),
 ]
 

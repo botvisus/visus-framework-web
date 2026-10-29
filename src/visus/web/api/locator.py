@@ -6,6 +6,15 @@ from typing import TYPE_CHECKING, Union, cast
 
 from visus.web.api._steps import run_step
 
+# role=button, role=button[name="Entrar"], role=link[name='Sair' i]  (i = sem caixa)
+_ROLE_SELECTOR = re.compile(r"""^role=([\w-]+)(?:\[name=(["'])(.*?)\2(?:\s*([is]))?\])?$""", re.S)
+
+
+def _css_quote(value: str) -> str:
+    """Escapa um valor para dentro de aspas duplas num seletor de atributo CSS."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 if TYPE_CHECKING:
     from visus.web.api.frame_locator import FrameLocator
     from visus.web.backends.base import PageDelegate
@@ -115,7 +124,22 @@ class Locator:
             value = selector[len("text=") :].strip()
             exact = len(value) >= 2 and value[0] == '"' and value[-1] == '"'
             return self._child(_text_step("text", value[1:-1] if exact else value, exact))
-        if selector.startswith("//") or selector.startswith("("):
+        if selector.startswith("role="):
+            # O formato que o próprio list_fields gera para botões e links sem id
+            # (`role=button[name="Entrar"]`); antes caía no CSS e o querySelectorAll o recusava
+            match = _ROLE_SELECTOR.match(selector.strip())
+            if match:
+                role, _quote, name, flag = match.groups()
+                if name is None:
+                    return self.get_by_role(role)
+                return self.get_by_role(role, name=name, exact=flag != "i")
+        if selector.startswith("id="):
+            return self._child(self._css_step(f'[id="{_css_quote(selector[3:].strip())}"]', deep))
+        if selector.startswith("class="):
+            classes = selector[len("class=") :].split()
+            return self._child(self._css_step("".join(f'[class~="{_css_quote(c)}"]' for c in classes), deep))
+        # `/html/body/...` (absoluto), `//button` e `(//button)[1]` são XPath
+        if selector.startswith("/") or selector.startswith("("):
             return self._child({"kind": "xpath", "value": selector})
         return self._child(self._css_step(selector, deep))
 

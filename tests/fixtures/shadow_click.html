@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>shadow click</title></head>
+  <body>
+    <div id="host"></div>
+    <p id="res">idle</p>
+    <script>
+      const root = document.getElementById('host').attachShadow({mode: 'open'});
+      root.innerHTML = '<button id="inner">Shadow Button</button>';
+      root.getElementById('inner').addEventListener('click', () => {
+        document.getElementById('res').textContent = 'shadow clicked';
+      });
+    </script>
+  </body>
+</html>

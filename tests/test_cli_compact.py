@@ -105,3 +105,45 @@ def test_text_trunca(live_session: list[str], base_url: str) -> None:
     first, rest = r.output.split("\n", 1)
     assert len(first) <= 20
     assert "more characters" in rest
+
+
+# --- o DOM de cada elemento enumerado, para o agente montar #id, .classe ou XPath ---
+
+
+def test_compact_dom_mostra_a_tag_de_abertura() -> None:
+    field = _field(0, "button", "Entrar", locator="#entrar", dom='<button id="entrar" class="btn btn-primary" type="submit">')
+    out = format_compact([field], title="T", url="u", dom=True)
+    assert out.splitlines()[1] == '  0  button         Entrar #entrar <button id="entrar" class="btn btn-primary" type="submit">'
+
+
+@pytest.mark.browser
+def test_list_fields_traz_o_dom_de_cada_elemento(live_session: list[str], base_url: str) -> None:
+    import json
+
+    runner.invoke(app, ["open", f"{base_url}/agent_page.html"])
+    fields = json.loads(runner.invoke(app, ["list-fields", "--json"]).output)
+    entrar = next(f for f in fields if f["name"] == "Entrar")
+    assert entrar["dom"] == '<button id="entrar" class="btn btn-primary" type="submit">'
+    email = next(f for f in fields if f["name"] == "E-mail")
+    assert email["dom"].startswith('<input id="email" type="email"')
+
+
+@pytest.mark.browser
+def test_list_fields_compact_dom(live_session: list[str], base_url: str) -> None:
+    runner.invoke(app, ["open", f"{base_url}/agent_page.html"])
+    r = runner.invoke(app, ["list-fields", "--compact", "--dom"])
+    assert r.exit_code == 0, r.output
+    assert '<button id="entrar" class="btn btn-primary" type="submit">' in r.output
+    # sem --dom a lista continua enxuta: só o #id
+    plain = runner.invoke(app, ["list-fields", "--compact"]).output
+    assert "#entrar" in plain and "<button" not in plain
+
+
+def test_dom_corta_atributos_longos_e_ignora_handlers() -> None:
+    import re
+
+    bundle = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "src/visus/web/backends/selenium/js/bundle.js"
+    ).read_text(encoding="utf-8")
+    assert re.search(r"function openTag\(el\)", bundle), "o bundle não calcula o DOM do elemento"

@@ -133,6 +133,7 @@ testpaths = ["tests"]
 markers = [
     "browser: integration test that launches a real headless browser",
     "packaging: builds the real wheel and installs it into a temp venv (needs network)",
+    "internet: drives a real public website (opt-in: VISUS_E2E_INTERNET=1)",
 ]
 timeout = 60
 asyncio_mode = "auto"

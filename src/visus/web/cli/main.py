@@ -475,6 +475,63 @@ def open(  # noqa: A001
     _emit_page()
 
 
+@app.command("batch")
+def batch(
+    actions_json: str = typer.Argument(
+        ..., metavar="ACTIONS_JSON", help='JSON list of commands: [["fill","0","ada"],["click","2"]].'
+    ),
+) -> None:
+    """Run several commands in one call, in order, stopping at the first failure.
+
+    Each item is a command's own argv. If any of them can change the page, the page's
+    numbered list is printed ONCE at the end — after a failure too, since it is what
+    the next attempt is chosen from. One call fills a whole form and shows the result.
+    """
+    import click
+
+    global _IN_BATCH
+    try:
+        actions = _json.loads(actions_json)
+    except ValueError:
+        actions = None
+    well_formed = isinstance(actions, list) and all(
+        isinstance(a, list) and a and all(isinstance(x, str) for x in a) for a in actions
+    )
+    if not well_formed:
+        output.emit_error(f"error: {_BATCH_USAGE}", code=2)
+    if any(a[0] == "batch" for a in actions):
+        output.emit_error("error: batch dentro de batch não é permitido", code=2)
+
+    failed: tuple[int, str] | None = None
+    changed = False
+    _IN_BATCH = True
+    try:
+        for n, action in enumerate(actions, start=1):
+            changed = changed or action[0] in _PAGE_CHANGING
+            try:
+                # Com standalone_mode=False o click DEVOLVE o código de um Exit em vez de levantar
+                rc = app(args=action, prog_name="visus", standalone_mode=False)
+                if isinstance(rc, int) and rc != 0:
+                    failed = (n, action[0])
+            except click.exceptions.Exit as exc:
+                if exc.exit_code:
+                    failed = (n, action[0])
+            except click.ClickException as exc:  # uso errado: opção desconhecida, argumento faltando
+                exc.show()
+                failed = (n, action[0])
+            if failed:
+                break
+    finally:
+        _IN_BATCH = False
+
+    if failed:
+        typer.echo(f"falhou na ação {failed[0]} ({failed[1]})", err=True)
+    if changed:
+        _emit_page()
+    if failed:
+        raise typer.Exit(1)
+
+
 @app.command("text")
 def page_text(
     max_chars: int = typer.Option(6000, "--max-chars", help="Cut the text after this many characters."),
@@ -640,7 +697,24 @@ def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         output.emit_error(f"error: daemon communication failed — {type(exc).__name__}: {exc}")
 
 
-def _emit_page(kinds: list[str] | None = None) -> None:
+# Inside `batch` the page is printed once, at the end — not after every action
+_IN_BATCH = False
+
+# Commands after which the page may be a different one: a batch that ran any of
+# them ends with the page's new numbered list
+_PAGE_CHANGING = frozenset({
+    "click", "dblclick", "hover", "check", "uncheck", "clear-input", "fill", "type",
+    "press", "select", "upload", "drag", "goto", "open", "back", "forward", "reload",
+    "tab", "tab-new", "tab-close", "tab-activate", "dialog",
+})
+
+_BATCH_USAGE = (
+    'batch espera uma lista JSON de comandos, cada um uma lista de strings: '
+    '[["fill","0","ada@empresa.com"],["fill","1","segredo"],["click","2"]]'
+)
+
+
+def _emit_page(kinds: list[str] | None = None, *, dom: bool = False) -> None:
     """The page as an agent reads it: settled field list, then title and URL."""
     from visus.web.cli.compact import format_compact, settle
 
@@ -648,11 +722,15 @@ def _emit_page(kinds: list[str] | None = None) -> None:
         args = {"kinds": kinds, "include_hidden": False, "highlight": False, "boxes": False}
         return list(_send("list_fields", args).get("fields", []))
 
+    # Ler a lista é o que dá números às próximas ações (o daemon guarda a última):
+    # dentro de um batch ela é lida assim mesmo, só não é impressa
     fields = settle(fetch)
+    if _IN_BATCH:
+        return
     page_title, page_url = str(_send("title") or ""), str(_send("url") or "")
     output.emit(
         {"title": page_title, "url": page_url, "fields": fields},
-        table=format_compact(fields, title=page_title, url=page_url),
+        table=format_compact(fields, title=page_title, url=page_url, dom=dom),
     )
 
 
@@ -1183,11 +1261,14 @@ def list_fields(
     compact: bool = typer.Option(
         False, "--compact", help="One line per field — the form an AI agent reads cheapest."
     ),
+    dom: bool = typer.Option(
+        False, "--dom", help="With --compact: also each element's opening tag (id, class, name…)."
+    ),
 ) -> None:
     """Enumerate interactive fields on the current page (numbered, highlighted)."""
     kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
     if compact:
-        _emit_page(kinds)
+        _emit_page(kinds, dom=dom)
         return
     result = _send(
         "list_fields",

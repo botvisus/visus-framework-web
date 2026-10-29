@@ -16,9 +16,12 @@ from typing import Any
 EMPTY_PAGE = "Nothing on this page to act on."
 
 
-def _describe(field: dict[str, Any]) -> str:
+def _describe(field: dict[str, Any], *, dom: bool = False) -> str:
     name = field.get("name") or ""
-    details = [
+    # O #id é o alvo mais curto e estável que existe: vale os poucos caracteres
+    locator = str(field.get("locator") or "")
+    handle = [locator] if locator.startswith("#") else []
+    details = handle + [
         f"{key}={field[key]!r}"
         for key in ("label", "placeholder", "value")
         if field.get(key) and field[key] != name
@@ -27,6 +30,8 @@ def _describe(field: dict[str, Any]) -> str:
         details.append(f"checked={field.get('checked')}")
     if field.get("disabled"):
         details.append("disabled")
+    if dom and field.get("dom"):
+        details.append(str(field["dom"]))
     # O tipo de um input diz o que vai nele: search, email, password, file…
     kind = str(field.get("kind") or "")
     if kind == "input" and field.get("type"):
@@ -35,10 +40,14 @@ def _describe(field: dict[str, Any]) -> str:
     return " ".join([line.rstrip(), *details])
 
 
-def format_compact(fields: list[dict[str, Any]], *, title: str, url: str) -> str:
-    """``Page: título | url`` e uma linha por campo (ou o aviso de página vazia)."""
+def format_compact(fields: list[dict[str, Any]], *, title: str, url: str, dom: bool = False) -> str:
+    """``Page: título | url`` e uma linha por campo (ou o aviso de página vazia).
+
+    ``dom`` acrescenta a tag de abertura de cada elemento (id, class, name, type…),
+    para quando o agente precisa montar um seletor CSS/XPath ou gerar código.
+    """
     lines = [f"Page: {title} | {url}"]
-    lines += [_describe(f) for f in fields] if fields else [EMPTY_PAGE]
+    lines += [_describe(f, dom=dom) for f in fields] if fields else [EMPTY_PAGE]
     return "\n".join(lines)
 
 

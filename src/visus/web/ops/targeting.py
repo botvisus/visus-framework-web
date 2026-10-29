@@ -114,4 +114,10 @@ def resolve_field(
     root: Any = page
     for sel in field.frame:
         root = root.frame_locator(sel)
+    # O XPath que o list_fields calculou aponta para ESTE elemento. O localizador
+    # "melhor" (papel+nome, classe) pode casar cópias escondidas dele — menus
+    # responsivos, modais fechados — e o número clicaria a cópia errada. Em shadow DOM
+    # o XPath não alcança: lá o localizador (com deep) continua sendo o caminho.
+    if field.xpath and not field.deep:
+        return cast(Locator, root.locator(f"xpath={field.xpath}"))
     return cast(Locator, root.locator(field.locator, deep=field.deep))

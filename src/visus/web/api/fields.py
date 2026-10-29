@@ -36,6 +36,8 @@ class Field:
     code: str = ""
     deep: bool = False
     box: dict[str, float] | None = None
+    # A tag de abertura do elemento no DOM (id, class, name, type…), até 200 caracteres
+    dom: str = ""
     """Viewport rect ``{x, y, width, height}`` at enumeration time, or ``None``.
 
     Same key names as :meth:`Locator.bounding_box`. Frozen at capture: it is the

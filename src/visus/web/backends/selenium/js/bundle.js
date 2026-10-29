@@ -396,10 +396,29 @@
     var r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
+  // document.elementFromPoint stops at a shadow HOST, and Node.contains never crosses
+  // a shadow boundary: a button inside an open shadow root looked "occluded" by its
+  // own host and could never be clicked. Descend into shadow roots for the real top
+  // element, and walk the composed tree (parentNode, else the root's host).
+  function deepElementFromPoint(x, y) {
+    var top = document.elementFromPoint(x, y), inner;
+    while (top && top.shadowRoot) {
+      inner = top.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === top) break;
+      top = inner;
+    }
+    return top;
+  }
+  function composedContains(ancestor, node) {
+    for (var n = node; n; n = n.parentNode || n.host) {
+      if (n === ancestor) return true;
+    }
+    return false;
+  }
   function hitTarget(el, x, y) {
-    var top = document.elementFromPoint(x, y);
+    var top = deepElementFromPoint(x, y);
     if (!top) return false;
-    return el === top || el.contains(top) || top.contains(el);
+    return el === top || composedContains(el, top) || composedContains(top, el);
   }
   function checkStable(el, cb) {
     // resolves cb(true/false) after comparing the rect across 2 animation frames
@@ -534,6 +553,23 @@
     var hp = el.getAttribute && el.getAttribute("aria-haspopup");
     if (hp && HASPOPUP_DROPDOWN[hp.toLowerCase()]) return true;
     return false;
+  }
+
+  // The element's opening tag as it is in the DOM — id, class, name, type, href… —
+  // so whoever reads the field list (an AI agent, a codegen) can pick an #id, a
+  // .class or an attribute for a selector. Styles and on* handlers are noise there;
+  // long values are cut so one element never costs more than 200 characters.
+  function openTag(el) {
+    var s = "<" + el.tagName.toLowerCase(), attrs = el.attributes || [], i, a, v;
+    for (i = 0; i < attrs.length; i++) {
+      a = attrs[i];
+      if (a.name === "style" || a.name.indexOf("on") === 0) continue;
+      v = String(a.value);
+      if (v.length > 80) v = v.slice(0, 79) + "…";
+      s += " " + a.name + (v === "" ? "" : '="' + v.replace(/"/g, "&quot;") + '"');
+    }
+    s += ">";
+    return s.length > 200 ? s.slice(0, 199) + "…" : s;
   }
 
   // Build a ready-to-use locator step list (and a human string) for `el`, mirroring
@@ -706,6 +742,7 @@
                 locator_kind: loc.locator_kind,
                 css: cssPath(el),
                 xpath: xPath(el),
+                dom: openTag(el),
                 deep: !!inShadow,
                 steps: loc.steps,
                 rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },

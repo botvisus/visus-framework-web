@@ -774,6 +774,7 @@ class SeleniumPageDelegate:
                     code=_code(d),
                     deep=bool(d.get("deep", False)),
                     box=_box(d),
+                    dom=cast(str, d.get("dom") or ""),
                 )
             )
         return fields

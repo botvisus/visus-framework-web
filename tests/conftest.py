@@ -98,11 +98,16 @@ def live_session(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     )
     thread.start()
     sf = session_server.session_file(tmp_path)
+    port = 0
+    # No Windows o arquivo pode existir e ainda estar sendo escrito (travado ou pela
+    # metade): tenta de novo até ele ser um JSON completo com a porta
     for _ in range(500):
-        if sf.is_file():
+        try:
+            port = int(json.loads(sf.read_text(encoding="utf-8"))["port"])
             break
-        time.sleep(0.02)
-    port = int(json.loads(sf.read_text(encoding="utf-8"))["port"])
+        except (OSError, ValueError, KeyError):
+            time.sleep(0.02)
+    assert port, "o daemon de teste não publicou a sessão"
     monkeypatch.chdir(tmp_path)
 
     ops: list[str] = []

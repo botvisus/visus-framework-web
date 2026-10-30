@@ -9,6 +9,12 @@ import threading
 
 import pytest
 
+# Typer forces a colour terminal under GitHub Actions (GITHUB_ACTIONS is set): the
+# ANSI codes then split `--json` / `visus install --skills` inside `--help` and the
+# help assertions fail only in CI. Its own switch turns that off -- it must be set
+# before typer is imported, which this module (loaded first) guarantees.
+os.environ.setdefault("_TYPER_FORCE_DISABLE_TERMINAL", "1")
+
 FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures"
 
 

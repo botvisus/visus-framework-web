@@ -39,6 +39,7 @@ TOOL_OPS: dict[str, str] = {
     "browser_check": "check",
     "browser_uncheck": "uncheck",
     "browser_select_option": "select",
+    "browser_pick_date": "pick_date",
     "browser_drag": "drag",
     "browser_focus": "focus",
     "browser_clear": "clear_input",

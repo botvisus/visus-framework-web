@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from typing import TYPE_CHECKING, Union, cast
 
 from visus.web.api._steps import run_step
@@ -442,6 +443,21 @@ class Locator:
             action_name="drag_to",
             selector=self._encoded,
         )
+
+    def pick_date(self, start: date | str, end: date | str | None = None) -> str:
+        """Pick a date (``YYYY-MM-DD`` or a :class:`datetime.date`), or a range with
+        ``end``, in this date field: a native date input, a text field (typed in the
+        format it already shows) or a calendar that only opens on click — it steps
+        through the months with the arrows and clicks the day. Returns what the field
+        shows afterwards; raises :class:`visus.web.ops.dates.DatePickError` when the
+        date did not stick::
+
+            page.locator("#period").pick_date("2026-11-02", "2026-11-06")
+        """
+        from visus.web.api.page import Page
+        from visus.web.ops.dates import pick_date
+
+        return pick_date(Page(self._delegate, self._defaults), self, start, end)
 
     def input_value(self) -> str:
         return self._delegate.locator_input_value(self._encoded)

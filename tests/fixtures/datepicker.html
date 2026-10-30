@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Date pickers</title>
+<style>
+  body { font-family: sans-serif; }
+  .popup { position: absolute; background: #fff; border: 1px solid #ccc; padding: 8px; display: none; }
+  .popup.open { display: flex; gap: 24px; }
+  .panel table { border-collapse: collapse; }
+  .panel td { width: 28px; height: 24px; text-align: center; cursor: pointer; }
+  .panel td.other { color: #ccc; }
+  .panel td.sel span { background: #e0205c; color: #fff; border-radius: 50%; padding: 2px 5px; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .nav { cursor: pointer; border: none; background: none; }
+  .arrow { display: inline-block; width: 14px; height: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+<!-- 1) nativo -->
+<label>Native <input type="date" id="native"></label>
+
+<!-- 2) campo de texto que aceita digitação -->
+<label>Typed <input id="typed" value="10/23/2026"></label>
+
+<!-- 3) intervalo só leitura, dois meses lado a lado (como o GMES) -->
+<div style="margin-top: 16px">
+  <input id="range" readonly value="10/23/2026 ~ 11/6/2026" style="width: 220px">
+  <div id="range-popup" class="popup"></div>
+</div>
+
+<!-- 4) um dia só, em PT (DD/MM/AAAA), setas sem texto -->
+<div style="margin-top: 260px" lang="pt-BR">
+  <input id="pt" readonly value="05/10/2026">
+  <div id="pt-popup" class="popup"></div>
+</div>
+
+<!-- 5) como o GMES: DOIS calendários independentes — o da esquerda é o INÍCIO, o da
+     direita é o FIM, cada um com as suas setas; o do início desliga (só pela cor) os
+     dias depois do fim, o do fim os antes do início; clicar o fim fecha -->
+<div style="margin-top: 260px">
+  <input id="gmes" readonly value="10/23/2026 ~ 11/6/2026" style="width: 220px">
+  <div id="gmes-popup" class="popup"></div>
+</div>
+
+<p id="log"></p>
+
+<script>
+  const EN = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const PT = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  function grid(year, month, pick, isSelected) {
+    // 6 semanas: os dias do mês anterior e do seguinte em cinza (classe "other")
+    const first = new Date(year, month, 1);
+    const start = new Date(year, month, 1 - first.getDay());
+    const table = document.createElement("table");
+    const head = document.createElement("tr");
+    for (const d of ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]) {
+      const th = document.createElement("th"); th.textContent = d; head.appendChild(th);
+    }
+    table.appendChild(head);
+    for (let w = 0; w < 6; w++) {
+      const tr = document.createElement("tr");
+      for (let i = 0; i < 7; i++) {
+        const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + i);
+        const td = document.createElement("td");
+        const span = document.createElement("span");
+        span.textContent = String(day.getDate());
+        td.appendChild(span);
+        if (day.getMonth() !== month) td.className = "other";
+        if (isSelected(day)) td.classList.add("sel");
+        // clicar um dia de outro mês escolheria o dia errado: o teste prova que não clicamos nele
+        td.addEventListener("mousedown", () => pick(day));
+        tr.appendChild(td);
+      }
+      table.appendChild(tr);
+    }
+    return table;
+  }
+
+  // ---- 3) intervalo
+  const range = document.getElementById("range");
+  const rangePopup = document.getElementById("range-popup");
+  let view = new Date(2026, 9, 1);   // outubro de 2026
+  let picking = null;                 // o início, entre o 1º e o 2º clique
+  const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+
+  function renderRange() {
+    rangePopup.innerHTML = "";
+    for (let k = 0; k < 2; k++) {
+      const m = new Date(view.getFullYear(), view.getMonth() + k, 1);
+      const panel = document.createElement("div");
+      panel.className = "panel";
+      const head = document.createElement("div");
+      head.className = "head";
+      const title = document.createElement("span");
+      title.className = "title";
+      title.textContent = `${EN[m.getMonth()]} ${m.getFullYear()} ▾`;
+      const prev = document.createElement("button"); prev.className = "nav"; prev.textContent = "◂";
+      const today = document.createElement("button"); today.className = "nav"; today.textContent = "●";
+      const next = document.createElement("button"); next.className = "nav"; next.textContent = "▸";
+      prev.onclick = () => { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); renderRange(); };
+      next.onclick = () => { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); renderRange(); };
+      today.onclick = () => { view = new Date(2026, 9, 1); renderRange(); };
+      head.append(title, prev, today, next);
+      panel.appendChild(head);
+      panel.appendChild(grid(m.getFullYear(), m.getMonth(), (day) => {
+        if (picking === null) { picking = day; renderRange(); return; }
+        const [a, b] = picking <= day ? [picking, day] : [day, picking];
+        range.value = `${fmt(a)} ~ ${fmt(b)}`;
+        picking = null;
+        rangePopup.classList.remove("open");
+        document.getElementById("log").textContent = "range:" + range.value;
+      }, (day) => picking !== null && day.getTime() === picking.getTime()));
+      rangePopup.appendChild(panel);
+    }
+  }
+  range.addEventListener("click", () => { renderRange(); rangePopup.classList.add("open"); });
+
+  // ---- 4) um dia só, PT, setas sem texto (só aria-label)
+  const pt = document.getElementById("pt");
+  const ptPopup = document.getElementById("pt-popup");
+  let ptView = new Date(2026, 9, 1);
+  const pad = (n) => String(n).padStart(2, "0");
+  function renderPt() {
+    ptPopup.innerHTML = "";
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    const head = document.createElement("div");
+    head.className = "head";
+    const prev = document.createElement("span"); prev.className = "arrow"; prev.setAttribute("aria-label", "Mês anterior"); prev.setAttribute("role", "button");
+    const title = document.createElement("strong"); title.textContent = `${PT[ptView.getMonth()]} de ${ptView.getFullYear()}`;
+    const next = document.createElement("span"); next.className = "arrow"; next.setAttribute("aria-label", "Próximo mês"); next.setAttribute("role", "button");
+    prev.onclick = () => { ptView = new Date(ptView.getFullYear(), ptView.getMonth() - 1, 1); renderPt(); };
+    next.onclick = () => { ptView = new Date(ptView.getFullYear(), ptView.getMonth() + 1, 1); renderPt(); };
+    head.append(prev, title, next);
+    panel.appendChild(head);
+    panel.appendChild(grid(ptView.getFullYear(), ptView.getMonth(), (day) => {
+      pt.value = `${pad(day.getDate())}/${pad(day.getMonth() + 1)}/${day.getFullYear()}`;
+      ptPopup.classList.remove("open");
+    }, () => false));
+    ptPopup.appendChild(panel);
+  }
+  pt.addEventListener("click", () => { renderPt(); ptPopup.classList.add("open"); });
+
+  // ---- 5) dois calendários independentes (GMES)
+  const gmes = document.getElementById("gmes");
+  const gmesPopup = document.getElementById("gmes-popup");
+  let gStart = new Date(2026, 9, 23), gEnd = new Date(2026, 10, 6);
+  let gViews = [new Date(2026, 9, 1), new Date(2026, 10, 1)];
+  function gmesCalendar(k) {
+    const m = gViews[k];
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    const head = document.createElement("div");
+    head.className = "head";
+    const title = document.createElement("span");
+    title.textContent = `${EN[m.getMonth()]} ${m.getFullYear()} ▾`;
+    const prev = document.createElement("span"); prev.className = "nav"; prev.textContent = "◂";
+    const today = document.createElement("span"); today.className = "nav"; today.textContent = "●";
+    const next = document.createElement("span"); next.className = "nav"; next.textContent = "▸";
+    for (const b of [prev, today, next]) b.style.cursor = "pointer";
+    prev.onclick = () => { gViews[k] = new Date(m.getFullYear(), m.getMonth() - 1, 1); renderGmes(); };
+    next.onclick = () => { gViews[k] = new Date(m.getFullYear(), m.getMonth() + 1, 1); renderGmes(); };
+    head.append(title, prev, today, next);
+    panel.appendChild(head);
+    const table = grid(m.getFullYear(), m.getMonth(), (day) => {
+      const off = k === 0 ? day > gEnd : day < gStart;
+      if (off) return;  // um dia desligado não faz nada, como num calendário de verdade
+      if (k === 0) { gStart = day; renderGmes(); }
+      else { gEnd = day; gmesPopup.classList.remove("open"); }
+      gmes.value = `${fmt(gStart)} ~ ${fmt(gEnd)}`;
+    }, () => false);
+    // desligados SÓ pela cor (sem classe nem atributo): o caso difícil
+    table.querySelectorAll("td").forEach((td) => {
+      if (td.classList.contains("other")) return;
+      const d = new Date(m.getFullYear(), m.getMonth(), +td.textContent);
+      if (k === 0 ? d > gEnd : d < gStart) td.style.color = "#d0d4da";
+    });
+    panel.appendChild(table);
+    return panel;
+  }
+  function renderGmes() {
+    gmesPopup.innerHTML = "";
+    gmesPopup.append(gmesCalendar(0), gmesCalendar(1));
+  }
+  gmes.addEventListener("click", () => { renderGmes(); gmesPopup.classList.add("open"); });
+</script>
+</body>
+</html>

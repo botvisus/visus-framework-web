@@ -130,6 +130,7 @@ _MUTATING_OPS: frozenset[str] = frozenset(
         "click_image", "click_ocr_text",
         "storage_set", "storage_delete", "storage_clear",
         "cookie_set", "cookie_delete",
+        "pick_date",
     }
 )
 
@@ -543,6 +544,12 @@ class SessionHandler:
         try:
             if op == "goto":
                 return generate_script_goto(str(args.get("url", "")))
+            if op == "pick_date":
+                target = self._target_event(args)
+                if target is None:
+                    return None
+                dates = [args.get("start"), args.get("end")]
+                return generate_line({"action": "pick_date", "target": target, "value": dates})
             entry = _CODE_ACTIONS.get(op)
             if entry is None:
                 return None
@@ -683,9 +690,12 @@ class SessionHandler:
         kinds = args.get("kinds")
         include_hidden = bool(args.get("include_hidden", False))
         highlight = bool(args.get("highlight", True))
+        # the CLI is what agents use: list the click-only elements too (menus, calendar
+        # days) unless asked not to — without them an agent falls back to text= guesses
+        clickables = bool(args.get("clickables", True))
         page = self.page()
         fields = page.list_fields(
-            kinds=kinds, include_hidden=include_hidden, highlight=highlight
+            kinds=kinds, include_hidden=include_hidden, highlight=highlight, clickables=clickables
         )
         self._fields = list(fields)
         # Stamp the page identity so a later index op can tell the page moved.
@@ -719,6 +729,15 @@ class SessionHandler:
             loc.press("Enter")
             return f"filled with {text!r} and pressed Enter"
         return f"filled with {text!r}"
+
+    def _op_pick_date(self, args: dict[str, Any]) -> str:
+        """A date, or a range, in any date field — native, typed, or a calendar it
+        steps through (see :mod:`visus.web.ops.dates`)."""
+        from visus.web.ops import dates
+
+        start = dates.parse_iso(str(args.get("start", "")))
+        end = dates.parse_iso(str(args["end"])) if args.get("end") else None
+        return dates.pick_date(self.page(), self._target(args), start, end)
 
     def _op_check(self, args: dict[str, Any]) -> str:
         self._target(args).check()
@@ -769,7 +788,10 @@ class SessionHandler:
         ``typer.echo(None)`` and ``typer.echo("")`` print an identical blank line,
         so the two cases have to be separated here, in the payload.
         """
-        value = self._target(args).first().text_content()
+        target = self._target(args).first()
+        # visible: o texto como aparece na tela (inner_text) — sem linhas escondidas de
+        # uma tabela filtrada nem o código de um <script>
+        value = target.inner_text() if args.get("visible") else target.text_content()
         return {"value": value, "present": value is not None}
 
     def _op_goto(self, args: dict[str, Any]) -> str:

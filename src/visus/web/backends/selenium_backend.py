@@ -9,7 +9,7 @@ import shutil
 import tempfile
 import weakref
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
@@ -207,6 +207,22 @@ class SeleniumBrowserDelegate:
         shutil.rmtree(self._download_dir, ignore_errors=True)
 
 
+def _size_window(driver: Any, *, headless: bool) -> None:
+    """A headed window opens MAXIMIZED: an agent (or a person) sees the whole page, and
+    a screenshot of it shows the popup that a small window would cut off. Headless gets
+    a 1920x1080 viewport for the same reason. ``VISUS_WINDOW_MAXIMIZED=0`` keeps the
+    browser's own default size."""
+    if os.environ.get("VISUS_WINDOW_MAXIMIZED", "1").strip() == "0":
+        return
+    try:
+        if headless:
+            driver.set_window_size(1920, 1080)
+        else:
+            driver.maximize_window()
+    except Exception:  # noqa: BLE001 -- a window size is never worth a failed launch
+        pass
+
+
 class SeleniumBackend:
     def launch(
         self,
@@ -224,6 +240,8 @@ class SeleniumBackend:
             remote_url=remote_url,
             debugger_address=debugger_address,
         )
+        if debugger_address is None:  # a browser we attached to keeps the size it had
+            _size_window(driver, headless=headless)
         return SeleniumBrowserDelegate(
             driver,
             profile_dir,

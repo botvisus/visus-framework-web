@@ -241,6 +241,7 @@ class Page:
         kinds: list[str] | None = None,
         include_hidden: bool = False,
         highlight: bool = True,
+        clickables: bool = False,
     ) -> list[Field]:
         """Enumerate RPA-relevant interactive fields on the current page.
 
@@ -249,9 +250,11 @@ class Page:
         visible, enabled fields are returned and a numbered overlay is drawn (a no-op
         in headless); pass ``highlight=False`` to skip drawing, ``include_hidden=True``
         to also return hidden/disabled fields, or ``kinds=[...]`` to filter by kind.
+        ``clickables=True`` also lists elements only a click handler makes interactive
+        (a React menu item, a calendar day), as kind ``"clickable"``.
         """
         fields = self._delegate.list_fields(
-            kinds=kinds, include_hidden=include_hidden, highlight=highlight
+            kinds=kinds, include_hidden=include_hidden, highlight=highlight, clickables=clickables
         )
         self._last_fields = list(fields)  # cached for field(index)
         return fields

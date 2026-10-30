@@ -200,6 +200,7 @@ def browser_list_fields(
     kind: str | None = None,
     include_hidden: bool = False,
     highlight: bool = False,
+    clickables: bool = True,
 ) -> list[dict]:  # type: ignore[type-arg]
     """List all RPA-relevant interactive fields on the current page.
 
@@ -217,18 +218,21 @@ def browser_list_fields(
     kind is an optional comma-separated filter (e.g. "button,input") restricting
     the result to those kinds; omit it to list every kind. include_hidden also
     returns hidden/disabled fields (flagged). highlight draws the numbered
-    overlay on the page (default off; a no-op when headless).
+    overlay on the page (default off; a no-op when headless). clickables (default on)
+    also lists elements only a click handler makes interactive — a menu item, a
+    calendar day — as kind "clickable".
     """
     parsed = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
     args: dict[str, Any] = {
         "kinds": parsed,
         "include_hidden": include_hidden,
         "highlight": highlight,
+        "clickables": clickables,
     }
 
     def _local() -> dict[str, Any]:
         fields = _session.page().list_fields(
-            kinds=parsed, include_hidden=include_hidden, highlight=highlight
+            kinds=parsed, include_hidden=include_hidden, highlight=highlight, clickables=clickables
         )
         _session.cache_fields(fields)  # so the action tools can target by `index`
         return {"fields": [f.to_dict() for f in fields]}
@@ -581,6 +585,47 @@ def browser_select_option(
     args["value"] = value
     env = _run("select", args, lambda: _session.target(args).select_option(value=value))
     return _acted(env, f"selected option {value!r}")
+
+
+@mcp.tool()
+def browser_pick_date(
+    start: str,
+    end: str | None = None,
+    index: int | None = None,
+    selector: str | None = None,
+    role: str | None = None,
+    name: str | None = None,
+    text: str | None = None,
+    exact: bool = False,
+    frame: str | None = None,
+    nth: int | None = None,
+) -> str:
+    """Pick a date (YYYY-MM-DD), or a range with ``end``, in any date field: a native date
+    input, a text field, or a calendar that opens on click — it steps through the months
+    with the arrows and clicks the day. Reads the field back and fails if it did not stick."""
+    from visus.web.ops import dates
+
+    args = _target_payload(
+        index=index,
+        selector=selector,
+        role=role,
+        name=name,
+        text=text,
+        exact=exact,
+        frame=frame,
+        nth=nth,
+    )
+    args["start"] = start
+    if end:
+        args["end"] = end
+
+    def _local() -> str:
+        first = dates.parse_iso(start)
+        last = dates.parse_iso(end) if end else None
+        return dates.pick_date(_session.page(), _session.target(args), first, last)
+
+    env = _run("pick_date", args, _local)
+    return _acted(env, str(env.get("result", "")))
 
 
 @mcp.tool()

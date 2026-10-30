@@ -102,4 +102,17 @@ def launch(
         remote_url=remote_url,
         debugger_address=debugger_address,
     )
-    return Browser(delegate, Defaults(slow_mo_ms=slow_mo))
+    return Browser(delegate, Defaults(slow_mo_ms=slow_mo, action_timeout_ms=_action_timeout_ms()))
+
+
+def _action_timeout_ms() -> int:
+    """``VISUS_ACTION_TIMEOUT_MS`` overrides the 30 s an action waits for its element: an
+    agent driving the CLI wants a wrong guess to fail in seconds, not in half a minute."""
+    import os
+
+    raw = os.environ.get("VISUS_ACTION_TIMEOUT_MS", "").strip()
+    try:
+        value = int(raw) if raw else Defaults.action_timeout_ms
+    except ValueError:
+        return Defaults.action_timeout_ms
+    return value if value > 0 else Defaults.action_timeout_ms

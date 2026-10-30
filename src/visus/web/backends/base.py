@@ -78,7 +78,12 @@ class PageDelegate(Protocol):
         self, *, selector: str | None, depth: int | None
     ) -> list[dict]: ...  # type: ignore[type-arg]
     def list_fields(
-        self, *, kinds: list[str] | None, include_hidden: bool, highlight: bool
+        self,
+        *,
+        kinds: list[str] | None,
+        include_hidden: bool,
+        highlight: bool,
+        clickables: bool = False,
     ) -> list[Field]: ...
     def clear_highlights(self) -> None: ...
     def pdf(self) -> bytes: ...

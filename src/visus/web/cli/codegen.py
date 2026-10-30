@@ -140,6 +140,9 @@ def generate_line(event: dict) -> str:  # type: ignore[type-arg]
         return f"{expr}.select_option(value={event.get('value', '')!r})"
     if action == "set_input_files":
         return f"{expr}.set_input_files({event.get('value', [])!r})"
+    if action == "pick_date":
+        dates = [repr(d) for d in event.get("value") or () if d]
+        return f"{expr}.pick_date({', '.join(dates)})"
     return f"# unsupported: {action}"
 
 

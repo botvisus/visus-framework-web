@@ -49,6 +49,7 @@ _EXPECTED_TOOLS = [
     "browser_check",
     "browser_uncheck",
     "browser_select_option",
+    "browser_pick_date",
     "browser_drag",
     "browser_focus",
     "browser_clear",
@@ -187,5 +188,5 @@ async def test_skill_resource_and_prompt_are_registered() -> None:
 
 
 def test_registering_the_skill_did_not_change_the_tool_count() -> None:
-    assert len(_get_tool_names()) == 52
+    assert len(_get_tool_names()) == 53
 

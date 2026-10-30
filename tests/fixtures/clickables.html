@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clickables</title>
+<style>
+  .item { cursor: pointer; padding: 4px; }
+  .card { cursor: pointer; padding: 8px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<!-- um menu de app React: div com onClick por delegação, só o cursor diz que é clicável -->
+<div id="menu">
+  <div class="item" id="m1">Daily Production Plan</div>
+  <div class="item" id="m2"><span>Weekly</span> <b>Plan</b></div>
+  <ul><li onclick="pick('order')">Order Status</li></ul>
+  <span tabindex="0" id="tab">Tab Stop</span>
+  <div class="card" id="card"><button id="real">Real Button</button> and some text</div>
+  <div class="item" id="icon"><svg width="12" height="12"><circle cx="6" cy="6" r="5"></circle></svg></div>
+  <div class="item" style="display:none">Hidden Item</div>
+  <p>Plain text, not clickable</p>
+</div>
+<p id="out"></p>
+<script>
+  function pick(v) { document.getElementById("out").textContent = "picked:" + v; }
+  document.getElementById("menu").addEventListener("click", (e) => {
+    const item = e.target.closest(".item");
+    if (item && item.id === "m1") pick("daily");
+    if (item && item.id === "m2") pick("weekly");
+  });
+</script>
+</body>
+</html>

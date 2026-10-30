@@ -692,7 +692,12 @@ class SeleniumPageDelegate:
         )
 
     def list_fields(
-        self, *, kinds: list[str] | None, include_hidden: bool, highlight: bool
+        self,
+        *,
+        kinds: list[str] | None,
+        include_hidden: bool,
+        highlight: bool,
+        clickables: bool = False,
     ) -> list[Field]:
         """Enumerate interactive fields via the bundle; optionally draw the overlay."""
         from visus.web.api.fields import Field
@@ -703,7 +708,7 @@ class SeleniumPageDelegate:
             list[dict[str, object]],
             self._driver.execute_script(
                 "return window.__visus.listFields(arguments[0]);",
-                {"kinds": kinds, "includeHidden": include_hidden},
+                {"kinds": kinds, "includeHidden": include_hidden, "clickables": clickables},
             ),
         )
         if highlight:

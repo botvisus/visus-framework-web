@@ -173,7 +173,12 @@ class _BoxPage:
         return "box fixture"
 
     def list_fields(
-        self, *, kinds: Any = None, include_hidden: bool = False, highlight: bool = True
+        self,
+        *,
+        kinds: Any = None,
+        include_hidden: bool = False,
+        highlight: bool = True,
+        clickables: bool = False,
     ) -> list[Field]:
         return [_field(0, "Go", {"x": 1.0, "y": 2.0, "width": 30.0, "height": 12.0})]
 

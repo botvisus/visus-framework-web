@@ -29,7 +29,7 @@ import sys
 import webbrowser
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING
@@ -563,12 +563,16 @@ class AsyncPage:
         kinds: list[str] | None = None,
         include_hidden: bool = False,
         highlight: bool = True,
+        clickables: bool = False,
     ) -> list[Field]:
         """Enumerate RPA-relevant interactive fields on the current page (draws the
         numbered overlay unless ``highlight=False``)."""
         return await asyncio.to_thread(
             lambda: self._p.list_fields(
-                kinds=kinds, include_hidden=include_hidden, highlight=highlight
+                kinds=kinds,
+                include_hidden=include_hidden,
+                highlight=highlight,
+                clickables=clickables,
             )
         )
 
@@ -1100,6 +1104,10 @@ class AsyncLocator:
                 value=value, label=label, index=index, timeout=timeout, backtrack=backtrack
             )
         )
+
+    async def pick_date(self, start: date | str, end: date | str | None = None) -> str:
+        """Async :meth:`visus.web.api.locator.Locator.pick_date`."""
+        return await asyncio.to_thread(lambda: self._loc.pick_date(start, end))
 
     async def drag_to(
         self, target: AsyncLocator, *, timeout: int | None = None, backtrack: bool | int = False

@@ -132,7 +132,7 @@ When something goes wrong: **[references/troubleshooting.md](references/troubles
 | You are | Use | Why |
 |---|---|---|
 | A coding agent with shell access | **the `visus` CLI** | Cheapest tokens: no tool schemas, one line per action, numbered indexes instead of an accessibility dump. This is the default. |
-| An MCP client without shell access | **`visus-web-mcp`** | **52 tools** over the same browser surface. Its browser is a *separate* process from the CLI daemon **by default**. Call `browser_attach_session` to drive the daemon's browser instead — then the model and the human share one page, one session and one field-index vocabulary. `browser_detach_session` goes back to the server's own browser. |
+| An MCP client without shell access | **`visus-web-mcp`** | **53 tools** over the same browser surface. Its browser is a *separate* process from the CLI daemon **by default**. Call `browser_attach_session` to drive the daemon's browser instead — then the model and the human share one page, one session and one field-index vocabulary. `browser_detach_session` goes back to the server's own browser. |
 | Writing a durable script or a test | **the Python library** | `from visus.web import launch, rpa, expect`. Auto-waiting actions, auto-retrying assertions, HTML run reports. |
 
 The CLI daemon and the MCP server hold **independent** browsers with opposite
@@ -141,7 +141,7 @@ follow). Pick one per task.
 
 ## Commands
 
-**106 commands** total (87 top-level plus the `session`, `storage`, `network`
+**107 commands** total (88 top-level plus the `session`, `storage`, `network`
 and `route` groups), covering the persistent-session daemon, request mocking,
 vision targeting, one-off screenshot/pdf/codegen helpers, and `install-skills`.
 The complete reference — targeting rules, every flag, grouped by task — is
@@ -156,6 +156,7 @@ visus snapshot ["#main"] [--depth N]     # REF/role/name table; REF is a list-fi
 visus click|dblclick|hover|focus|check|uncheck <target>   # "#css" | //xpath | text=… | idx
 visus fill <target> <text>               # also: -s "#user" --value text
 visus select <target> <value> | visus press <target> Enter | visus clear-input <target>
+visus pick-date <target> 2026-11-02 [2026-11-06]   # any date field or calendar popup
 visus get-text|get-attribute <attr>|count <target>
 visus <any of the above> --nth 0         # when a target matches several elements
 visus title | visus url | visus tabs | visus tab <idx>
@@ -213,7 +214,7 @@ browser's console messages, which are `visus logs`.)
 
 ## MCP server
 
-`visus-web-mcp` (or `visus mcp`) exposes **52 tools** — navigation, ARIA
+`visus-web-mcp` (or `visus mcp`) exposes **53 tools** — navigation, ARIA
 snapshot, `browser_list_fields`, every action, tabs, dialogs, cookies,
 network/console capture, screenshot, evaluate, and the vision tools. Configure
 with `VISUS_WEB_ENGINE` (chrome | edge | firefox | edge_ie) and

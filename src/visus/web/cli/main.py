@@ -562,7 +562,9 @@ def page_text(
     max_chars: int = typer.Option(6000, "--max-chars", help="Cut the text after this many characters."),
 ) -> None:
     """Print the page's visible text (no JavaScript eval)."""
-    content = str(_send("get_text", _target_args(None, "body", None, None, None)) or "")
+    args = _target_args(None, "body", None, None, None)
+    args["visible"] = True
+    content = _render_value(_send("get_text", args))
     if len(content) > max_chars:
         content = f"{content[:max_chars]}\n… {len(content) - max_chars} more characters"
     output.emit({"text": content}, table=content)
@@ -713,7 +715,14 @@ def _send_env(op: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
     if output.snapshot_sink():
         payload["snapshot"] = True
     try:
-        return session_client.send_envelope(op, payload)
+        env = session_client.send_envelope(op, payload)
+        # Dentro de um batch a página sai UMA vez, no fim: o "### Page" de cada ação
+        # só repetiria URL e título (e o agente paga por cada linha). Um diálogo
+        # aberto continua aparecendo — é o que o agente tem de tratar.
+        page = env.get("page")
+        if _IN_BATCH and isinstance(page, dict) and page.get("dialog") is None:
+            env.pop("page", None)
+        return env
     except session_client.SessionError as exc:
         output.emit_error(f"error: {exc}")
     except _json.JSONDecodeError as exc:
@@ -730,7 +739,7 @@ _IN_BATCH = False
 _PAGE_CHANGING = frozenset({
     "click", "dblclick", "hover", "check", "uncheck", "clear-input", "fill", "type",
     "press", "select", "upload", "drag", "goto", "open", "back", "forward", "reload",
-    "tab", "tab-new", "tab-close", "tab-activate", "dialog",
+    "tab", "tab-new", "tab-close", "tab-activate", "dialog", "pick-date",
 })
 
 _BATCH_USAGE = (
@@ -1289,6 +1298,12 @@ def list_fields(
     dom: bool = typer.Option(
         False, "--dom", help="With --compact: also each element's opening tag (id, class, name…)."
     ),
+    clickables: bool = typer.Option(
+        True,
+        "--clickables/--no-clickables",
+        help="Also list elements only a click handler makes interactive (a menu item, a "
+        "calendar day) as kind `clickable`. On by default.",
+    ),
 ) -> None:
     """Enumerate interactive fields on the current page (numbered, highlighted)."""
     kinds = [k.strip() for k in kind.split(",") if k.strip()] if kind else None
@@ -1302,6 +1317,7 @@ def list_fields(
             "include_hidden": show_all,
             "highlight": highlight,
             "boxes": boxes,
+            "clickables": clickables,
         },
     )
     fields = result.get("fields", [])
@@ -1401,6 +1417,40 @@ def fill(
     if submit:
         args["submit"] = True  # only sent when asked, so the payload stays minimal
     output.emit_envelope(_send_env("fill", args))
+
+
+@app.command("pick-date")
+def pick_date(
+    target: str = typer.Argument(
+        ..., help="Field index from the last list-fields (a plain number), or a selector."
+    ),
+    start: str = typer.Argument(..., help="The date, YYYY-MM-DD (the start of a range)."),
+    end: str = typer.Argument(
+        None, help="The end of a range, YYYY-MM-DD — for a field like `10/23/2026 ~ 11/6/2026`."
+    ),
+    frame: str = _FRAME_OPT,
+) -> None:
+    """Pick a date or a range in any date field: `visus pick-date 5 2026-11-02 2026-11-06`.
+
+    Works on a native date input, on a text field (typed in the format it already
+    shows) and on a calendar that only opens on click — it steps through the months
+    with the arrows and clicks the day in the right month, never a greyed day of the
+    month next to it. Reads the field back: a date that did not stick is an error.
+    """
+    from visus.web.ops.dates import parse_iso
+
+    for value in (start, end):
+        if value is not None:
+            try:
+                parse_iso(value)
+            except ValueError as exc:
+                output.emit_error(f"error: {exc}", code=2)
+    index, selector = _positional(target, None)
+    args = _target_args(index, selector, None, None, None, frame=frame)
+    args["start"] = start
+    if end:
+        args["end"] = end
+    output.emit_envelope(_send_env("pick_date", args))
 
 
 @app.command()
@@ -1616,10 +1666,17 @@ def get_text(
     exact: bool = _EXACT_OPT,
     frame: str = _FRAME_OPT,
     nth: int = _NTH_OPT,
+    visible: bool = typer.Option(
+        False,
+        "--visible",
+        help="Only the text that shows on screen (no hidden rows, no <script> code).",
+    ),
 ) -> None:
     """Print a field's text content."""
     index, sel = _positional(target, selector)
     args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
+    if visible:
+        args["visible"] = True
     result = _send("get_text", args)
     output.emit(result, table=_render_value(result))
 

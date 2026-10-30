@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Duplicates</title></head>
+<body>
+<!-- um grupo de radios com o MESMO name (o normal num formulário) -->
+<label><input type="radio" name="lang" value="Any" checked> Any</label>
+<label><input type="radio" name="lang" value="Java"> Java</label>
+<label><input type="radio" name="lang" value="Python"> Python</label>
+<!-- ids repetidos (acontece em sites de verdade) -->
+<div id="row1"><button id="edit_btn" onclick="hit('row1')">Edit</button></div>
+<div id="row2"><button id="edit_btn" onclick="hit('row2')">Edit 2</button></div>
+<!-- mesma classe, sem id nem name -->
+<button class="btn" onclick="hit('a')">Alpha</button>
+<button class="btn" onclick="hit('b')">Beta</button>
+<p id="out"></p>
+<script>function hit(v) { document.getElementById("out").textContent = "hit:" + v; }</script>
+</body>
+</html>

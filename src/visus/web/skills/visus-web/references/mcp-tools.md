@@ -43,7 +43,7 @@ template `visus://skill/references/{name}`, and the prompt
 |---|---|
 | Navigation | `browser_navigate`, `browser_navigate_back`, `browser_navigate_forward`, `browser_reload` |
 | Inspect | `browser_snapshot`, `browser_list_fields`, `browser_clear_highlights`, `browser_translate_element`, `browser_title`, `browser_url`, `browser_get_text`, `browser_get_attribute`, `browser_count` |
-| Actions | `browser_click`, `browser_dblclick`, `browser_fill`, `browser_press`, `browser_hover`, `browser_check`, `browser_uncheck`, `browser_select_option`, `browser_drag`, `browser_focus`, `browser_clear`, `browser_set_input_files` |
+| Actions | `browser_click`, `browser_dblclick`, `browser_fill`, `browser_press`, `browser_hover`, `browser_check`, `browser_uncheck`, `browser_select_option`, `browser_pick_date`, `browser_drag`, `browser_focus`, `browser_clear`, `browser_set_input_files` |
 | Wait / expect | `browser_wait_for`, `browser_expect_text` |
 | Tabs | `browser_tab_list`, `browser_tab_new`, `browser_tab_select`, `browser_tab_activate`, `browser_tab_close`, `browser_set_tab_follow` |
 | Dialogs | `browser_handle_dialog` |

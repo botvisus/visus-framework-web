@@ -555,6 +555,44 @@
     return false;
   }
 
+  // An element that only a click handler makes interactive: a React/Vue menu item, a
+  // calendar day, a card — no role, no href, invisible to isFieldCandidate. Signals: an
+  // inline handler, a tabindex >= 0, or being the ROOT of a cursor:pointer region (the
+  // cursor is inherited, so only the outermost pointer element counts). It must carry a
+  // name (short own text, aria-label or title) and must not wrap or sit inside a real
+  // control — that control is listed instead, so nothing appears twice.
+  var CONTROL_SELECTOR = "a[href],button,input,select,textarea,[role=button],[role=link]," +
+    "[role=menuitem],[role=option],[role=tab],[role=checkbox],[role=radio],[contenteditable=true]";
+  function clickText(el) {
+    var t = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!t) t = (el.getAttribute("aria-label") || el.getAttribute("title") || "").trim();
+    return t;
+  }
+  function isClickableCandidate(el) {
+    var tag = el.tagName.toLowerCase();
+    if (tag === "html" || tag === "body" || tag === "label" || tag === "option") return false;
+    if (el.ownerSVGElement) return false;  // the parts of an icon: the icon's box is listed
+    var handler = el.hasAttribute("onclick");
+    var ti = el.getAttribute("tabindex");
+    if (ti !== null && ti !== "" && parseInt(ti, 10) >= 0) handler = true;
+    if (!handler) {
+      var cs;
+      try { cs = getComputedStyle(el); } catch (e) { return false; }
+      if (cs.cursor !== "pointer") return false;
+      var p = el.parentElement;
+      if (p) {
+        try { if (getComputedStyle(p).cursor === "pointer") return false; } catch (e2) { /* keep */ }
+      }
+    }
+    var name = clickText(el);
+    if (!name || name.length > 80) return false;
+    if (el.querySelector && el.querySelector(CONTROL_SELECTOR)) return false;
+    if (el.parentElement && el.parentElement.closest && el.parentElement.closest(CONTROL_SELECTOR)) {
+      return false;
+    }
+    return true;
+  }
+
   // The element's opening tag as it is in the DOM — id, class, name, type, href… —
   // so whoever reads the field list (an AI agent, a codegen) can pick an #id, a
   // .class or an attribute for a selector. Styles and on* handlers are noise there;
@@ -576,30 +614,68 @@
   // the _htmlsel.py ranking: id -> testid -> name -> aria-label -> role+name ->
   // minimal CSS -> smart. `deep` marks shadow-DOM css steps so the resolver pierces.
   var TEST_HOOKS = ["data-testid", "data-test", "data-test-id", "data-qa", "data-cy"];
+  // A candidate is only good if it names THIS element alone: a radio group shares its
+  // `name`, real sites repeat ids, a table has nine "View" links. A non-unique
+  // locator made an action by number hit the FIRST match, and the generated code too.
+  function uniqueIn(el, css) {
+    try {
+      var root = (el.getRootNode && el.getRootNode()) || document;
+      var found = root.querySelectorAll(css);
+      return found.length === 1 && found[0] === el;
+    } catch (e) {
+      return false;
+    }
+  }
+  var ROLE_CANDIDATES = "a,button,input,select,textarea,summary,[role],[tabindex]";
+  function roleNameUnique(el, role, nm) {
+    var root = (el.getRootNode && el.getRootNode()) || document, list, i, same = 0;
+    try { list = root.querySelectorAll(ROLE_CANDIDATES); } catch (e) { return false; }
+    for (i = 0; i < list.length; i++) {
+      if (computeRole(list[i]) === role && accessibleName(list[i]) === nm) {
+        same++;
+        if (same > 1) return false;
+      }
+    }
+    return same === 1;
+  }
   function bestLocator(el, deep) {
     var tag = el.tagName.toLowerCase();
-    var k, v, css = null, kind = null;
+    var k, v, cand, css = null, kind = null;
     var id = el.getAttribute && el.getAttribute("id");
-    if (id) { css = "#" + cssEscape(id); kind = "css"; }
+    if (id && uniqueIn(el, "#" + cssEscape(id))) { css = "#" + cssEscape(id); kind = "css"; }
     if (css === null) {
       for (k = 0; k < TEST_HOOKS.length; k++) {
         v = el.getAttribute && el.getAttribute(TEST_HOOKS[k]);
-        if (v) { css = "[" + TEST_HOOKS[k] + '="' + cssAttrValue(v) + '"]'; kind = "testid"; break; }
+        cand = v ? "[" + TEST_HOOKS[k] + '="' + cssAttrValue(v) + '"]' : null;
+        if (cand && uniqueIn(el, cand)) { css = cand; kind = "testid"; break; }
       }
     }
     if (css === null) {
       v = el.getAttribute && el.getAttribute("name");
-      if (v) { css = tag + '[name="' + cssAttrValue(v) + '"]'; kind = "name"; }
+      if (v) {
+        cand = tag + '[name="' + cssAttrValue(v) + '"]';
+        if (uniqueIn(el, cand)) {
+          css = cand; kind = "name";
+        } else {
+          // a radio/checkbox group shares its name: the value tells them apart
+          var val = el.getAttribute && el.getAttribute("value");
+          if (val) {
+            cand += '[value="' + cssAttrValue(val) + '"]';
+            if (uniqueIn(el, cand)) { css = cand; kind = "name"; }
+          }
+        }
+      }
     }
     if (css === null) {
       v = el.getAttribute && el.getAttribute("aria-label");
-      if (v && v.trim()) { css = '[aria-label="' + cssAttrValue(v) + '"]'; kind = "label"; }
+      cand = v && v.trim() ? '[aria-label="' + cssAttrValue(v) + '"]' : null;
+      if (cand && uniqueIn(el, cand)) { css = cand; kind = "label"; }
     }
     if (css === null) {
       // role + accessible-name (expressed as a role step the engine understands)
       var role = computeRole(el);
       var nm = accessibleName(el);
-      if (role && nm) {
+      if (role && nm && roleNameUnique(el, role, nm)) {
         return {
           steps: [{ kind: "role", role: role, name: nm, exact: true }],
           locator: "role=" + role + "[name=\"" + nm + "\"]",
@@ -614,7 +690,12 @@
       for (c = 0; c < classes.length; c++) {
         if (classes[c]) sel += "." + cssEscape(classes[c]);
       }
-      if (sel !== tag) { css = sel; kind = "css"; }
+      if (sel !== tag && uniqueIn(el, sel)) { css = sel; kind = "css"; }
+    }
+    if (css === null) {
+      // nothing above names it alone: its exact path in its own root does
+      var path = cssPath(el);
+      if (path && uniqueIn(el, path)) { css = path; kind = "css"; }
     }
     if (css === null) {
       // smart fallback: a couple of identifying attributes, else bare tag
@@ -639,15 +720,25 @@
   // A resolvable CSS selector path for `el` within its OWN root (document, open
   // shadow root, or iframe document). Prefers an #id anchor; else an
   // :nth-of-type path up to the nearest ancestor id / root.
+  // An id is an anchor only when it is the page's only one: real sites repeat ids, and
+  // an anchor on a repeated id points at the first copy, not at this element.
+  function idUnique(node, id) {
+    try {
+      var root = (node.getRootNode && node.getRootNode()) || document;
+      return root.querySelectorAll('[id="' + cssAttrValue(id) + '"]').length === 1;
+    } catch (e) {
+      return false;
+    }
+  }
   function cssPath(el) {
     if (!el || el.nodeType !== 1) return "";
     var id = el.getAttribute && el.getAttribute("id");
-    if (id) return "#" + cssEscape(id);
+    if (id && idUnique(el, id)) return "#" + cssEscape(id);
     var parts = [], node = el, seg, pid, parent, s, sib, sameTag, idx;
     while (node && node.nodeType === 1) {
       seg = node.tagName.toLowerCase();
       pid = node.getAttribute && node.getAttribute("id");
-      if (pid && node !== el) { parts.unshift("#" + cssEscape(pid)); break; }
+      if (pid && node !== el && idUnique(node, pid)) { parts.unshift("#" + cssEscape(pid)); break; }
       parent = node.parentNode;
       if (parent && parent.children && parent.children.length) {
         sameTag = 0; idx = 0;
@@ -672,7 +763,7 @@
   function xPath(el) {
     if (!el || el.nodeType !== 1) return "";
     var id = el.getAttribute && el.getAttribute("id");
-    if (id) return '//*[@id="' + id + '"]';
+    if (id && idUnique(el, id)) return '//*[@id="' + id + '"]';
     var parts = [], node = el, tag, parent, idx, count, s, sib;
     while (node && node.nodeType === 1) {
       tag = node.tagName.toLowerCase();
@@ -698,7 +789,7 @@
   // Depth-first collection of field descriptors across the main document, open
   // shadow roots, and same-origin iframes. `frameChain` is the CSS selector chain
   // of iframes traversed to reach `root`; `inShadow` marks shadow-DOM context.
-  function collectFields(root, frameChain, inShadow, includeHidden, kinds, acc) {
+  function collectFields(root, frameChain, inShadow, includeHidden, kinds, acc, clickables) {
     var all;
     try {
       all = root.querySelectorAll("*");
@@ -706,9 +797,10 @@
     var i, el, sr, kind, role, visible, disabled;
     for (i = 0; i < all.length; i++) {
       el = all[i];
-      if (isFieldCandidate(el)) {
+      var plain = isFieldCandidate(el);
+      if (plain || (clickables && isClickableCandidate(el))) {
         role = computeRole(el);
-        kind = fieldKind(el, role);
+        kind = plain ? fieldKind(el, role) : "clickable";
         // custom dropdown trigger overrides a generic role classification
         var hp = el.getAttribute && el.getAttribute("aria-haspopup");
         if (hp && HASPOPUP_DROPDOWN[hp.toLowerCase()]) kind = "dropdown";
@@ -729,7 +821,7 @@
                 tag: el.tagName.toLowerCase(),
                 type: type || null,
                 role: role || null,
-                name: accessibleName(el),
+                name: kind === "clickable" ? clickText(el) : accessibleName(el),
                 label: labelText(el) || null,
                 placeholder: (el.getAttribute && el.getAttribute("placeholder")) || null,
                 value: (typeof el.value === "string") ? el.value : null,
@@ -755,14 +847,14 @@
       }
       // recurse into an open shadow root (feature-detected)
       sr = el.shadowRoot;
-      if (sr) collectFields(sr, frameChain, true, includeHidden, kinds, acc);
+      if (sr) collectFields(sr, frameChain, true, includeHidden, kinds, acc, clickables);
       // recurse into same-origin iframes
       if (el.tagName === "IFRAME") {
         var doc = null;
         try { doc = el.contentDocument; } catch (xErr) { doc = null; }
         if (doc) {
           collectFields(doc, frameChain.concat([iframeSelector(el)]), inShadow,
-            includeHidden, kinds, acc);
+            includeHidden, kinds, acc, clickables);
         }
       }
     }
@@ -784,8 +876,9 @@
     opts = opts || {};
     var kinds = opts.kinds || null;
     var includeHidden = !!opts.includeHidden;
+    var clickables = !!opts.clickables;
     var acc = [];
-    collectFields(document, [], false, includeHidden, kinds, acc);
+    collectFields(document, [], false, includeHidden, kinds, acc, clickables);
     // dedup by element (most specific kind already chosen per element), assign indices
     var seen = [], out = [], i, item;
     for (i = 0; i < acc.length; i++) {

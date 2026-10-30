@@ -893,7 +893,7 @@ async def test_async_page_list_fields() -> None:
     result = await AsyncPage(p).list_fields(kinds=["input"], include_hidden=True, highlight=False)
     assert result is sentinel
     p.list_fields.assert_called_once_with(
-        kinds=["input"], include_hidden=True, highlight=False
+        kinds=["input"], include_hidden=True, highlight=False, clickables=False
     )
 
 

@@ -932,7 +932,19 @@ async def test_async_page_solve_captcha() -> None:
     target = AsyncLocator(target_loc)
     result = await AsyncPage(p).solve_captcha(target, preprocess=False)
     assert result == "AB12"
-    p.solve_captcha.assert_called_once_with(target_loc, preprocess=False)
+    p.solve_captcha.assert_called_once_with(
+        target_loc, preprocess=False, provider=None, api_key=None, timeout=None
+    )
+
+
+async def test_async_page_solve_captcha_sem_alvo_usa_o_servico() -> None:
+    p = _make_page()
+    p.solve_captcha.return_value = "solved"
+    result = await AsyncPage(p).solve_captcha(provider="2captcha", api_key="k", timeout=60)
+    assert result == "solved"
+    p.solve_captcha.assert_called_once_with(
+        None, preprocess=True, provider="2captcha", api_key="k", timeout=60
+    )
 
 
 # ---------------------------------------------------------------------------

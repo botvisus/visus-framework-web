@@ -227,7 +227,12 @@ prompt.
 
 ## Beyond the CLI
 
-- **Vision** (`[vision]`): `visus read-text`, `visus solve-captcha`,
+- **Captcha**: `visus solve-captcha` (no target) solves the page's reCAPTCHA,
+  Cloudflare Turnstile or hCaptcha with a captcha service — key in
+  `VISUS_CAPTCHA_KEY` (CapSolver; `VISUS_CAPTCHA_PROVIDER=2captcha` for 2Captcha) —
+  and applies the token; `page.solve_captcha()` in a script. Never click through
+  the picture challenges: without a key, ask a human to solve it.
+- **Vision** (`[vision]`): `visus read-text`, `visus solve-captcha <target>` (OCR),
   `visus find-image tmpl.png -c 0.8 --json` — OCR and OpenCV template matching.
   **[references/vision.md](references/vision.md)**
 - **Tracing & HTML reports**: `rpa("login")` records the run and writes a

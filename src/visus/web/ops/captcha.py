@@ -275,11 +275,12 @@ def request_token(
     info: CaptchaInfo,
     *,
     timeout: float = 120.0,
-    post: Post = _post,
+    post: Post | None = None,
     sleep: Callable[[float], Any] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str:
     """Pede o token ao serviço e espera por ele (``createTask`` e ``getTaskResult``)."""
+    post = post or _post  # lido na hora: um teste troca o _post do módulo
     base = PROVIDERS[provider]
     created = _checked(
         provider,
@@ -309,9 +310,10 @@ def request_token(
 
 
 def balance(
-    provider: str | None = None, api_key: str | None = None, *, post: Post = _post
+    provider: str | None = None, api_key: str | None = None, *, post: Post | None = None
 ) -> float:
     """O saldo da conta no serviço — também a forma de testar a chave."""
+    post = post or _post
     name = _provider(provider)
     key = api_key or os.environ.get("VISUS_CAPTCHA_KEY") or ""
     if not key:
@@ -336,7 +338,7 @@ def solve(
     provider: str | None = None,
     api_key: str | None = None,
     timeout: float | None = None,
-    post: Post = _post,
+    post: Post | None = None,
     sleep: Callable[[float], Any] = time.sleep,
 ) -> str:
     """Acha o captcha da página, resolve pelo serviço e aplica o token. Devolve o que fez."""

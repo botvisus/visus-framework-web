@@ -50,7 +50,8 @@ template `visus://skill/references/{name}`, and the prompt
 | Network / console *(Chromium)* | `browser_network_requests`, `browser_console_messages` |
 | Cookies | `browser_get_cookies`, `browser_add_cookies`, `browser_clear_cookies` |
 | Media / JS | `browser_screenshot`, `browser_evaluate` |
-| Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha`, `browser_find_image`, `browser_click_image`, `browser_click_ocr_text` — the last two PRESS a matched template or recognised text, for targets with no accessibility tree at all. |
+| Captcha | `browser_solve_captcha` with no target: reCAPTCHA/Turnstile/hCaptcha solved by a captcha service (key in `VISUS_CAPTCHA_KEY`, `provider` capsolver or 2captcha) and the token applied. |
+| Vision *(`[vision]`)* | `browser_read_text`, `browser_solve_captcha` (with a target: OCR), `browser_find_image`, `browser_click_image`, `browser_click_ocr_text` — the last two PRESS a matched template or recognised text, for targets with no accessibility tree at all. |
 | Tracing | `browser_tracing_start`, `browser_tracing_stop`, `browser_tracing_report` — record a run and write a SINGLE-FILE HTML report: every screenshot embedded as a data URI, a KPI band, per-step logs, and the ARIA snapshot on failure. Hand the path to your human; it needs no viewer. `report` works on any trace zip with no browser at all. The other two refuse while attached, because the actions would be happening in the daemon. |
 | Lifecycle | `browser_close` |
 | Attach | `browser_attach_session`, `browser_detach_session` |

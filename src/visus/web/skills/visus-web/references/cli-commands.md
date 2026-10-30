@@ -155,7 +155,8 @@ it needs chrome or edge; on Firefox, stub the API from the page with `page.add_i
 | `visus highlight [idx] [target] [--style <css>] [--hide]` | Box **one** element on the live page — what a human needs to see which element the agent chose. `--style` replaces the default border (e.g. `"2px dashed #0a0"`), `--hide` removes the box. Distinct from `visus clear`, which erases the numbered overlay. |
 | `visus resize <w> <h>` | Resize the window so the **viewport** is exactly w x h CSS pixels. Prints the size actually achieved, not the one requested: a window manager can clamp it (minimum widths, screen size), and echoing the request back would hide that. Use it to reproduce a width-specific layout bug, or to make screenshots deterministic across machines. |
 | `visus read-text [idx] [target]` *(`[vision]`)* | OCR an element's screenshot → recognized text. |
-| `visus solve-captcha [idx] [target]` *(`[vision]`)* | OCR-solve a text CAPTCHA. |
+| `visus solve-captcha [--provider capsolver\|2captcha]` | Solve the reCAPTCHA (v2/v3/Enterprise), Cloudflare Turnstile or hCaptcha on the page with a captcha service and apply the token (the widget's field, `getResponse`/`execute` and the page's callback) — then submit. The key comes from `VISUS_CAPTCHA_KEY` (CapSolver by default, the cheapest; `VISUS_CAPTCHA_PROVIDER=2captcha` also does hCaptcha), never from the command line. No captcha on the page: it only says so. Cloudflare's full-page check is waited out. Prints `page.solve_captcha()` for the script; in a `batch` the page's new list follows. |
+| `visus solve-captcha [idx] [target]` *(`[vision]`)* | OCR-solve a text CAPTCHA image. |
 | `visus find-image <template.png> [idx] [target] -c <conf> [--json]` *(`[vision]`)* | Find a template image inside the page/element. |
 
 ### Tooling

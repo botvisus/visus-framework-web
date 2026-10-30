@@ -2932,13 +2932,15 @@ def solve_captcha(
     text CAPTCHA image and print the text.
     """
     index, sel = _positional(target, selector)
-    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     if index is None and not any((sel, role, name, text)):
         # a chave vai ao daemon junto com o pedido — nunca pela linha de comando
-        args["provider"] = provider or os.environ.get("VISUS_CAPTCHA_PROVIDER") or None
-        args["api_key"] = os.environ.get("VISUS_CAPTCHA_KEY") or None
-        output.emit_envelope(_send_env("solve_captcha", args))
+        token_args = {
+            "provider": provider or os.environ.get("VISUS_CAPTCHA_PROVIDER") or None,
+            "api_key": os.environ.get("VISUS_CAPTCHA_KEY") or None,
+        }
+        output.emit_envelope(_send_env("solve_captcha", token_args))
         return
+    args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     output.emit(_send("solve_captcha", args))
 
 

@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+
+
+def in_container() -> bool:
+    """Linux dentro de um container (Docker, CI): o seccomp barra o sandbox do próprio
+    Chrome e o /dev/shm é pequeno. ``VISUS_CHROME_NO_SANDBOX=1`` força; ``=0`` desliga."""
+    forced = os.environ.get("VISUS_CHROME_NO_SANDBOX", "").strip()
+    if forced:
+        return forced not in ("0", "false", "False", "no")
+    return sys.platform.startswith("linux") and Path("/.dockerenv").exists()
 
 
 def build_options(
@@ -33,6 +44,10 @@ def build_options(
     opts.add_argument("--no-first-run")
     opts.add_argument("--no-default-browser-check")
     opts.add_argument("--disable-gpu")
+    if in_container():
+        # o container é o sandbox; e o /dev/shm de 64 MB derrubaria as abas pesadas
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
     opts.add_experimental_option(
         "prefs",
         {

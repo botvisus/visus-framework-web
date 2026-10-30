@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json as _json
+import os
 import runpy
 from pathlib import Path
 from typing import Any
@@ -340,9 +341,7 @@ def install(
 @app.command("install-skills")
 def install_skills_cmd(
     target: str = typer.Option("claude", "--target", help="claude | agents | both"),
-    force: bool = typer.Option(
-        False, "--force", help="Wipe the target directory before copying."
-    ),
+    force: bool = typer.Option(False, "--force", help="Wipe the target directory before copying."),
 ) -> None:
     """Install the bundled `visus-web` agent skill into this repository."""
     _install_skills(target, force=force)
@@ -443,9 +442,13 @@ def pdf(
 @app.command()
 def open(  # noqa: A001
     url: str = typer.Argument(..., help="URL to open."),
-    engine: str = typer.Option(None, "--engine", "-e", help="chrome | edge | firefox (new session only)."),
+    engine: str = typer.Option(
+        None, "--engine", "-e", help="chrome | edge | firefox (new session only)."
+    ),
     wait: bool = typer.Option(
-        False, "--wait", help="Old behaviour: a one-off headed browser, closed when you press Enter."
+        False,
+        "--wait",
+        help="Old behaviour: a one-off headed browser, closed when you press Enter.",
     ),
 ) -> None:
     """Open URL in the session (starting it if needed) and print the page, numbered.
@@ -478,7 +481,9 @@ def open(  # noqa: A001
 @app.command("batch")
 def batch(
     actions_json: str = typer.Argument(
-        ..., metavar="ACTIONS_JSON", help='JSON list of commands: [["fill","0","ada"],["click","2"]].'
+        ...,
+        metavar="ACTIONS_JSON",
+        help='JSON list of commands: [["fill","0","ada"],["click","2"]].',
     ),
 ) -> None:
     """Run several commands in one call, in order, stopping at the first failure.
@@ -516,7 +521,9 @@ def batch(
             except click.exceptions.Exit as exc:
                 if exc.exit_code:
                     failed = (n, action[0])
-            except click.ClickException as exc:  # uso errado: opção desconhecida, argumento faltando
+            except (
+                click.ClickException
+            ) as exc:  # uso errado: opção desconhecida, argumento faltando
                 exc.show()
                 failed = (n, action[0])
             if failed:
@@ -548,9 +555,15 @@ def downloads(as_json: bool = typer.Option(False, "--json", help="Emit JSON.")) 
 
 @app.command("wait-download")
 def wait_download(
-    timeout: int = typer.Option(30_000, "--timeout", help="Milliseconds to wait for the download to finish."),
-    last: bool = typer.Option(False, "--last", help="Take the newest completed download, even one already reported."),
-    save_to: str = typer.Option(None, "--save-to", help="Copy the file into this folder (it outlives the session)."),
+    timeout: int = typer.Option(
+        30_000, "--timeout", help="Milliseconds to wait for the download to finish."
+    ),
+    last: bool = typer.Option(
+        False, "--last", help="Take the newest completed download, even one already reported."
+    ),
+    save_to: str = typer.Option(
+        None, "--save-to", help="Copy the file into this folder (it outlives the session)."
+    ),
 ) -> None:
     """Wait for the next download to finish and print its path (after a `click` that downloads)."""
     result = _send("wait_download", {"timeout": timeout, "last": last, "save_to": save_to})
@@ -559,7 +572,9 @@ def wait_download(
 
 @app.command("text")
 def page_text(
-    max_chars: int = typer.Option(6000, "--max-chars", help="Cut the text after this many characters."),
+    max_chars: int = typer.Option(
+        6000, "--max-chars", help="Cut the text after this many characters."
+    ),
 ) -> None:
     """Print the page's visible text (no JavaScript eval)."""
     args = _target_args(None, "body", None, None, None)
@@ -665,9 +680,7 @@ def report(
     """Render a self-contained HTML report from a trace zip (no session needed)."""
     from visus.web import tracing
 
-    path = tracing.render_report(
-        str(Path(trace_zip).resolve()), str(Path(output_html).resolve())
-    )
+    path = tracing.render_report(str(Path(trace_zip).resolve()), str(Path(output_html).resolve()))
     output.emit(path, table=f"saved {path}")
 
 
@@ -736,14 +749,40 @@ _IN_BATCH = False
 
 # Commands after which the page may be a different one: a batch that ran any of
 # them ends with the page's new numbered list
-_PAGE_CHANGING = frozenset({
-    "click", "dblclick", "hover", "check", "uncheck", "clear-input", "fill", "type",
-    "press", "select", "upload", "drag", "goto", "open", "back", "forward", "reload",
-    "tab", "tab-new", "tab-close", "tab-activate", "dialog", "pick-date",
-})
+_PAGE_CHANGING = frozenset(
+    {
+        "click",
+        "dblclick",
+        "hover",
+        "check",
+        "uncheck",
+        "clear-input",
+        "fill",
+        "type",
+        "press",
+        "select",
+        "upload",
+        "drag",
+        "goto",
+        "open",
+        "back",
+        "forward",
+        "reload",
+        "tab",
+        "tab-new",
+        "tab-close",
+        "tab-activate",
+        "dialog",
+        "pick-date",
+        # o que apareceu depois de esperar é justamente o que o agente vai usar
+        "wait",
+        # o token pode enviar o formulário ou liberar o resto da página
+        "solve-captcha",
+    }
+)
 
 _BATCH_USAGE = (
-    'batch espera uma lista JSON de comandos, cada um uma lista de strings: '
+    "batch espera uma lista JSON de comandos, cada um uma lista de strings: "
     '[["fill","0","ada@empresa.com"],["fill","1","segredo"],["click","2"]]'
 )
 
@@ -768,9 +807,7 @@ def _emit_page(kinds: list[str] | None = None, *, dom: bool = False) -> None:
     )
 
 
-def _format_fields(
-    fields: list[dict[str, Any]], *, full: bool = False, boxes: bool = False
-) -> str:
+def _format_fields(fields: list[dict[str, Any]], *, full: bool = False, boxes: bool = False) -> str:
     from visus.web.cli.console import format_fields
 
     return format_fields(fields, full=full, boxes=boxes)
@@ -792,8 +829,7 @@ def _format_snapshot(elements: list[dict[str, Any]], *, boxes: bool = False) -> 
         table.add_column("BOX x,y,w,h", no_wrap=True)
     for e in elements:
         ref = e.get("ref")
-        cells = ["-" if ref is None else str(ref), str(e.get("role", "")),
-                 str(e.get("name", ""))]
+        cells = ["-" if ref is None else str(ref), str(e.get("role", "")), str(e.get("name", ""))]
         if boxes:
             cells.append(_box_cell(e.get("box")))
         table.add_row(*cells)
@@ -808,8 +844,10 @@ def _format_find(result: dict[str, Any]) -> str:
     rows = result.get("rows", [])
     if not rows:
         return f"no match for {result.get('query', '')!r} in {result.get('total', 0)} rows"
-    lines = [f"{result.get('matched', 0)} of {result.get('total', 0)} rows "
-             f"match {result.get('query', '')!r}"]
+    lines = [
+        f"{result.get('matched', 0)} of {result.get('total', 0)} rows "
+        f"match {result.get('query', '')!r}"
+    ]
     prev: int | None = None
     for r in rows:
         if prev is not None and r["line"] != prev + 1:
@@ -859,6 +897,8 @@ def _use_session(name: str | None) -> None:
         session_client.set_session_name(name)
     except session_client.SessionError as exc:
         output.emit_error(f"error: {exc}")
+
+
 _BUTTON_OPT = typer.Option(
     "left", "--button", "-b", help="Mouse button: left (default), middle or right."
 )
@@ -1140,9 +1180,7 @@ def session_attach(
             "exposes the Chrome DevTools Protocol"
         )
     try:
-        info = session_client.start_daemon(
-            engine, False, url, debugger_address=_cdp_address(cdp)
-        )
+        info = session_client.start_daemon(engine, False, url, debugger_address=_cdp_address(cdp))
     except session_client.SessionError as exc:
         output.emit_error(str(exc))
     output.emit(
@@ -1189,8 +1227,17 @@ def session_status(
     info = session_client.status()
     if info is None:
         output.emit_error("no session running")
-    keys = ("pid", "port", "engine", "headless", "url", "title", "windows", "active_tab",
-            "fields_cached")
+    keys = (
+        "pid",
+        "port",
+        "engine",
+        "headless",
+        "url",
+        "title",
+        "windows",
+        "active_tab",
+        "fields_cached",
+    )
     output.emit(
         info,
         table="\n".join(f"{k:14}: {info[k]}" for k in keys if k in info),
@@ -1356,8 +1403,7 @@ def click(
         env = _send_env("click_ocr_text", ocr_args)
         r = env["result"]
         message = (
-            f"clicked text {r['text']!r} at ({r['x']}, {r['y']}) "
-            f"confidence={r['confidence']:.3f}"
+            f"clicked text {r['text']!r} at ({r['x']}, {r['y']}) confidence={r['confidence']:.3f}"
         )
         output.emit_envelope({**env, "result": message})
         return
@@ -2236,13 +2282,17 @@ def wait(
     frame: str = _FRAME_OPT,
     nth: int = _NTH_OPT,
 ) -> None:
-    """Wait for an element to reach a state (visible/hidden)."""
+    """Wait for an element to reach a state (visible/hidden) — never sleep.
+
+    Not sure of the selector yet? Wait for the words it will show: --text "Saved".
+    """
     index, sel = _positional(target, selector)
     args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
     args["state"] = state
     if timeout is not None:
         args["timeout"] = timeout
-    output.emit(_send("wait", args))
+    # o envelope traz a linha de código (### Code); num batch a lista nova vem no fim
+    output.emit_envelope(_send_env("wait", args))
 
 
 @app.command("expect-text")
@@ -2438,7 +2488,9 @@ def cookie_delete(
 
 @app.command("add-cookies")
 def add_cookies(
-    cookies_json: str = typer.Argument(..., help='JSON list, e.g. \'[{"name":"a","value":"b","url":"http://x"}]\'.'),
+    cookies_json: str = typer.Argument(
+        ..., help='JSON list, e.g. \'[{"name":"a","value":"b","url":"http://x"}]\'.'
+    ),
 ) -> None:
     """Add cookies from a JSON list to the session's context."""
     try:
@@ -2537,8 +2589,7 @@ def state_save(
     output.emit(
         result,
         table=(
-            f"saved {result['path']} "
-            f"({result['cookies']} cookie(s), {result['origins']} origin(s))"
+            f"saved {result['path']} ({result['cookies']} cookie(s), {result['origins']} origin(s))"
         ),
     )
 
@@ -2807,9 +2858,7 @@ def request(
 # Full traffic capture (request bodies, JSONP, beacons, pixel pings)
 # ---------------------------------------------------------------------------
 
-network_app = typer.Typer(
-    help="Capture what the page itself sends (complements `visus requests`)."
-)
+network_app = typer.Typer(help="Capture what the page itself sends (complements `visus requests`).")
 app.add_typer(network_app, name="network")
 
 
@@ -2862,6 +2911,11 @@ def read_text(
 @app.command("solve-captcha")
 def solve_captcha(
     target: str = _TARGET_ARG,
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        help="capsolver (default) or 2captcha; the key comes from VISUS_CAPTCHA_KEY.",
+    ),
     selector: str = typer.Option(None, "--selector", "-s"),
     role: str = typer.Option(None, "--role"),
     name: str = typer.Option(None, "--name"),
@@ -2870,9 +2924,21 @@ def solve_captcha(
     frame: str = _FRAME_OPT,
     nth: int = _NTH_OPT,
 ) -> None:
-    """OCR-solve a text CAPTCHA in the targeted element and print the solution."""
+    """Solve the page's CAPTCHA.
+
+    With no target: the reCAPTCHA (v2/v3/Enterprise), Cloudflare Turnstile or hCaptcha on
+    the page is solved by a captcha service with the key in VISUS_CAPTCHA_KEY (CapSolver,
+    or VISUS_CAPTCHA_PROVIDER=2captcha) and the token applied. With a target: OCR the
+    text CAPTCHA image and print the text.
+    """
     index, sel = _positional(target, selector)
     args = _target_args(index, sel, role, name, text, exact=exact, frame=frame, nth=nth)
+    if index is None and not any((sel, role, name, text)):
+        # a chave vai ao daemon junto com o pedido — nunca pela linha de comando
+        args["provider"] = provider or os.environ.get("VISUS_CAPTCHA_PROVIDER") or None
+        args["api_key"] = os.environ.get("VISUS_CAPTCHA_KEY") or None
+        output.emit_envelope(_send_env("solve_captcha", args))
+        return
     output.emit(_send("solve_captcha", args))
 
 

@@ -223,9 +223,7 @@ class Page:
     def get_by_test_id(self, test_id: str) -> Locator:
         return Locator(self._delegate, (), self._defaults).get_by_test_id(test_id)
 
-    def snapshot(
-        self, selector: str | None = None, *, depth: int | None = None
-    ) -> list[dict]:  # type: ignore[type-arg]
+    def snapshot(self, selector: str | None = None, *, depth: int | None = None) -> list[dict]:  # type: ignore[type-arg]
         """Return the page's interactive elements as ``{role, name, depth}`` dicts.
 
         ``selector`` scopes the snapshot to one subtree (``page.snapshot("#main")``)
@@ -287,9 +285,7 @@ class Page:
         if not self._last_fields:
             raise RuntimeError("no fields cached — call page.list_fields() first")
         if not 0 <= index < len(self._last_fields):
-            raise IndexError(
-                f"field index {index} out of range (have {len(self._last_fields)})"
-            )
+            raise IndexError(f"field index {index} out of range (have {len(self._last_fields)})")
         return self.field_locator(self._last_fields[index])
 
     def fields_in_box(self, box: dict[str, float], *, contained: bool = False) -> list[Field]:
@@ -355,10 +351,42 @@ class Page:
         return data
 
     # --- vision hooks (lazy-import; requires [vision] extra) ---
-    def solve_captcha(self, locator: Locator, *, preprocess: bool = True) -> str:
-        from visus.web.vision import solve_captcha
+    def solve_captcha(
+        self,
+        locator: Locator | None = None,
+        *,
+        preprocess: bool = True,
+        provider: str | None = None,
+        api_key: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        """Solve the page's CAPTCHA.
 
-        return solve_captcha(locator.screenshot(), preprocess=preprocess)
+        Without *locator*: a reCAPTCHA (v2/v3/Enterprise), Cloudflare Turnstile or
+        hCaptcha on the page is solved by a captcha service — CapSolver by default, or
+        ``provider="2captcha"`` — with *api_key* (else ``VISUS_CAPTCHA_KEY``), and the
+        token is applied to the page. Returns what it did; with no captcha on the page it
+        only says so, so a script can call it where a captcha sometimes shows up.
+
+        With *locator*: OCR the text CAPTCHA image it points at and return the text
+        (requires the ``[vision]`` extra).
+        """
+        if locator is not None:
+            from visus.web.vision import solve_captcha
+
+            return solve_captcha(locator.screenshot(), preprocess=preprocess)
+        from visus.web.ops.captcha import solve
+
+        done: list[str] = []
+        run_step(
+            self._delegate,
+            lambda: done.append(solve(self, provider=provider, api_key=api_key, timeout=timeout)),
+            False,
+            slow_mo_ms=self._defaults.slow_mo_ms,
+            action_name="solve_captcha",
+            target=self.url,
+        )
+        return done[-1]
 
     @contextmanager
     def expect_popup(self, *, timeout: int | None = None) -> Generator[_ValueHolder, None, None]:
@@ -465,9 +493,7 @@ class Page:
             for m in self._delegate.console_messages()
         ]
 
-    def wait_for_response(
-        self, url_pattern: str, *, timeout: int | None = None
-    ) -> NetworkResponse:
+    def wait_for_response(self, url_pattern: str, *, timeout: int | None = None) -> NetworkResponse:
         """Wait for the next response whose URL matches *url_pattern* (glob like
         ``"*api/orders*"`` or plain substring). Chromium only."""
         rec = self._delegate.wait_for_response(
@@ -482,9 +508,9 @@ class Page:
     ) -> Generator[_ValueHolder, None, None]:
         """Context manager: run an action and capture the response it triggers::
 
-            with page.expect_response("*api/login*") as info:
-                page.get_by_role("button", name="Sign in").click()
-            assert info.value.ok
+        with page.expect_response("*api/login*") as info:
+            page.get_by_role("button", name="Sign in").click()
+        assert info.value.ok
         """
         marker = self._delegate.network_marker()
         holder: _ValueHolder = _ValueHolder()
@@ -506,9 +532,7 @@ class Page:
         """
         self._delegate.add_init_script(script)
 
-    def set_geolocation(
-        self, latitude: float, longitude: float, *, accuracy: float = 100
-    ) -> None:
+    def set_geolocation(self, latitude: float, longitude: float, *, accuracy: float = 100) -> None:
         """Override the device geolocation (Chromium only).
 
         Grant the permission first: ``page.grant_permissions(["geolocation"])``.

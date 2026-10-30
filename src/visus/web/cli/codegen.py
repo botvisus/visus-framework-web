@@ -143,6 +143,8 @@ def generate_line(event: dict) -> str:  # type: ignore[type-arg]
     if action == "pick_date":
         dates = [repr(d) for d in event.get("value") or () if d]
         return f"{expr}.pick_date({', '.join(dates)})"
+    if action == "wait_for":
+        return f"{expr}.wait_for(state={event.get('value') or 'visible'!r})"
     return f"# unsupported: {action}"
 
 

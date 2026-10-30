@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Captcha</title></head>
+<body>
+  <!-- O widget como o site o declara (sem o script do Google: o teste é offline) -->
+  <form id="login">
+    <input id="user" name="user" placeholder="User">
+    <div class="g-recaptcha" data-sitekey="6Le-test-v2-sitekey" data-callback="onCaptcha"></div>
+    <textarea id="g-recaptcha-response" name="g-recaptcha-response" style="display:none"></textarea>
+    <button id="send" type="button">Send</button>
+  </form>
+  <p id="status">waiting</p>
+  <script>
+    function onCaptcha(token) {
+      document.getElementById("status").textContent = "verified:" + token;
+    }
+  </script>
+</body></html>

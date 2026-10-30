@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Delayed</title></head>
+<body>
+  <h1>Rows</h1>
+  <button id="add" onclick="setTimeout(add, 1500)">Add</button>
+  <div id="rows"></div>
+  <p id="msg"></p>
+  <script>
+    function add() {
+      const input = document.createElement("input");
+      input.id = "row2"; input.placeholder = "Row 2";
+      document.getElementById("rows").appendChild(input);
+      document.getElementById("msg").textContent = "Row 2 was added";
+    }
+  </script>
+</body></html>

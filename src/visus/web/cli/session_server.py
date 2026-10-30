@@ -29,7 +29,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, cast
 
-from visus.web import Engine, errors, launch
+from visus.web import Engine, _action_timeout_ms, errors, launch
 from visus.web.api.assertions import expect
 from visus.web.api.browser import Browser
 from visus.web.api.context import Context
@@ -120,16 +120,50 @@ _DIALOG_SAFE_OPS: frozenset[str] = frozenset({"dialog", "shutdown", "status"})
 
 _MUTATING_OPS: frozenset[str] = frozenset(
     {
-        "click", "dblclick", "fill", "check", "uncheck", "select", "press",
-        "hover", "focus", "clear_input", "drag", "drop", "upload", "goto", "back",
-        "forward", "reload", "tab", "tab_new", "tab_close", "dialog",
-        "add_cookies", "clear_cookies", "eval", "route", "unroute", "run_code",
+        "click",
+        "dblclick",
+        "fill",
+        "check",
+        "uncheck",
+        "select",
+        "press",
+        "hover",
+        "focus",
+        "clear_input",
+        "drag",
+        "drop",
+        "upload",
+        "goto",
+        "back",
+        "forward",
+        "reload",
+        "tab",
+        "tab_new",
+        "tab_close",
+        "dialog",
+        "add_cookies",
+        "clear_cookies",
+        "eval",
+        "route",
+        "unroute",
+        "run_code",
         "state_load",
-        "type", "key_down", "key_up",
-        "mouse_move", "mouse_down", "mouse_up", "mouse_wheel", "resize",
-        "click_image", "click_ocr_text",
-        "storage_set", "storage_delete", "storage_clear",
-        "cookie_set", "cookie_delete",
+        "solve_captcha",
+        "type",
+        "key_down",
+        "key_up",
+        "mouse_move",
+        "mouse_down",
+        "mouse_up",
+        "mouse_wheel",
+        "resize",
+        "click_image",
+        "click_ocr_text",
+        "storage_set",
+        "storage_delete",
+        "storage_clear",
+        "cookie_set",
+        "cookie_delete",
         "pick_date",
     }
 )
@@ -550,6 +584,16 @@ class SessionHandler:
                     return None
                 dates = [args.get("start"), args.get("end")]
                 return generate_line({"action": "pick_date", "target": target, "value": dates})
+            if op == "solve_captcha":
+                # a chave fica fora: o script lê VISUS_CAPTCHA_KEY quando roda
+                return None if self._has_target(args) else "page.solve_captcha()"
+            if op == "wait":
+                # o script espera o mesmo que o agente esperou (e não um sleep chutado)
+                target = self._target_event(args)
+                if target is None:
+                    return None
+                state = args.get("state") or "visible"
+                return generate_line({"action": "wait_for", "target": target, "value": state})
             entry = _CODE_ACTIONS.get(op)
             if entry is None:
                 return None
@@ -832,9 +876,7 @@ class SessionHandler:
                 page.screenshot(path=path, full_page=bool(args.get("full_page")))
         finally:
             if size is not None:
-                page.set_device_metrics(
-                    int(size["w"]), int(size["h"]), device_scale_factor=1.0
-                )
+                page.set_device_metrics(int(size["w"]), int(size["h"]), device_scale_factor=1.0)
         return str(Path(path).resolve())
 
     def _op_pdf(self, args: dict[str, Any]) -> str:
@@ -1159,7 +1201,8 @@ class SessionHandler:
         state = args.get("state") or "visible"
         loc = self._target(args)
         timeout = args.get("timeout")
-        ms = 5000 if timeout is None else int(timeout)
+        # espera o quanto uma ação esperaria pelo seu elemento (VISUS_ACTION_TIMEOUT_MS)
+        ms = _action_timeout_ms() if timeout is None else int(timeout)
         want_visible = state != "hidden"
         deadline = time.monotonic() + ms / 1000.0
         while True:
@@ -1276,7 +1319,9 @@ class SessionHandler:
                     return f"{action} 'dialog' dialog: {msg!r}"
                 except Exception:  # noqa: BLE001 — NoAlertPresent: ainda não abriu
                     if time.monotonic() >= deadline:
-                        raise errors.VisusTimeoutError("no dialog appeared within 5000 ms") from None
+                        raise errors.VisusTimeoutError(
+                            "no dialog appeared within 5000 ms"
+                        ) from None
                     time.sleep(0.05)
         page = self.page()
         msg, typ = page._delegate.handle_next_dialog(
@@ -1302,7 +1347,14 @@ class SessionHandler:
             if name.endswith(self._PARTIAL_DOWNLOAD) or not os.path.isfile(path):
                 continue
             st = os.stat(path)
-            files.append({"name": name, "path": os.path.abspath(path), "size": st.st_size, "mtime": st.st_mtime})
+            files.append(
+                {
+                    "name": name,
+                    "path": os.path.abspath(path),
+                    "size": st.st_size,
+                    "mtime": st.st_mtime,
+                }
+            )
         files.sort(key=lambda f: f["mtime"], reverse=True)
         return files
 
@@ -1319,8 +1371,10 @@ class SessionHandler:
         deadline = time.monotonic() + timeout_ms / 1000
         while True:
             files = self._completed_downloads()
-            pick = files[0] if args.get("last") and files else next(
-                (f for f in files if f["path"] not in self._seen_downloads), None
+            pick = (
+                files[0]
+                if args.get("last") and files
+                else next((f for f in files if f["path"] not in self._seen_downloads), None)
             )
             if pick is not None:
                 break
@@ -1394,9 +1448,7 @@ class SessionHandler:
         keep = [
             c
             for c in cookies
-            if not _cookie_matches(
-                c, name=name, domain=args.get("domain"), path=args.get("path")
-            )
+            if not _cookie_matches(c, name=name, domain=args.get("domain"), path=args.get("path"))
         ]
         deleted = len(cookies) - len(keep)
         if deleted == 0:
@@ -1466,9 +1518,7 @@ class SessionHandler:
             str(pattern),
             status=None if args.get("status") is None else int(args["status"]),
             body=None if args.get("body") is None else str(args["body"]),
-            content_type=(
-                None if args.get("content_type") is None else str(args["content_type"])
-            ),
+            content_type=(None if args.get("content_type") is None else str(args["content_type"])),
             headers={str(k): str(v) for k, v in dict(headers).items()},
             abort=bool(args.get("abort", False)),
         )
@@ -1728,8 +1778,16 @@ class SessionHandler:
         return self._target(args).ocr_text()
 
     def _op_solve_captcha(self, args: dict[str, Any]) -> str:
-        loc = self._target(args)
-        return self.page().solve_captcha(loc)
+        # com alvo: o OCR de um captcha de texto; sem alvo: o reCAPTCHA/Turnstile/hCaptcha
+        # da página, pelo serviço da chave que o cliente mandou (nunca vai para log)
+        if self._has_target(args):
+            return self.page().solve_captcha(self._target(args))
+        timeout = args.get("timeout")
+        return self.page().solve_captcha(
+            provider=args.get("provider"),
+            api_key=args.get("api_key"),
+            timeout=None if timeout is None else float(timeout),
+        )
 
     def _op_find_image(self, args: dict[str, Any]) -> dict[str, Any]:
         import io
@@ -1742,8 +1800,11 @@ class SessionHandler:
         template_path = args.get("template_path", "")
         confidence = float(args.get("confidence", 0.8))
         page = self.page()
-        if args.get("selector") or args.get("role") or args.get("target_text") or (
-            args.get("index") is not None
+        if (
+            args.get("selector")
+            or args.get("role")
+            or args.get("target_text")
+            or (args.get("index") is not None)
         ):
             screenshot_bytes = self._target(args).screenshot()
         else:
@@ -1800,8 +1861,7 @@ class SessionHandler:
         match = find_image(shot, template_path, confidence=confidence)
         if match is None:
             raise LookupError(
-                f"template {template_path!r} not found on the page "
-                f"at confidence >= {confidence}"
+                f"template {template_path!r} not found on the page at confidence >= {confidence}"
             )
         ratio = self._device_pixel_ratio()
         x = origin_x + match.center_x / ratio
@@ -1972,9 +2032,7 @@ class SessionHandler:
                 info["title"] = p.title()
                 driver = self._driver()
                 handles = (
-                    list(driver.window_handles)
-                    if driver is not None
-                    else list(self._known_handles)
+                    list(driver.window_handles) if driver is not None else list(self._known_handles)
                 )
                 info["windows"] = len(handles)
                 active = self._peek_active(handles) if handles else None
@@ -2432,9 +2490,7 @@ def _make_logger(
     handler = RotatingFileHandler(
         log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
     )
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     logger.addHandler(handler)
     return logger
 
@@ -2460,7 +2516,11 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError:
         slow_mo = 0
     allow_run_code = os.environ.get("VISUS_WEB_ALLOW_RUN_CODE", "0") not in (
-        "0", "", "false", "False", "no"
+        "0",
+        "",
+        "false",
+        "False",
+        "no",
     )
     debugger_address = os.environ.get("VISUS_WEB_DEBUGGER_ADDRESS") or None
     device = os.environ.get("VISUS_WEB_DEVICE") or None

@@ -82,7 +82,7 @@ Timeouts are milliseconds. Exit code 1 = the command failed; 2 = usage error.
 
 | Command | What it does |
 |---|---|
-| `visus wait [idx] [target] --state <s> --timeout <ms>` | Wait for `visible`/`hidden`/`attached`/`detached`. |
+| `visus wait [idx] [target] --state <s> --timeout <ms>` | Wait for `visible`/`hidden`/`attached`/`detached` — never sleep. Returns as soon as the target is there (by default it waits as long as an action would, `VISUS_ACTION_TIMEOUT_MS`, 30 s). When the selector is not known yet, wait for the words it will show: `wait --text "Row 2 was added"`. Prints its `wait_for(...)` code line; inside a `batch` the page's new numbered list follows, with what just appeared. |
 | `visus expect-text [idx] <text> --timeout <ms>` | Assert an element contains text (PASSED/FAILED). |
 
 ### Tabs / windows

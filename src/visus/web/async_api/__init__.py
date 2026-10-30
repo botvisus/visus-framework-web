@@ -465,9 +465,9 @@ class AsyncPage:
     ) -> AsyncIterator[_ValueHolder]:
         """Run an action and capture the response it triggers (Chromium only)::
 
-            async with page.expect_response("*api/login*") as info:
-                await page.get_by_role("button", name="Sign in").click()
-            assert info.value.ok
+        async with page.expect_response("*api/login*") as info:
+            await page.get_by_role("button", name="Sign in").click()
+        assert info.value.ok
         """
         p = self._p
         marker = await asyncio.to_thread(p._delegate.network_marker)
@@ -493,9 +493,7 @@ class AsyncPage:
             lambda: self._p.set_geolocation(latitude, longitude, accuracy=accuracy)
         )
 
-    async def grant_permissions(
-        self, permissions: list[str], *, origin: str | None = None
-    ) -> None:
+    async def grant_permissions(self, permissions: list[str], *, origin: str | None = None) -> None:
         """Grant browser permissions, optionally per-origin (Chromium only)."""
         await asyncio.to_thread(lambda: self._p.grant_permissions(permissions, origin=origin))
 
@@ -585,9 +583,7 @@ class AsyncPage:
         :meth:`list_fields` call — act by number, like the CLI."""
         return AsyncLocator(self._p.field(index))
 
-    async def fields_in_box(
-        self, box: dict[str, float], *, contained: bool = False
-    ) -> list[Field]:
+    async def fields_in_box(self, box: dict[str, float], *, contained: bool = False) -> list[Field]:
         """Async mirror of :meth:`visus.web.Page.fields_in_box`."""
         return await asyncio.to_thread(lambda: self._p.fields_in_box(box, contained=contained))
 
@@ -597,10 +593,24 @@ class AsyncPage:
 
     # --- vision ---
 
-    async def solve_captcha(self, locator: AsyncLocator, *, preprocess: bool = True) -> str:
-        """Solve a text/image CAPTCHA from *locator* (requires the ``[vision]`` extra)."""
+    async def solve_captcha(
+        self,
+        locator: AsyncLocator | None = None,
+        *,
+        preprocess: bool = True,
+        provider: str | None = None,
+        api_key: str | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        """Solve the page's CAPTCHA — see :meth:`visus.web.Page.solve_captcha`."""
         return await asyncio.to_thread(
-            lambda: self._p.solve_captcha(locator._loc, preprocess=preprocess)
+            lambda: self._p.solve_captcha(
+                None if locator is None else locator._loc,
+                preprocess=preprocess,
+                provider=provider,
+                api_key=api_key,
+                timeout=timeout,
+            )
         )
 
     # --- event-capture context managers ---
@@ -619,9 +629,7 @@ class AsyncPage:
         holder = _ValueHolder()
         yield holder
         t = timeout if timeout is not None else p._defaults.action_timeout_ms
-        new_delegate = await asyncio.to_thread(
-            p._delegate.adopt_new_handle, before, timeout_ms=t
-        )
+        new_delegate = await asyncio.to_thread(p._delegate.adopt_new_handle, before, timeout_ms=t)
         holder._set(AsyncPage(Page(new_delegate, p._defaults)))
 
     @asynccontextmanager
@@ -950,9 +958,7 @@ class AsyncLocator:
     async def bounding_box(self) -> dict[str, float] | None:
         return await asyncio.to_thread(self._loc.bounding_box)
 
-    async def dispatch_event(
-        self, type: str, event_init: dict[str, object] | None = None
-    ) -> None:
+    async def dispatch_event(self, type: str, event_init: dict[str, object] | None = None) -> None:
         await asyncio.to_thread(lambda: self._loc.dispatch_event(type, event_init))
 
     async def scroll_into_view_if_needed(self) -> None:
@@ -1038,9 +1044,7 @@ class AsyncLocator:
     async def press(
         self, key: str, *, timeout: int | None = None, backtrack: bool | int = False
     ) -> None:
-        await asyncio.to_thread(
-            lambda: self._loc.press(key, timeout=timeout, backtrack=backtrack)
-        )
+        await asyncio.to_thread(lambda: self._loc.press(key, timeout=timeout, backtrack=backtrack))
 
     async def press_sequentially(
         self,
@@ -1116,16 +1120,10 @@ class AsyncLocator:
             lambda: self._loc.drag_to(target._loc, timeout=timeout, backtrack=backtrack)
         )
 
-    async def focus(
-        self, *, timeout: int | None = None, backtrack: bool | int = False
-    ) -> None:
-        await asyncio.to_thread(
-            lambda: self._loc.focus(timeout=timeout, backtrack=backtrack)
-        )
+    async def focus(self, *, timeout: int | None = None, backtrack: bool | int = False) -> None:
+        await asyncio.to_thread(lambda: self._loc.focus(timeout=timeout, backtrack=backtrack))
 
-    async def blur(
-        self, *, timeout: int | None = None, backtrack: bool | int = False
-    ) -> None:
+    async def blur(self, *, timeout: int | None = None, backtrack: bool | int = False) -> None:
         await asyncio.to_thread(lambda: self._loc.blur(timeout=timeout, backtrack=backtrack))
 
     async def clear(
@@ -1138,9 +1136,7 @@ class AsyncLocator:
     async def set_input_files(
         self, files: str | list[str], *, backtrack: bool | int = False
     ) -> None:
-        await asyncio.to_thread(
-            lambda: self._loc.set_input_files(files, backtrack=backtrack)
-        )
+        await asyncio.to_thread(lambda: self._loc.set_input_files(files, backtrack=backtrack))
 
 
 # ---------------------------------------------------------------------------
@@ -1226,9 +1222,7 @@ class AsyncLocatorAssertions:
     async def to_have_id(self, id: str, *, timeout: int | None = None) -> None:
         await asyncio.to_thread(lambda: self._a.to_have_id(id, timeout=timeout))
 
-    async def to_have_values(
-        self, values: Sequence[str], *, timeout: int | None = None
-    ) -> None:
+    async def to_have_values(self, values: Sequence[str], *, timeout: int | None = None) -> None:
         await asyncio.to_thread(lambda: self._a.to_have_values(values, timeout=timeout))
 
 
@@ -1247,9 +1241,7 @@ class AsyncPageAssertions:
     def not_(self) -> AsyncPageAssertions:
         return AsyncPageAssertions(self._a.not_)
 
-    async def to_have_url(
-        self, url: str | re.Pattern[str], *, timeout: int | None = None
-    ) -> None:
+    async def to_have_url(self, url: str | re.Pattern[str], *, timeout: int | None = None) -> None:
         await asyncio.to_thread(lambda: self._a.to_have_url(url, timeout=timeout))
 
     async def to_have_title(
@@ -1266,7 +1258,5 @@ class AsyncPageAssertions:
     ) -> None:
         """Async mirror of ``PageAssertions.to_match_aria_snapshot``."""
         await asyncio.to_thread(
-            lambda: self._a.to_match_aria_snapshot(
-                expected, selector=selector, timeout=timeout
-            )
+            lambda: self._a.to_match_aria_snapshot(expected, selector=selector, timeout=timeout)
         )

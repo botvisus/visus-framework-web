@@ -6,6 +6,7 @@ Run via: uv run visus-web-mcp   (or python -m visus.web.mcp.server)
 
 from __future__ import annotations
 
+import os
 import tempfile
 import time
 import uuid
@@ -930,6 +931,7 @@ def browser_set_tab_follow(enabled: bool) -> str:
     enabled=True: AUTO-FOLLOW. Subsequent operations target the most recently
     opened tab/popup window automatically (handy for "open in new tab" flows).
     """
+
     def _local() -> dict[str, Any]:
         return {"follow": _session.set_follow(enabled)}
 
@@ -951,6 +953,7 @@ def browser_handle_dialog(accept: bool = True, prompt_text: str | None = None) -
     NOTE: The action that triggers the dialog must be called BEFORE this tool,
     as this tool handles the PENDING dialog immediately.
     """
+
     def _local() -> str:
         page = _session.page()
         msg, typ = page._delegate.handle_next_dialog(
@@ -976,6 +979,7 @@ def browser_network_requests(url_filter: str = "") -> list[dict]:  # type: ignor
     only URLs containing that substring (e.g. "/api/"). Chromium engines only.
     Use it to verify that the API call behind a UI action really happened.
     """
+
     def _local() -> dict[str, Any]:
         out: list[dict[str, Any]] = [
             {
@@ -1004,6 +1008,7 @@ def browser_console_messages(level: str = "") -> list[dict]:  # type: ignore[typ
     (e.g. "SEVERE" for errors only). Chromium engines only. Check this first
     when a page misbehaves with no visible cause.
     """
+
     def _local() -> dict[str, Any]:
         out: list[dict[str, Any]] = [
             {"level": m.level, "text": m.text} for m in _session.page().console_messages()
@@ -1026,6 +1031,7 @@ def browser_console_messages(level: str = "") -> list[dict]:  # type: ignore[typ
 @mcp.tool()
 def browser_get_cookies() -> list[dict]:  # type: ignore[type-arg]
     """Return all cookies for the current context."""
+
     def _local() -> dict[str, Any]:
         return {"cookies": _session.context().cookies()}
 
@@ -1037,6 +1043,7 @@ def browser_get_cookies() -> list[dict]:  # type: ignore[type-arg]
 @mcp.tool()
 def browser_add_cookies(cookies: list[dict]) -> str:  # type: ignore[type-arg]
     """Add cookies to the current context. Each cookie must have at least 'name', 'value', 'url'."""
+
     def _local() -> str:
         _session.context().add_cookies(cookies)
         return f"added {len(cookies)} cookie(s)"
@@ -1176,8 +1183,16 @@ def browser_solve_captcha(
     exact: bool = False,
     frame: str | None = None,
     nth: int | None = None,
+    provider: str | None = None,
 ) -> str:
-    """OCR-solve a text CAPTCHA shown in the targeted element and return the solution."""
+    """Solve the page's CAPTCHA.
+
+    With no target: the reCAPTCHA (v2/v3/Enterprise), Cloudflare Turnstile or hCaptcha on
+    the page is solved by a captcha service with the key in VISUS_CAPTCHA_KEY —
+    ``provider`` "capsolver" (default) or "2captcha" — and the token applied; returns
+    what it did ("no captcha on this page" when there is none). With a target: OCR the
+    text CAPTCHA image shown in it and return the text.
+    """
     args = _target_payload(
         index=index,
         selector=selector,
@@ -1188,6 +1203,18 @@ def browser_solve_captcha(
         frame=frame,
         nth=nth,
     )
+    if index is None and not any((selector, role, name, text)):
+        args = {
+            "provider": provider or os.environ.get("VISUS_CAPTCHA_PROVIDER") or None,
+            "api_key": os.environ.get("VISUS_CAPTCHA_KEY") or None,
+        }
+
+        def _token() -> str:
+            return _session.page().solve_captcha(provider=args["provider"], api_key=args["api_key"])
+
+        token_result: str = _run("solve_captcha", args, _token)["result"]
+        return token_result
+
     def _local() -> str:
         return _session.page().solve_captcha(_session.target(args))
 
@@ -1341,9 +1368,7 @@ def browser_click_image(
         return _click_vision_match(args, kind="image")
 
     result: dict[str, Any] = _run("click_image", args, _local)["result"]
-    return (
-        f"clicked image at ({result['x']}, {result['y']}) confidence={result['confidence']:.3f}"
-    )
+    return f"clicked image at ({result['x']}, {result['y']}) confidence={result['confidence']:.3f}"
 
 
 @mcp.tool()

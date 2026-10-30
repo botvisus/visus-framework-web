@@ -165,7 +165,12 @@ class _FakePage:
         ]
 
     def list_fields(
-        self, *, kinds: Any = None, include_hidden: bool = False, highlight: bool = True
+        self,
+        *,
+        kinds: Any = None,
+        include_hidden: bool = False,
+        highlight: bool = True,
+        clickables: bool = False,
     ):
         self.log.append(f"list_fields:kinds={kinds}:hidden={include_hidden}:hl={highlight}")
         return self._fields
@@ -423,6 +428,7 @@ def test_mutating_ops_cover_every_state_changing_op() -> None:
             "click_image", "click_ocr_text",
             "storage_set", "storage_delete", "storage_clear",
             "cookie_set", "cookie_delete",
+            "pick_date", "solve_captcha",
         }
     )
     actual = session_server._MUTATING_OPS

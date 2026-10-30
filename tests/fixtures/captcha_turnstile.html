@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Turnstile</title></head>
+<body>
+  <form>
+    <div class="cf-turnstile" data-sitekey="0x4AAAAAAAtestSiteKey" data-action="login"
+         data-callback="turnstileDone">
+      <input type="hidden" name="cf-turnstile-response" value="">
+    </div>
+  </form>
+  <p id="status">waiting</p>
+  <script>
+    function turnstileDone(token) {
+      document.getElementById("status").textContent = "turnstile:" + token;
+    }
+  </script>
+</body></html>

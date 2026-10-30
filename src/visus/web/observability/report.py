@@ -505,11 +505,11 @@ def _render_html(events: list[dict[str, Any]], screenshots: dict[str, bytes]) ->
                     f'<div class="run-header"><h3>Run {escape(run["run_id"])}</h3>'
                     f'<span class="run-sub">{escape(_instant(run["ts"]))} · {summary}</span></div>'
                 )
-            cards = []
+            step_cards: list[str] = []
             for event in run["events"]:
                 number += 1
-                cards.append(_render_task(event, screenshots, number))
-            sections.append(header + f'<div class="steps">{"".join(cards)}</div>')
+                step_cards.append(_render_task(event, screenshots, number))
+            sections.append(header + f'<div class="steps">{"".join(step_cards)}</div>')
         timeline = "\n".join(sections)
     else:
         timeline = '<p class="empty">No actions recorded.</p>'

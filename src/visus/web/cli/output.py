@@ -141,7 +141,10 @@ def emit_envelope(env: dict[str, Any], *, table: str | None = None) -> None:
     if page.get("dialog") is not None:
         typer.echo("")
         typer.echo("### Page")
-        typer.echo(f"- Dialog open: {page['dialog']!r} — handle it with `visus dialog` or `visus dialog --dismiss`")
+        typer.echo(
+            f"- Dialog open: {page['dialog']!r} — handle it with `visus dialog` "
+            "or `visus dialog --dismiss`"
+        )
         return
     if page:
         typer.echo("")

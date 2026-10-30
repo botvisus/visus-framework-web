@@ -24,7 +24,9 @@ def _batch(*actions: list[str]) -> list[str]:
 @pytest.mark.browser
 def test_batch_executa_em_ordem(live_session: list[str], base_url: str) -> None:
     runner.invoke(app, ["open", f"{base_url}/agent_page.html"])
-    r = runner.invoke(app, _batch(["fill", "0", "ada@empresa.com"], ["fill", "1", "segredo"], ["click", "3"]))
+    r = runner.invoke(
+        app, _batch(["fill", "0", "ada@empresa.com"], ["fill", "1", "segredo"], ["click", "3"])
+    )
     assert r.exit_code == 0, r.output
     assert "Page: Portal do Fornecedor" in r.output
     text = runner.invoke(app, ["text"]).output
@@ -34,7 +36,9 @@ def test_batch_executa_em_ordem(live_session: list[str], base_url: str) -> None:
 @pytest.mark.browser
 def test_batch_para_na_primeira_falha(live_session: list[str], base_url: str) -> None:
     runner.invoke(app, ["open", f"{base_url}/agent_page.html"])
-    r = runner.invoke(app, _batch(["fill", "0", "a@b.c"], ["click", "99"], ["fill", "1", "nao-deve"]))
+    r = runner.invoke(
+        app, _batch(["fill", "0", "a@b.c"], ["click", "99"], ["fill", "1", "nao-deve"])
+    )
     assert r.exit_code == 1, r.output
     assert "falhou na ação 2 (click)" in r.output
     # a lista da página vem mesmo na falha: é dela que o agente tira a próxima tentativa
@@ -46,7 +50,12 @@ def test_batch_para_na_primeira_falha(live_session: list[str], base_url: str) ->
 
 @pytest.mark.browser
 def test_batch_lista_a_pagina_uma_vez(live_session: list[str], base_url: str) -> None:
-    r = runner.invoke(app, _batch(["open", f"{base_url}/agent_page.html"], ["fill", "0", "x@y.z"], ["check", "2"]))
+    r = runner.invoke(
+        app,
+        _batch(
+            ["open", f"{base_url}/agent_page.html"], ["fill", "0", "x@y.z"], ["check", "2"]
+        ),
+    )
     assert r.exit_code == 0, r.output
     assert r.output.count("Page: ") == 1, r.output
 

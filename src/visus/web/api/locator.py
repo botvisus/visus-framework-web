@@ -138,7 +138,8 @@ class Locator:
             return self._child(self._css_step(f'[id="{_css_quote(selector[3:].strip())}"]', deep))
         if selector.startswith("class="):
             classes = selector[len("class=") :].split()
-            return self._child(self._css_step("".join(f'[class~="{_css_quote(c)}"]' for c in classes), deep))
+            selector = "".join(f'[class~="{_css_quote(c)}"]' for c in classes)
+            return self._child(self._css_step(selector, deep))
         # `/html/body/...` (absoluto), `//button` e `(//button)[1]` são XPath
         if selector.startswith("/") or selector.startswith("("):
             return self._child({"kind": "xpath", "value": selector})

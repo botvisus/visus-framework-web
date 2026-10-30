@@ -99,7 +99,15 @@ def test_compact_mostra_o_id_quando_o_elemento_tem() -> None:
     from visus.web.cli.compact import format_compact
 
     out = format_compact(
-        [{"index": 0, "kind": "button", "name": "Entrar", "locator": "#entrar", "xpath": "/html/body/form/button"}],
+        [
+            {
+                "index": 0,
+                "kind": "button",
+                "name": "Entrar",
+                "locator": "#entrar",
+                "xpath": "/html/body/form/button",
+            }
+        ],
         title="T",
         url="u",
     )

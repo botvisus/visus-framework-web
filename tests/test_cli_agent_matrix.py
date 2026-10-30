@@ -51,7 +51,9 @@ def test_dialog_aceita_e_dismiss(live_session: list[str], base_url: str) -> None
 
 
 @pytest.mark.browser
-def test_comando_com_dialogo_aberto_recusa_e_orienta(live_session: list[str], base_url: str) -> None:
+def test_comando_com_dialogo_aberto_recusa_e_orienta(
+    live_session: list[str], base_url: str
+) -> None:
     """Qualquer leitura da página com um alert aberto fazia o ChromeDriver fechá-lo
     em silêncio: o agente nunca soube que houve um diálogo. Agora o comando recusa,
     diz o texto do diálogo e como tratá-lo — e o diálogo continua lá."""
@@ -79,7 +81,9 @@ def test_wait_text_timeout_sai_com_erro(live_session: list[str], base_url: str) 
 
 
 @pytest.mark.browser
-def test_download_imprime_o_caminho_e_copia(live_session: list[str], base_url: str, tmp_path: Path) -> None:
+def test_download_imprime_o_caminho_e_copia(
+    live_session: list[str], base_url: str, tmp_path: Path
+) -> None:
     _ok("open", f"{base_url}/downloads.html")
     _ok("click", "#dl")
     out = _ok("wait-download", "--timeout", "15000")
@@ -109,7 +113,12 @@ def test_saida_utf8_mesmo_em_pipe(tmp_path: Path) -> None:
     codepage local (cp1252/cp850) e "não" chega como lixo ao processo pai."""
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
     proc = subprocess.run(
-        [sys.executable, "-c", "from visus.web.cli._entry import cli_main; import sys; sys.argv=['visus','batch','[[\"batch\",\"[]\"]]']; cli_main()"],
+        [
+            sys.executable,
+            "-c",
+            "from visus.web.cli._entry import cli_main; import sys; "
+            "sys.argv=['visus','batch','[[\"batch\",\"[]\"]]']; cli_main()",
+        ],
         cwd=str(tmp_path),
         capture_output=True,
         env=env,

@@ -39,7 +39,9 @@ def test_compact_formata_como_o_agente_le() -> None:
 
 
 def test_compact_omite_label_igual_ao_nome() -> None:
-    out = format_compact([_field(0, "input", "Busca", type="search", label="Busca", value="")], title="T", url="u")
+    out = format_compact(
+        [_field(0, "input", "Busca", type="search", label="Busca", value="")], title="T", url="u"
+    )
     assert out.splitlines()[1] == "  0  input:search   Busca"
 
 
@@ -111,9 +113,13 @@ def test_text_trunca(live_session: list[str], base_url: str) -> None:
 
 
 def test_compact_dom_mostra_a_tag_de_abertura() -> None:
-    field = _field(0, "button", "Entrar", locator="#entrar", dom='<button id="entrar" class="btn btn-primary" type="submit">')
+    dom = '<button id="entrar" class="btn btn-primary" type="submit">'
+    field = _field(0, "button", "Entrar", locator="#entrar", dom=dom)
     out = format_compact([field], title="T", url="u", dom=True)
-    assert out.splitlines()[1] == '  0  button         Entrar #entrar <button id="entrar" class="btn btn-primary" type="submit">'
+    assert out.splitlines()[1] == (
+        "  0  button         Entrar #entrar "
+        '<button id="entrar" class="btn btn-primary" type="submit">'
+    )
 
 
 @pytest.mark.browser

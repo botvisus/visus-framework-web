@@ -716,7 +716,9 @@ class SessionHandler:
                 resp: dict[str, Any] = {"ok": True, "result": method(args)}
             except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
                 return {"ok": False, "error": cli_hint(f"{type(exc).__name__}: {exc}")}
-            if op in _MUTATING_OPS:
+            # the op that ended the session (the last tab closed) leaves no page to
+            # describe: reading one would launch a BRAND-NEW browser just to quit it
+            if op in _MUTATING_OPS and self._browser is not None:
                 resp["page"] = self._post_state()
                 if args.get("snapshot"):
                     resp["snapshot"] = self._write_snapshot()
@@ -2241,6 +2243,11 @@ def _handle_conn(
                 _reply(resp)
                 if op == "shutdown" and resp.get("ok"):
                     stop.set()
+                    return
+                if stop.is_set():
+                    # the op ended the session (the last tab closed): this connection
+                    # is done -- reading on held the daemon open until the client hung
+                    # up or the whole shutdown grace ran out
                     return
             except Exception as exc:  # noqa: BLE001 — never crash the handler thread
                 _reply({"ok": False, "error": f"{type(exc).__name__}: {exc}"})

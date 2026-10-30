@@ -2204,6 +2204,29 @@ def test_closing_the_last_tab_really_stops_the_daemon(tmp_path: Path) -> None:
         h.close()
 
 
+def test_closing_the_last_tab_never_launches_a_new_browser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the op that ended the session there is no page to describe: reading one
+    used to call ``page()`` -> ``_ensure()`` and launch a BRAND-NEW Chrome just to read
+    its url/title, which the daemon then had to quit again (seconds of shutdown)."""
+    h = _handler_with_fake_page(_FakePage())
+
+    def last_tab_closed(args: dict[str, Any]) -> dict[str, Any]:
+        h.close()  # what the real op does when no window is left
+        return {"closed": 0, "remaining": 0, "session_stopped": True}
+
+    def no_launch(*a: Any, **k: Any) -> Any:
+        raise AssertionError("a new browser was launched after the session ended")
+
+    monkeypatch.setattr(h, "_op_tab_close", last_tab_closed)
+    monkeypatch.setattr(session_server, "launch", no_launch)
+    resp = h.handle("tab_close", {"snapshot": True})
+    assert resp["ok"] is True, resp
+    assert resp["result"]["session_stopped"] is True
+    assert "page" not in resp and "snapshot" not in resp
+
+
 def test_bind_stop_is_optional_and_binds() -> None:
     """A handler starts unbound (unit tests, embedders) and bind_stop attaches
     the server's event — an unbound handler must never raise, it just reports
@@ -2320,7 +2343,13 @@ def test_status_and_tabs_do_not_adopt_a_background_window() -> None:
 
 
 def _exited_pid() -> int:
-    """A pid that genuinely belonged to a process which has now exited."""
+    """A pid that genuinely belonged to a process which has now exited.
+
+    Windows reuses pids fast: by the time the test probes it, the number may belong to
+    a NEW process (an xdist worker, a program of the developer). Tests that use it must
+    stub ``_probe_pid`` and ``_terminate`` (see :func:`_no_real_kills`) -- a real probe
+    made ``kill()`` run ``taskkill /F`` on whatever got the pid, killing pytest workers
+    ("node down: Not properly terminated") at random."""
     import subprocess
     import sys as _sys
 
@@ -2329,17 +2358,33 @@ def _exited_pid() -> int:
     return proc.pid
 
 
-def test_kill_removes_json_and_lock_and_reports(tmp_path: Path) -> None:
+def _no_real_kills(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The dead pid stays dead (no real probe can hit a reused pid) and nothing is
+    really terminated: returns the pids ``kill()`` tried to terminate."""
+    killed: list[int] = []
+    monkeypatch.setattr(session_client, "_probe_pid", lambda pid: False)
+    monkeypatch.setattr(session_client, "_terminate", killed.append)
+    return killed
+
+
+def test_kill_removes_json_and_lock_and_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    killed = _no_real_kills(monkeypatch)
     sf = _write_session(tmp_path, {"pid": _exited_pid(), "port": 2, "token": "t"})
     lock = sf.with_name(sf.name + ".lock")
     lock.write_text("999999", encoding="utf-8")
     msg = session_client.kill(start_dir=tmp_path)
     assert not sf.exists() and not lock.exists()
     assert "default.json" in msg and "default.json.lock" in msg
+    assert killed == [], "a dead daemon is never terminated"
 
 
-def test_kill_removes_an_orphaned_lock_with_no_session_file(tmp_path: Path) -> None:
+def test_kill_removes_an_orphaned_lock_with_no_session_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The wedge case: the json was cleaned, the lock was not."""
+    killed = _no_real_kills(monkeypatch)
     visus = tmp_path / ".visus" / "sessions"
     visus.mkdir(parents=True)
     lock = visus / "default.json.lock"
@@ -2347,6 +2392,7 @@ def test_kill_removes_an_orphaned_lock_with_no_session_file(tmp_path: Path) -> N
     msg = session_client.kill(start_dir=tmp_path)
     assert not lock.exists()
     assert "default.json.lock" in msg
+    assert killed == []
 
 
 def test_kill_with_nothing_to_remove(tmp_path: Path) -> None:
@@ -2372,9 +2418,13 @@ def test_cli_session_kill(monkeypatch: pytest.MonkeyPatch) -> None:
     assert r.exit_code == 0 and "removed session.json" in r.output
 
 
-def test_claim_lock_reclaims_a_lock_whose_owner_is_dead(tmp_path: Path) -> None:
+def test_claim_lock_reclaims_a_lock_whose_owner_is_dead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A `kill -9`'d daemon leaves its lock behind; the next daemon must reclaim it."""
     import os as _os
+
+    _no_real_kills(monkeypatch)  # the owner's pid may already belong to a new process
 
     sf = session_server.session_file(tmp_path)
     sf.parent.mkdir(parents=True, exist_ok=True)

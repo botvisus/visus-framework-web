@@ -29,14 +29,29 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 pytestmark = [pytest.mark.packaging, pytest.mark.timeout(900)]
 
 
-def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
+# A stalled download (a TLS read that never gets data) is NOT covered by pip's own
+# retries: without a cap the install hung for an hour until pytest-timeout os._exit'ed
+# the whole xdist worker ("node down: Not properly terminated"). Fail it, clearly.
+INSTALL_TIMEOUT = 600
+
+
+def _run(command: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
     # Decode as UTF-8 explicitly: `text=True` alone picks the locale encoding, and on
     # Windows that is cp1252, which cannot decode the box-drawing characters Rich puts
     # in `visus --help`. The decode then fails inside subprocess' reader thread and
     # `stdout` silently arrives as None.
-    return subprocess.run(
-        command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
-    )
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{command[2:5]} did not finish in {timeout:g}s -- is PyPI reachable?")
 
 
 def _venv_executables(env_dir: Path) -> tuple[Path, Path]:
@@ -53,7 +68,20 @@ def _install(env_dir: Path, requirement: str) -> Path:
     venv.EnvBuilder(with_pip=True, clear=True).create(env_dir)
     python, visus = _venv_executables(env_dir)
     proc = _run(
-        [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-q", requirement]
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-q",
+            "--timeout",
+            "30",
+            "--retries",
+            "3",
+            requirement,
+        ],
+        timeout=INSTALL_TIMEOUT,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     return visus

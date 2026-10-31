@@ -1344,9 +1344,12 @@ class SessionHandler:
         if not folder or not os.path.isdir(folder):
             return []
         files = []
-        for name in os.listdir(folder):
+        names = os.listdir(folder)
+        for name in names:
             path = os.path.join(folder, name)
-            if name.endswith(self._PARTIAL_DOWNLOAD) or not os.path.isfile(path):
+            # o Firefox cria o nome final VAZIO ao lado de `<nome>.part`
+            partial = any(name + s in names for s in self._PARTIAL_DOWNLOAD)
+            if name.endswith(self._PARTIAL_DOWNLOAD) or partial or not os.path.isfile(path):
                 continue
             st = os.stat(path)
             files.append(

@@ -136,6 +136,9 @@ markers = [
     "internet: drives a real public website (opt-in: VISUS_E2E_INTERNET=1)",
 ]
 timeout = 60
+# A hang that slips past pytest-timeout (it left no trace when a context teardown
+# wedged the CI job for 33 min) still prints every thread's stack after 120 s.
+faulthandler_timeout = 120
 asyncio_mode = "auto"
 # -p no:visus_web: our own pytest11 entry point would import visus.web BEFORE
 # pytest-cov starts measuring, zeroing out import-time coverage. The plugin is

@@ -314,6 +314,25 @@ def test_handle_dialog_confirm_dismiss(srv):  # type: ignore[no-untyped-def]
     assert cres == "no"
 
 
+@pytest.mark.browser
+def test_a_page_read_while_the_dialog_is_open_does_not_close_it(srv):  # type: ignore[no-untyped-def]
+    """The race CI hit, made deterministic: the click's page-state read (or any read)
+    ran while the confirm was open, the driver dismissed it on its own, and
+    browser_handle_dialog then timed out waiting for a dialog that was gone."""
+    import time
+
+    server, base_url = srv
+    server.browser_navigate(f"{base_url}/popups.html")
+    server.browser_click(selector="#confirmbtn")
+    time.sleep(0.5)  # the confirm opens 50 ms after the click: it is open now
+    try:
+        server.browser_title()
+    except Exception:  # noqa: BLE001 — refusing while a dialog is open is fine
+        pass
+    result = server.browser_handle_dialog(accept=False)
+    assert "dismissed" in result
+
+
 # ---------------------------------------------------------------------------
 # Cookies
 # ---------------------------------------------------------------------------

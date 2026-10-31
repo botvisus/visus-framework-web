@@ -194,7 +194,9 @@ def test_capture_frames_records_a_changing_page(browser):
         "document.getElementById('b').style.background='rgb('+n+','+n+','+n+')';},80);</script>"
     )
     frames = capture_frames(page, fps=5, duration_ms=1200)
-    assert len(frames) >= 4, f"expected at least 4 frames, got {len(frames)}"
+    # Not `>= fps * seconds`: polling is "roughly fps", and on a loaded CI runner one
+    # full-viewport screenshot took ~400 ms (3 frames, not 6). Two is what "differ" needs.
+    assert len(frames) >= 2, f"expected at least 2 frames, got {len(frames)}"
     assert all(f.startswith(b"\x89PNG") for f in frames)
     assert len(set(frames)) >= 2, "every captured frame was identical"
 

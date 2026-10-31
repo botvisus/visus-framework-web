@@ -171,4 +171,5 @@ class Backend(Protocol):
         user_data_dir: str | None = None,
         remote_url: str | None = None,
         debugger_address: str | None = None,
+        keep_dialogs: bool = False,
     ) -> BrowserDelegate: ...

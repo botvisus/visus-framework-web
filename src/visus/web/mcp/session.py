@@ -43,7 +43,11 @@ class Session:
         if self._browser is None:
             engine_str = os.environ.get("VISUS_WEB_ENGINE", "chrome")
             headless = os.environ.get("VISUS_WEB_HEADLESS", "1") != "0"
-            self._browser = launch(Engine.from_str(engine_str), headless=headless)
+            # keep_dialogs: browser_handle_dialog must find the dialog a click opened,
+            # even if the page-state read after that click ran while it was open
+            self._browser = launch(
+                Engine.from_str(engine_str), headless=headless, keep_dialogs=True
+            )
             self._context = self._browser.new_context()
             first = self._context.new_page()
             self._pages = [first]

@@ -64,6 +64,7 @@ def launch(
     user_data_dir: str | None = None,
     remote_url: str | None = None,
     debugger_address: str | None = None,
+    keep_dialogs: bool = False,
 ) -> Browser:
     """Launch a browser and return a Browser handle.
 
@@ -83,6 +84,11 @@ def launch(
     it with :meth:`Browser.detach`; :meth:`Browser.close` would end the browser
     along with the session.
 
+    *keep_dialogs* leaves an ``alert``/``confirm``/``prompt`` open until it is
+    handled explicitly (``page.expect_dialog``) instead of letting the driver
+    dismiss it as soon as any other command runs — what an agent that must SEE
+    the dialog needs. Off by default.
+
     Usage:
         with launch(headless=True) as browser:
             page = browser.new_page()
@@ -101,6 +107,7 @@ def launch(
         user_data_dir=user_data_dir,
         remote_url=remote_url,
         debugger_address=debugger_address,
+        keep_dialogs=keep_dialogs,
     )
     return Browser(delegate, Defaults(slow_mo_ms=slow_mo, action_timeout_ms=_action_timeout_ms()))
 

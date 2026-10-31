@@ -604,7 +604,8 @@ class SeleniumPageDelegate:
                 },
             )
             return base64.b64decode(cast(str, shot["data"]))
-        except (AttributeError, WebDriverException, KeyError):
+        # RuntimeError: Selenium 4.52+ refuses CDP on Firefox outright
+        except (AttributeError, WebDriverException, KeyError, RuntimeError):
             pass
         get_full = getattr(self._driver, "get_full_page_screenshot_as_png", None)  # Firefox native
         if callable(get_full):
@@ -823,9 +824,12 @@ class SeleniumPageDelegate:
         deadline = time.monotonic() + timeout_ms / 1000
         while True:
             if os.path.isdir(self._download_dir):
-                for name in os.listdir(self._download_dir):
+                names = os.listdir(self._download_dir)
+                for name in names:
+                    # Firefox creates the final name EMPTY next to `<name>.part` and
+                    # fills it only when the download ends: wait for the sibling to go
                     if name not in before_set and not any(
-                        name.endswith(s) for s in _PARTIAL_SUFFIXES
+                        name.endswith(s) or name + s in names for s in _PARTIAL_SUFFIXES
                     ):
                         abspath = os.path.abspath(os.path.join(self._download_dir, name))
                         return (abspath, name)
@@ -1268,6 +1272,7 @@ class SeleniumContextDelegate:
         self._download_dir = download_dir
         self._owns_driver = owns_driver
         self._profile_dir = profile_dir
+        self._closed = False
         self._pages: list[SeleniumPageDelegate] = []
         if first_handle is not None:
             self._make_page(first_handle)
@@ -1347,6 +1352,11 @@ class SeleniumContextDelegate:
         return list(self._reconcile())
 
     def close(self) -> None:
+        # Idempotent: Browser.dispose() closes every owning context again, and a
+        # second quit() on a dead driver retries HTTP to a closed port for ~16 s
+        if self._closed:
+            return
+        self._closed = True
         for page in list(self._pages):
             page.close()
         if self._owns_driver:

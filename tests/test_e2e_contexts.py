@@ -89,3 +89,27 @@ def test_storage_state_roundtrip(browser, base_url, tmp_path):
         assert page2.evaluate("() => sessionStorage.getItem('s')") == "1"
     finally:
         ctx2.close()
+
+
+@pytest.mark.browser
+def test_closing_the_browser_does_not_quit_an_already_closed_context_again(base_url):
+    """``browser.close()`` re-closed every owning context, even one already closed:
+    a second ``quit()`` on a dead driver sent HTTP to a port nobody listens on and
+    Selenium retried it for ~16 s per context — under CI load it hung the job."""
+    from visus.web import launch
+
+    with launch(headless=True) as browser:
+        ctx = browser.new_context()
+        ctx.new_page().goto(f"{base_url}/forms.html")
+        driver = ctx._delegate._driver
+        real_quit = driver.quit
+        quits: list[int] = []
+
+        def counting_quit() -> None:
+            quits.append(1)
+            real_quit()
+
+        driver.quit = counting_quit
+        ctx.close()
+        ctx.close()
+    assert len(quits) == 1, f"the context's driver was quit {len(quits)} times"

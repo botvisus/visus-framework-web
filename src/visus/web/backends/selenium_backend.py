@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from visus.web.backends.base import BrowserConfig, ContextDelegate
@@ -50,6 +51,7 @@ def _spawn_driver(
     user_data_dir: str | None = None,
     remote_url: str | None = None,
     debugger_address: str | None = None,
+    keep_dialogs: bool = False,
 ) -> tuple[WebDriver, str, str, bool]:
     """Create a driver with a profile + download dir.
 
@@ -76,6 +78,11 @@ def _spawn_driver(
         user_data_dir=profile_dir,
         debugger_address=debugger_address,
     )
+    if keep_dialogs:
+        # The driver's default ("dismiss and notify") closes an alert the moment ANY
+        # command runs while it is open — an agent reading the page state right after
+        # the click that opened it would lose the dialog it is about to handle.
+        cast(ArgOptions, options).unhandled_prompt_behavior = "ignore"
     try:
         if remote_url is not None:
             driver = webdriver.Remote(command_executor=remote_url, options=options)  # type: ignore[arg-type]
@@ -110,6 +117,7 @@ class SeleniumBrowserDelegate:
         owns_profile: bool = True,
         remote_url: str | None = None,
         attached: bool = False,
+        keep_dialogs: bool = False,
     ) -> None:
         self._driver = driver
         self._profile_dir = profile_dir
@@ -119,6 +127,7 @@ class SeleniumBrowserDelegate:
         self._owns_profile = owns_profile
         self._remote_url = remote_url
         self._attached = attached
+        self._keep_dialogs = keep_dialogs
         self._disposed = False
         self._contexts: list[SeleniumContextDelegate] = []
         # First context shares the launch driver (owns_driver=False).
@@ -145,7 +154,10 @@ class SeleniumBrowserDelegate:
         # user_data_dir cannot be shared by two live browser processes) but do
         # follow the browser onto the same remote grid when one was used.
         driver, profile, dl, _owns = _spawn_driver(
-            self._config, headless=self._headless, remote_url=self._remote_url
+            self._config,
+            headless=self._headless,
+            remote_url=self._remote_url,
+            keep_dialogs=self._keep_dialogs,
         )
         ctx = SeleniumContextDelegate(
             driver,
@@ -232,6 +244,7 @@ class SeleniumBackend:
         user_data_dir: str | None = None,
         remote_url: str | None = None,
         debugger_address: str | None = None,
+        keep_dialogs: bool = False,
     ) -> SeleniumBrowserDelegate:
         driver, profile_dir, download_dir, owns_profile = _spawn_driver(
             config,
@@ -239,6 +252,7 @@ class SeleniumBackend:
             user_data_dir=user_data_dir,
             remote_url=remote_url,
             debugger_address=debugger_address,
+            keep_dialogs=keep_dialogs,
         )
         if debugger_address is None:  # a browser we attached to keeps the size it had
             _size_window(driver, headless=headless)
@@ -251,4 +265,5 @@ class SeleniumBackend:
             owns_profile=owns_profile,
             remote_url=remote_url,
             attached=debugger_address is not None,
+            keep_dialogs=keep_dialogs,
         )

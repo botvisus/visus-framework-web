@@ -840,6 +840,7 @@ def test_ensure_partial_launch_failure_is_atomic_and_retries(
         user_data_dir=None,
         remote_url=None,
         debugger_address=None,
+        keep_dialogs=False,
     ):
         b = browsers.pop(0)
         launched.append(b)

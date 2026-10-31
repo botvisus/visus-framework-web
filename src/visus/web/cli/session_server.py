@@ -36,7 +36,10 @@ from visus.web.api.context import Context
 from visus.web.api.fields import Field
 from visus.web.api.locator import Locator
 from visus.web.api.page import Page
-from visus.web.backends.selenium.driver_delegate import SeleniumPageDelegate
+from visus.web.backends.selenium.driver_delegate import (
+    SeleniumPageDelegate,
+    _is_fresh_placeholder,
+)
 from visus.web.cli import session_client
 from visus.web.cli.codegen import generate_line
 from visus.web.ops.targeting import StaleFieldIndexError, make_locator, resolve_field
@@ -329,6 +332,9 @@ class SessionHandler:
                 user_data_dir=self._user_data_dir,
                 remote_url=self._remote_url,
                 debugger_address=self._debugger_address,
+                # o diálogo que um clique abriu fica até o agente tratá-lo: sem isto,
+                # a leitura do estado da página logo após o clique o fechava sozinha
+                keep_dialogs=True,
             )
             # Failure-atomic: if any step after launch raises (bad URL, etc.),
             # tear the partial browser down so the next op retries from scratch
@@ -1352,6 +1358,8 @@ class SessionHandler:
             if name.endswith(self._PARTIAL_DOWNLOAD) or partial or not os.path.isfile(path):
                 continue
             st = os.stat(path)
+            if _is_fresh_placeholder(st):
+                continue
             files.append(
                 {
                     "name": name,

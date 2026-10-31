@@ -91,6 +91,17 @@ def translate_exc(exc: Exception) -> errors.VisusWebError:
     return errors.VisusWebError(str(exc))
 
 
+#: How long an EMPTY file counts as a download still starting. Firefox creates the
+#: final name empty FIRST and its `<name>.part` only a moment later, so for that
+#: instant nothing on disk says "in progress"; a genuinely empty download is just
+#: reported this much later.
+_PLACEHOLDER_GRACE_S = 1.0
+
+
+def _is_fresh_placeholder(st: os.stat_result) -> bool:
+    return st.st_size == 0 and time.time() - st.st_mtime < _PLACEHOLDER_GRACE_S
+
+
 class SeleniumPageDelegate:
     """One browser window handle. Activates its window before each operation."""
 
@@ -832,6 +843,11 @@ class SeleniumPageDelegate:
                         name.endswith(s) or name + s in names for s in _PARTIAL_SUFFIXES
                     ):
                         abspath = os.path.abspath(os.path.join(self._download_dir, name))
+                        try:
+                            if _is_fresh_placeholder(os.stat(abspath)):
+                                continue
+                        except OSError:  # renamed/removed between listdir and stat
+                            continue
                         return (abspath, name)
             if time.monotonic() >= deadline:
                 raise errors.VisusTimeoutError(f"no new download completed within {timeout_ms} ms")

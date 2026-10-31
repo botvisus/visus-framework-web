@@ -45,6 +45,31 @@ def test_wait_for_download_ignores_firefox_empty_placeholder(tmp_path: Path) -> 
     assert body == "hello download"
 
 
+def test_wait_for_download_ignores_the_placeholder_before_its_part_file_exists(
+    tmp_path: Path,
+) -> None:
+    """CI's real order: the empty final name FIRST, `.part` only a moment later —
+    so for that instant the directory holds nothing but a 0-byte file."""
+    page = SimpleNamespace(_download_dir=str(tmp_path))
+    (tmp_path / "download.txt").write_bytes(b"")
+
+    def firefox() -> None:
+        time.sleep(0.2)
+        (tmp_path / "download.txt.part").write_bytes(b"hel")
+        time.sleep(0.4)
+        (tmp_path / "download.txt").write_text("hello download", encoding="utf-8")
+        (tmp_path / "download.txt.part").unlink()
+
+    thread = threading.Thread(target=firefox)
+    thread.start()
+    try:
+        path, _ = SeleniumPageDelegate.wait_for_download(page, [], timeout_ms=5000)  # type: ignore[arg-type]
+        body = Path(path).read_text(encoding="utf-8")
+    finally:
+        thread.join()
+    assert body == "hello download"
+
+
 def test_session_downloads_skip_a_file_still_being_written(tmp_path: Path) -> None:
     (tmp_path / "done.txt").write_text("ok", encoding="utf-8")
     (tmp_path / "busy.txt").write_bytes(b"")

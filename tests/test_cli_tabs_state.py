@@ -253,6 +253,7 @@ def test_handler_forwards_launch_options(monkeypatch: pytest.MonkeyPatch) -> Non
         "user_data_dir": "/profiles/p1",
         "remote_url": "http://grid:4444/wd/hub",
         "debugger_address": None,
+        "keep_dialogs": True,
     }
     assert seen["goto"] == "http://x"
 

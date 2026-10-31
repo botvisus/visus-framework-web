@@ -51,6 +51,22 @@ def test_dialog_aceita_e_dismiss(live_session: list[str], base_url: str) -> None
 
 
 @pytest.mark.browser
+def test_o_navegador_da_sessao_nao_fecha_dialogos_sozinho(base_url: str) -> None:
+    """Com o padrão do driver ("dismiss and notify"), a leitura do estado da página
+    que o `click` faz logo depois fechava o confirm que o próprio clique abrira, e o
+    `dialog` seguinte esperava em vão (CI: "no dialog appeared within 5000 ms")."""
+    from visus.web.cli import session_server
+
+    h = session_server.SessionHandler(engine="chrome", headless=True, url="about:blank")
+    try:
+        assert h.handle("goto", {"url": f"{base_url}/popups.html"})["ok"]
+        caps = h._driver().capabilities  # type: ignore[union-attr]
+        assert caps.get("unhandledPromptBehavior") == "ignore", caps
+    finally:
+        h.close()
+
+
+@pytest.mark.browser
 def test_comando_com_dialogo_aberto_recusa_e_orienta(
     live_session: list[str], base_url: str
 ) -> None:

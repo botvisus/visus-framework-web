@@ -54,9 +54,15 @@ def _quiet(service: Service) -> Service:
     no console of its own to lend it — Windows then allocates a fresh one, which
     the user sees as a black window flashing on screen. Selenium forwards
     ``creation_flags`` straight to ``subprocess.Popen``.
+
+    It also stops the driver inheriting this process's handles: Selenium passes
+    ``close_fds=False`` on Windows, so the driver would hold open every pipe our
+    parent reads us through, and a supervisor of a process that died (a timeout,
+    a crash) would wait for an EOF that never comes while the driver lives on.
     """
     if sys.platform == "win32":
         service.creation_flags = subprocess.CREATE_NO_WINDOW
+        service.popen_kw["close_fds"] = True
     return service
 
 

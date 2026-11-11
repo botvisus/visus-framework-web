@@ -188,3 +188,12 @@ def test_campo_que_aceita_digitar_nao_abre_o_calendario(page) -> None:  # type: 
 def test_locator_pick_date_na_api(page) -> None:  # type: ignore[no-untyped-def]
     page.locator("#gmes").pick_date("2026-11-02", "2026-11-06")
     assert page.locator("#gmes").input_value() == "11/2/2026 ~ 11/6/2026"
+
+
+@pytest.mark.browser
+def test_campo_bloqueado_que_so_abre_pelo_botao(page) -> None:  # type: ignore[no-untyped-def]
+    """InputDate do Wijmo: o campo é readonly e clicar nele não abre o calendário — só o
+    botão ▾ do componente. O pick_date tem de achar esse botão, navegar e clicar o dia."""
+    msg = dates.pick_date(page, page.locator("#wijmo"), date(2026, 12, 9))
+    assert page.locator("#wijmo").input_value() == "2026/12/09"
+    assert "2026/12/09" in msg

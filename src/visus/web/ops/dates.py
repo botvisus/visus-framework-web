@@ -154,6 +154,28 @@ _SET_NATIVE_JS = r"""(el, value) => {
   return el.value;
 }"""
 
+# The field's own opener when clicking the field does nothing (Wijmo's InputDate opens only
+# from its ▾ button): the nearest button-like element inside the field's component, at most
+# four ancestors up — never one that contains the field (that would be the whole form).
+_TOGGLE_JS = r"""(el) => {
+  document.querySelectorAll("[data-visus-toggle]")
+    .forEach((t) => t.removeAttribute("data-visus-toggle"));
+  const visible = (n) => {
+    const r = n.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(n).visibility !== "hidden";
+  };
+  const OPENERS = "button, [role=button], .wj-btn, [class*=toggle], [class*=calendar], "
+    + "[class*=datepicker], [class*=date-picker], .input-group-addon, .input-group-append, "
+    + ".input-group-text, [aria-haspopup]";
+  let box = el.parentElement;
+  for (let up = 0; box && up < 4; up++, box = box.parentElement) {
+    const found = Array.from(box.querySelectorAll(OPENERS))
+      .find((n) => n !== el && !n.contains(el) && visible(n));
+    if (found) { found.setAttribute("data-visus-toggle", "1"); return true; }
+  }
+  return false;
+}"""
+
 _COMMIT_JS = r"""(el) => {
   el.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
@@ -550,6 +572,11 @@ def pick_date(page: Any, field: Any, start: date | str, end: date | str | None =
     def reopen() -> None:
         loc.click()
         page.wait_for_timeout(_SETTLE_MS)
+        scan = cast(dict[str, Any], page.evaluate(_CALENDAR_JS))
+        if not scan.get("panels") and loc.evaluate(_TOGGLE_JS):
+            # clicar no campo não abriu nada: o calendário abre pelo botão do componente
+            page.locator("[data-visus-toggle]").first().click()
+            page.wait_for_timeout(_SETTLE_MS)
 
     reopen()
     if end is None:

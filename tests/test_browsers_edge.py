@@ -29,3 +29,15 @@ def test_registry_edge_config_present():
     assert cfg.engine is Engine.EDGE
     assert callable(cfg.options_factory)
     assert callable(cfg.driver_factory)
+
+
+def test_http_continua_http_sem_https_first(tmp_path):
+    """Edge é Chromium: mesma regra do Chrome para sites http:// de intranet."""
+    opts = edge.build_options(
+        headless=False, download_dir=str(tmp_path), user_data_dir=str(tmp_path / "p")
+    )
+    disabled = [a for a in opts.arguments if a.startswith("--disable-features=")]
+    assert len(disabled) == 1
+    features = disabled[0].split("=", 1)[1].split(",")
+    assert {"HttpsUpgrades", "HttpsFirstBalancedModeAutoEnable"} <= set(features)
+    assert opts.experimental_options["prefs"]["https_only_mode_enabled"] is False

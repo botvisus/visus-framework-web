@@ -13,6 +13,16 @@ from visus.web.errors import UnsupportedEngineError
 
 _MIMES = "application/octet-stream,text/plain,application/pdf,application/zip,image/png,text/csv"
 
+# http:// continua http:// (intranet de empresa é http puro): sem isto o HTTPS-First do
+# Firefox tenta https antes — lento num host sem TLS — e o HTTPS-Only cai na página de aviso.
+_HTTP_PREFS = (
+    "dom.security.https_first",
+    "dom.security.https_first_pbm",
+    "dom.security.https_first_schemeless",
+    "dom.security.https_only_mode",
+    "dom.security.https_only_mode_pbm",
+)
+
 
 def build_options(
     *,
@@ -34,6 +44,8 @@ def build_options(
     opts.set_preference("browser.download.useDownloadDir", True)
     opts.set_preference("browser.helperApps.neverAskSaveToDisk", _MIMES)
     opts.set_preference("pdfjs.disabled", True)
+    for pref in _HTTP_PREFS:
+        opts.set_preference(pref, False)
     return opts
 
 

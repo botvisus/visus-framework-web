@@ -9,6 +9,8 @@ from selenium import webdriver
 from selenium.webdriver.edge.options import Options
 from selenium.webdriver.edge.service import Service
 
+from visus.web.backends.browsers.chrome import DISABLED_FEATURES, HTTP_PREFS
+
 
 def build_options(
     *,
@@ -31,11 +33,14 @@ def build_options(
     opts.add_argument("--no-first-run")
     opts.add_argument("--no-default-browser-check")
     opts.add_argument("--disable-gpu")
+    # Edge é Chromium: http:// de intranet não pode virar https forçado (ver chrome.py)
+    opts.add_argument("--disable-features=" + ",".join(DISABLED_FEATURES))
     opts.add_experimental_option(
         "prefs",
         {
             "download.default_directory": download_dir,
             "download.prompt_for_download": False,
+            **HTTP_PREFS,
         },
     )
     # Performance log feeds page.network_requests(); browser log feeds

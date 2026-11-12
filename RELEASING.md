@@ -11,11 +11,14 @@ branch to PyPI, unversioned and untested.
 
 ## Steps
 
-1. **Bump the version in BOTH places.** They are duplicated and nothing keeps them in
-   sync — a release that bumps only one ships a package whose `visus version` lies.
+1. **Bump the version in ALL THREE places.** They are duplicated and nothing keeps them
+   in sync — a release that bumps only one ships a package whose `visus version` lies.
 
    - `pyproject.toml` → `[project] version = "X.Y.Z"` (line 7)
    - `src/visus/web/__init__.py` → `__version__ = "X.Y.Z"` (line 17)
+   - `src/visus/web/skills/visus-web/SKILL.md` → frontmatter `version: "X.Y.Z"` (line 5;
+     `tests/test_skill_docs.py` fails the CI gate when it lags — that stopped v0.3.3's
+     first publish)
 
    Verify: `uv run python -c "import visus.web; print(visus.web.__version__)"`
 

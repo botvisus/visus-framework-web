@@ -120,8 +120,14 @@ def test_highlight_draws_and_hides_a_box_on_a_real_page(base_url: str) -> None:
 
     try:
         assert h.handle("highlight", {"selector": "#btn"})["ok"] is True
-        # highlight() appends the box AND a centre dot, both tagged.
-        assert js("() => document.querySelectorAll('[data-visus-highlight]').length") == 2
+        # highlight() appends ONE tagged box, in the visus-studio look: green #2ea043,
+        # 2px rounded border, a translucent green fill.
+        assert js("() => document.querySelectorAll('[data-visus-highlight]').length") == 1
+        look = js(
+            "() => { const s = document.querySelector('[data-visus-highlight]').style;"
+            " return [s.borderTopColor, s.borderTopWidth, s.backgroundColor, s.borderRadius]; }"
+        )
+        assert look == ["rgb(46, 160, 67)", "2px", "rgba(46, 160, 67, 0.14)", "3px"]
 
         styled = h.handle("highlight", {"selector": "#btn", "style": "2px dashed rgb(0, 170, 0)"})
         assert styled["ok"] is True, styled

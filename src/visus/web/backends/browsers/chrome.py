@@ -11,6 +11,19 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
+# http:// continua http:// (intranet de empresa é http puro). Sem isto o Chromium tenta
+# https antes — lento num host sem TLS — e então barra a página ou mostra o aviso de site
+# não seguro; o driver.get volta sem erro e a aba fica na Nova guia. Precisa dos DOIS
+# primeiros juntos (medido no Chrome 157); os demais cobrem variações de versão.
+DISABLED_FEATURES = (
+    "HttpsUpgrades",
+    "HttpsFirstBalancedModeAutoEnable",
+    "HttpsFirstModeV2ForTypicallySecureUsers",
+    "HttpsFirstModeIncognito",
+)
+# a opção "Sempre usar conexões seguras" de um perfil persistente (user_data_dir)
+HTTP_PREFS = {"https_only_mode_enabled": False}
+
 
 def in_container() -> bool:
     """Linux dentro de um container (Docker, CI): o seccomp barra o sandbox do próprio
@@ -44,6 +57,7 @@ def build_options(
     opts.add_argument("--no-first-run")
     opts.add_argument("--no-default-browser-check")
     opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-features=" + ",".join(DISABLED_FEATURES))
     if in_container():
         # o container é o sandbox; e o /dev/shm de 64 MB derrubaria as abas pesadas
         opts.add_argument("--no-sandbox")
@@ -53,6 +67,7 @@ def build_options(
         {
             "download.default_directory": download_dir,
             "download.prompt_for_download": False,
+            **HTTP_PREFS,
         },
     )
     # Performance log feeds page.network_requests(); browser log feeds

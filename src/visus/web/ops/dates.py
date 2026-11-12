@@ -154,6 +154,50 @@ _SET_NATIVE_JS = r"""(el, value) => {
   return el.value;
 }"""
 
+# The field's own opener when clicking the field does nothing (Wijmo's InputDate opens only
+# from its ▾ button): the nearest opener inside the field's OWN component, at most four
+# ancestors up. A candidate in a branch that holds another field is that field's opener; a
+# submit/reset button, or a labelled button whose label is not about dates/dropdowns
+# ("Pesquisar", "Excluir"), is the form's — clicking those would change the page.
+_TOGGLE_JS = r"""(el) => {
+  document.querySelectorAll("[data-visus-toggle]")
+    .forEach((t) => t.removeAttribute("data-visus-toggle"));
+  const visible = (n) => {
+    const r = n.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(n).visibility !== "hidden";
+  };
+  const FIELDS = "input:not([type=hidden]):not([type=button]):not([type=submit])"
+    + ":not([type=reset]):not([type=image]), select, textarea";
+  const SPECIFIC = ".wj-btn, [class*=toggle], [class*=calendar], [class*=datepicker], "
+    + "[class*=date-picker], .input-group-addon, .input-group-append, .input-group-text, "
+    + "[aria-haspopup]";
+  const GENERIC = "button, [role=button]";
+  const HINT = /date|data|fecha|calend|picker|toggle|dropdown|expand|open|abrir|abre/i;
+  const label = (n) => ((n.getAttribute("aria-label") || "") + " " + (n.title || "")).trim();
+  // the branch of `box` that holds `n` holds no other (visible) field
+  const ownBranch = (n, box) => {
+    let branch = n;
+    while (branch.parentElement && branch.parentElement !== box) branch = branch.parentElement;
+    const fields = Array.from(branch.querySelectorAll(FIELDS));
+    if (branch.matches(FIELDS)) fields.push(branch);
+    return !fields.some((f) => f !== el && visible(f));
+  };
+  const usable = (n, box) => n !== el && !n.contains(el) && visible(n)
+    && !(n.type === "submit" && n.form) && n.type !== "reset" && ownBranch(n, box);
+  const specific = (n) => n.matches(SPECIFIC) || HINT.test(label(n));
+  // an unlabelled icon button (▾, a calendar glyph) next to the field
+  const iconish = (n) =>
+    n.matches(GENERIC) && !label(n) && (n.textContent || "").trim().length <= 2;
+  let box = el.parentElement;
+  for (let up = 0; box && up < 4; up++, box = box.parentElement) {
+    const all = Array.from(box.querySelectorAll(SPECIFIC + ", " + GENERIC))
+      .filter((n) => usable(n, box));
+    const found = all.find(specific) || all.find(iconish);
+    if (found) { found.setAttribute("data-visus-toggle", "1"); return true; }
+  }
+  return false;
+}"""
+
 _COMMIT_JS = r"""(el) => {
   el.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
@@ -550,6 +594,11 @@ def pick_date(page: Any, field: Any, start: date | str, end: date | str | None =
     def reopen() -> None:
         loc.click()
         page.wait_for_timeout(_SETTLE_MS)
+        scan = cast(dict[str, Any], page.evaluate(_CALENDAR_JS))
+        if not scan.get("panels") and loc.evaluate(_TOGGLE_JS):
+            # clicar no campo não abriu nada: o calendário abre pelo botão do componente
+            page.locator("[data-visus-toggle]").first().click()
+            page.wait_for_timeout(_SETTLE_MS)
 
     reopen()
     if end is None:

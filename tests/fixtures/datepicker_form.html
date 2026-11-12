@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Date field in a form</title>
+</head>
+<body>
+<!-- campos bloqueados SEM calendário, no meio de um formulário: quando o clique no campo não
+     abre nada, o pick_date procura o botão do componente — e não pode clicar o botão de
+     OUTRO campo, nem Salvar/Excluir/Pesquisar do formulário -->
+<form id="form" onsubmit="event.preventDefault(); window.__clicks.submit++;">
+  <div class="row">
+    <div class="col"><label>Data <input id="plain" readonly value="10/23/2026"></label></div>
+    <div class="col">
+      <div class="input-group">
+        <input id="other" readonly value="10/23/2026">
+        <button type="button" class="other-toggle" aria-label="Toggle dropdown"
+                onclick="window.__clicks.otherToggle++">&#9662;</button>
+      </div>
+    </div>
+  </div>
+  <div class="filter">
+    <input id="solo" readonly value="10/23/2026">
+    <button type="button" onclick="window.__clicks.search++">Pesquisar</button>
+    <button type="button" aria-label="Pesquisar" onclick="window.__clicks.searchIcon++">&#128269;</button>
+    <button onclick="window.__clicks.ok++">OK</button>
+  </div>
+  <div class="actions">
+    <button type="button" onclick="window.__clicks.remove++">Excluir</button>
+    <button type="submit">Salvar</button>
+  </div>
+</form>
+<script>
+  window.__clicks = { submit: 0, otherToggle: 0, search: 0, searchIcon: 0, ok: 0, remove: 0 };
+</script>
+</body>
+</html>

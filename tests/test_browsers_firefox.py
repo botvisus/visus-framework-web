@@ -60,3 +60,19 @@ def test_registry_firefox_config_present():
     assert cfg.engine is Engine.FIREFOX
     assert callable(cfg.options_factory)
     assert callable(cfg.driver_factory)
+
+
+def test_http_continua_http_sem_https_first(tmp_path):
+    """Firefox tem o próprio HTTPS-First/HTTPS-Only: http:// de intranet não pode virar
+    https forçado (lento num host sem TLS) nem cair na página de aviso."""
+    prefs = firefox.build_options(
+        headless=False, download_dir=str(tmp_path), user_data_dir=str(tmp_path / "p")
+    ).preferences
+    for pref in (
+        "dom.security.https_first",
+        "dom.security.https_first_pbm",
+        "dom.security.https_first_schemeless",
+        "dom.security.https_only_mode",
+        "dom.security.https_only_mode_pbm",
+    ):
+        assert prefs.get(pref) is False, pref

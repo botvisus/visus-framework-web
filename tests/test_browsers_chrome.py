@@ -41,3 +41,16 @@ def test_fora_de_container_nao_desliga_o_sandbox(tmp_path, monkeypatch):
     monkeypatch.delenv("VISUS_CHROME_NO_SANDBOX", raising=False)
     monkeypatch.setattr(chrome.sys, "platform", "win32")
     assert chrome.in_container() is False
+
+
+def test_http_continua_http_sem_https_first(tmp_path):
+    """Intranet de empresa é http:// puro: o Chrome não pode tentar https antes (lento) nem
+    barrar/avisar 'site não seguro' (a navegação ficava na Nova guia, sem erro nenhum)."""
+    opts = chrome.build_options(
+        headless=False, download_dir=str(tmp_path), user_data_dir=str(tmp_path / "p")
+    )
+    disabled = [a for a in opts.arguments if a.startswith("--disable-features=")]
+    assert len(disabled) == 1  # o Chrome só respeita UM --disable-features
+    features = disabled[0].split("=", 1)[1].split(",")
+    assert {"HttpsUpgrades", "HttpsFirstBalancedModeAutoEnable"} <= set(features)
+    assert opts.experimental_options["prefs"]["https_only_mode_enabled"] is False

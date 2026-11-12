@@ -188,3 +188,33 @@ def test_campo_que_aceita_digitar_nao_abre_o_calendario(page) -> None:  # type: 
 def test_locator_pick_date_na_api(page) -> None:  # type: ignore[no-untyped-def]
     page.locator("#gmes").pick_date("2026-11-02", "2026-11-06")
     assert page.locator("#gmes").input_value() == "11/2/2026 ~ 11/6/2026"
+
+
+@pytest.mark.browser
+def test_campo_bloqueado_que_so_abre_pelo_botao(page) -> None:  # type: ignore[no-untyped-def]
+    """InputDate do Wijmo: o campo é readonly e clicar nele não abre o calendário — só o
+    botão ▾ do componente. O pick_date tem de achar esse botão, navegar e clicar o dia."""
+    msg = dates.pick_date(page, page.locator("#wijmo"), date(2026, 12, 9))
+    assert page.locator("#wijmo").input_value() == "2026/12/09"
+    assert "2026/12/09" in msg
+
+
+@pytest.fixture
+def form_page(browser, base_url):  # type: ignore[no-untyped-def]
+    p = browser.new_page()
+    p.goto(f"{base_url}/datepicker_form.html")
+    return p
+
+
+_NO_CLICKS = {"submit": 0, "otherToggle": 0, "search": 0, "searchIcon": 0, "ok": 0, "remove": 0}
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("field", ["#plain", "#solo"])
+def test_campo_sem_calendario_nao_clica_botao_alheio(form_page, field) -> None:  # type: ignore[no-untyped-def]
+    """O botão do componente é procurado só DENTRO do componente do campo: o ▾ de outro
+    campo, Pesquisar (texto ou ícone), OK de submit, Excluir e Salvar ficam intocados — um
+    campo sem calendário dá erro, não um clique que muda a página."""
+    with pytest.raises(dates.DatePickError):
+        dates.pick_date(form_page, form_page.locator(field), date(2026, 12, 9))
+    assert form_page.evaluate("() => window.__clicks") == _NO_CLICKS

@@ -43,6 +43,16 @@
   <div id="gmes-popup" class="popup"></div>
 </div>
 
+
+<!-- 6) como o InputDate do Wijmo: o campo é bloqueado e clicar NELE não abre nada; só o
+     botão ▾ do componente abre o calendário (em inglês, YYYY/MM/DD) -->
+<div style="margin-top: 260px">
+  <div class="wj-input-group">
+    <input id="wijmo" class="wj-form-control" readonly value="2026/10/23">
+    <span class="wj-input-group-btn"><button type="button" class="wj-btn" aria-label="Toggle dropdown">&#9662;</button></span>
+  </div>
+  <div id="wijmo-popup" class="popup"></div>
+</div>
 <p id="log"></p>
 
 <script>
@@ -185,6 +195,32 @@
     gmesPopup.append(gmesCalendar(0), gmesCalendar(1));
   }
   gmes.addEventListener("click", () => { renderGmes(); gmesPopup.classList.add("open"); });
+
+  // ---- 6) InputDate do Wijmo: só o botão ▾ abre; o clique no campo não faz nada
+  const wj = document.getElementById("wijmo");
+  const wjPopup = document.getElementById("wijmo-popup");
+  let wjView = new Date(2026, 9, 1);
+  function renderWj() {
+    wjPopup.innerHTML = "";
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    const head = document.createElement("div");
+    head.className = "head";
+    const prev = document.createElement("button"); prev.className = "nav"; prev.textContent = "‹";
+    const title = document.createElement("strong"); title.textContent = `${EN[wjView.getMonth()]} ${wjView.getFullYear()}`;
+    const next = document.createElement("button"); next.className = "nav"; next.textContent = "›";
+    prev.onclick = () => { wjView = new Date(wjView.getFullYear(), wjView.getMonth() - 1, 1); renderWj(); };
+    next.onclick = () => { wjView = new Date(wjView.getFullYear(), wjView.getMonth() + 1, 1); renderWj(); };
+    head.append(prev, title, next);
+    panel.appendChild(head);
+    panel.appendChild(grid(wjView.getFullYear(), wjView.getMonth(), (day) => {
+      wj.value = `${day.getFullYear()}/${pad(day.getMonth() + 1)}/${pad(day.getDate())}`;
+      wjPopup.classList.remove("open");
+    }, () => false));
+    wjPopup.appendChild(panel);
+  }
+  document.querySelector("#wijmo + .wj-input-group-btn button, .wj-input-group .wj-btn")
+    .addEventListener("click", () => { renderWj(); wjPopup.classList.add("open"); });
 </script>
 </body>
 </html>

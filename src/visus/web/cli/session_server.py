@@ -234,6 +234,29 @@ _DROP_JS = r"""(el, a) => {
 }"""
 
 
+# O navegador que a pessoa fechou na mão (o X da janela): o objeto continua no daemon, mas
+# o WebDriver responde assim. Só estes sinais contam -- um erro qualquer não reabre nada.
+_BROWSER_GONE_TYPES = frozenset(
+    {"InvalidSessionIdException", "MaxRetryError", "NewConnectionError", "ConnectionRefusedError"}
+)
+_BROWSER_GONE_TEXT = (
+    "invalid session id",
+    "chrome not reachable",
+    "not connected to devtools",
+    "session deleted because of page crash",
+    "browser has closed the connection",
+    "connection refused",
+    "max retries exceeded",
+    "failed to establish a new connection",
+)
+# status só lê (diz "running": false); detach/shutdown encerram -- nenhuma abre outro
+_NO_REOPEN_OPS = frozenset({"status", "detach", "shutdown"})
+REOPENED_NOTE = (
+    "the browser had been closed, so a new one was opened (same profile: cookies and "
+    "logins kept) -- it starts on a blank page"
+)
+
+
 class SessionHandler:
     """Holds a live browser/context/page and dispatches ops to page operations.
 
@@ -439,6 +462,45 @@ class SessionHandler:
         if getattr(self._page._delegate, "_handle", None) == handle:
             return self._page
         return Page(SeleniumPageDelegate(driver, handle), self._page._defaults)
+
+    def _browser_gone(self) -> bool:
+        """True quando o navegador desta sessão foi fechado (a pessoa fechou a janela, ou
+        ele caiu): o objeto continua aqui, mas o WebDriver não responde mais. Só lê."""
+        if self._browser is None:
+            return False
+        driver = self._driver()
+        if driver is None:
+            return False  # página sem Selenium (testes): nada a conferir
+        try:
+            driver.window_handles  # noqa: B018 -- a chamada mais barata que toca o navegador
+        except Exception as exc:  # noqa: BLE001
+            text = f"{type(exc).__name__}: {exc}".lower()
+            return type(exc).__name__ in _BROWSER_GONE_TYPES or any(
+                sign in text for sign in _BROWSER_GONE_TEXT
+            )
+        return False
+
+    def _forget_closed_browser(self) -> None:
+        """Solta o navegador que já foi fechado, para o próximo ``_ensure`` abrir outro
+        com as mesmas opções e o mesmo perfil. O do próprio daemon fecha o que sobrou (o
+        chromedriver); o conectado (o Chrome da pessoa) só é solto, nunca fechado."""
+        browser = self._browser
+        self._stop_tracing_if_running()
+        if browser is not None:
+            try:
+                if self._attached:
+                    browser.detach()
+                else:
+                    browser.close()
+            except Exception:  # noqa: BLE001 -- já estava morto: fechar o resto é o melhor esforço
+                pass
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._capture = None
+        self._known_handles = []
+        self._active_handle = None
+        self._invalidate_fields()
 
     def _stop_tracing_if_running(self) -> None:
         """Flush a live tracing session so shutdown never orphans its log handler."""
@@ -700,6 +762,12 @@ class SessionHandler:
         args = args or {}
         with self._lock:
             self._last_op_at = time.monotonic()
+            # a pessoa fechou o navegador na mão: sem isto, TODO comando seguinte falhava
+            # com "invalid session id" até alguém parar a sessão -- o _ensure() só abre
+            # outro quando não há nenhum
+            reopened = op not in _NO_REOPEN_OPS and self._browser_gone()
+            if reopened:
+                self._forget_closed_browser()
             # Com um alert/confirm/prompt aberto, QUALQUER comando que toque a página
             # faz o ChromeDriver fechá-lo em silêncio ("dismiss and notify"): o agente
             # nunca saberia que houve um diálogo. Recusa e diz como tratá-lo.
@@ -721,7 +789,12 @@ class SessionHandler:
                 code = self._generated_code(op, args)
                 resp: dict[str, Any] = {"ok": True, "result": method(args)}
             except Exception as exc:  # noqa: BLE001 — daemon must never crash a client
-                return {"ok": False, "error": cli_hint(f"{type(exc).__name__}: {exc}")}
+                error = cli_hint(f"{type(exc).__name__}: {exc}")
+                if reopened:
+                    error = f"{REOPENED_NOTE}; then: {error}"
+                return {"ok": False, "error": error}
+            if reopened:
+                resp["note"] = REOPENED_NOTE
             # the op that ended the session (the last tab closed) leaves no page to
             # describe: reading one would launch a BRAND-NEW browser just to quit it
             if op in _MUTATING_OPS and self._browser is not None:
@@ -2020,7 +2093,8 @@ class SessionHandler:
 
     def _op_status(self, args: dict[str, Any]) -> dict[str, Any]:
         """Report session state. READ-ONLY: never adopts a background window."""
-        running = self._browser is not None
+        # o objeto existir não basta: a pessoa pode ter fechado a janela
+        running = self._browser is not None and not self._browser_gone()
         info: dict[str, Any] = {
             "running": running,
             "engine": self._engine,

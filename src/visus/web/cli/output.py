@@ -132,6 +132,11 @@ def emit_envelope(env: dict[str, Any], *, table: str | None = None) -> None:
         typer.echo("" if result is None else str(result))
         return
     typer.echo(table if table is not None else ("" if result is None else str(result)))
+    note = env.get("note")
+    if note:  # ex.: o navegador tinha sido fechado e foi reaberto
+        typer.echo("")
+        typer.echo("### Note")
+        typer.echo(f"- {note}")
     code = env.get("code")
     if code:
         typer.echo("")

@@ -265,6 +265,12 @@ def test_registry_never_records_the_token(tmp_path: Path) -> None:
         _time.sleep(0.02)
     port = int(json.loads(sf.read_text(encoding="utf-8"))["port"])
     reg = session_server.registry_file(tmp_path, "default")
+    # serve() writes the session file FIRST and the registry entry right after: waiting
+    # only for the first raced the second (failed on the Windows runners, v0.3.4/v0.3.6)
+    for _ in range(200):
+        if reg.is_file():
+            break
+        _time.sleep(0.02)
     try:
         assert reg.is_file(), "serve() did not mirror the session into the registry"
         entry = json.loads(reg.read_text(encoding="utf-8"))

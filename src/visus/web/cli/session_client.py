@@ -427,7 +427,7 @@ def start_daemon(
     else:
         start_new_session = True
 
-    subprocess.Popen(
+    daemon = subprocess.Popen(
         _daemon_argv() + [engine, env["VISUS_WEB_HEADLESS"]] + ([url] if url else []),
         cwd=str(base),
         env=env,
@@ -451,6 +451,8 @@ def start_daemon(
             if _socket_open(int(info.get("port", -1))):
                 info["_file"] = str(sf)
                 return info
+        if daemon.poll() is not None:  # it gave up (e.g. the browser refused): say why now
+            break
         time.sleep(0.1)
     log_path = base / ".visus" / "daemon.log"
     tail = _log_tail(base)
@@ -458,6 +460,8 @@ def start_daemon(
         detail = f"\n--- last lines of {log_path} ---\n{tail}"
     else:
         detail = f" (no output in {log_path})"
+    if daemon.poll() is not None:
+        raise SessionError(f"daemon exited before it came up{detail}")
     raise SessionError(f"daemon did not come up within {timeout:.0f}s{detail}")
 
 

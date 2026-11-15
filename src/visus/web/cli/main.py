@@ -1148,6 +1148,8 @@ def _cdp_address(raw: str) -> str:
     ``debuggerAddress`` wants the bare authority, so both forms are accepted.
     """
     value = raw.strip()
+    if value.lower() in ("mine", "visus"):  # the person's browser (visus.web.own_browser)
+        return value.lower()
     for prefix in ("http://", "https://", "ws://", "wss://"):
         if value.startswith(prefix):
             value = value[len(prefix) :]
@@ -1157,10 +1159,23 @@ def _cdp_address(raw: str) -> str:
 @session_app.command("attach")
 def session_attach(
     cdp: str = typer.Option(
-        ..., "--cdp", help="DevTools address, e.g. 127.0.0.1:9222 or http://localhost:9222."
+        ...,
+        "--cdp",
+        help=(
+            "DevTools address (127.0.0.1:9222), 'mine' (the Chrome/Edge you have open) or "
+            "'visus' (your installed Chrome/Edge on a profile of visus, no driver)."
+        ),
     ),
     url: str = typer.Argument(None, help="Optional URL to navigate the attached tab to."),
-    engine: str = typer.Option("chrome", "--engine", "-e", help="chrome | edge."),
+    engine: str = typer.Option(
+        None, "--engine", "-e", help="chrome | edge (default: Chrome, else Edge)."
+    ),
+    profile: str = typer.Option(
+        None, "--profile", help="With --cdp visus: the profile folder (logins are kept there)."
+    ),
+    idle_timeout: float = typer.Option(
+        None, "--idle-timeout", help="Seconds without commands before the session is released."
+    ),
 ) -> None:
     """Attach the session to a browser that is ALREADY running (chrome/edge).
 
@@ -1172,23 +1187,40 @@ def session_attach(
     as it does for `session start`. End it with `visus session detach` — a plain
     `stop` would close a window that is not yours to close.
     """
+    from visus.web import own_browser
     from visus.web.cli import output, session_client
 
+    address = _cdp_address(cdp)
+    if engine is None:
+        if address == "mine":
+            engine = own_browser.mine_engine()
+        elif address == "visus":
+            engine = own_browser.pick() or ""
+            if not engine:
+                output.emit_error("neither Chrome nor Edge is installed on this computer")
+        else:
+            engine = "chrome"
     if engine not in ("chrome", "edge"):
         output.emit_error(
             f"attaching needs chrome or edge, not {engine!r} — no other engine "
             "exposes the Chrome DevTools Protocol"
         )
     try:
-        info = session_client.start_daemon(engine, False, url, debugger_address=_cdp_address(cdp))
+        info = session_client.start_daemon(
+            engine,
+            False,
+            url,
+            debugger_address=address,
+            user_data_dir=profile if address == "visus" else None,
+            idle_timeout=idle_timeout,
+            # "mine" waits for the person to click Allow on the browser
+            timeout=own_browser.CONSENT_TIMEOUT_S + 30 if address == "mine" else 20.0,
+        )
     except session_client.SessionError as exc:
         output.emit_error(str(exc))
     output.emit(
         info,
-        table=(
-            f"attached to {_cdp_address(cdp)} "
-            f"(pid {info['pid']}, port {info['port']}, engine {engine})"
-        ),
+        table=(f"attached to {address} (pid {info['pid']}, port {info['port']}, engine {engine})"),
     )
 
 

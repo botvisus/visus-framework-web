@@ -89,6 +89,9 @@ def test_start_daemon_exports_the_gate(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, *a: Any, **kw: Any) -> None:
             captured["env"] = kw["env"]
 
@@ -107,6 +110,9 @@ def test_start_daemon_omits_the_gate_by_default(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, *a: Any, **kw: Any) -> None:
             captured["env"] = kw["env"]
 

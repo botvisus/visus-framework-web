@@ -296,6 +296,12 @@ class SessionHandler:
         # True when the browser belongs to somebody else: closing it would destroy
         # the user's own window, so only `detach` may end such a session.
         self._attached = debugger_address is not None
+        # "mine"/"visus": the person's Chrome/Edge (visus.web.own_browser) -- resolved to a
+        # real address when the browser is first needed
+        self._own = debugger_address if debugger_address in ("mine", "visus") else None
+        self._shim: Any = None
+        # with "mine", the tabs that are the agent's: it never takes over one of the person's
+        self._own_tabs: set[str] = set()
         self._detached = False
         self._device = device
         self._browser: Browser | None = None
@@ -346,15 +352,30 @@ class SessionHandler:
         return self._last_op_at
 
     # --- lifecycle -------------------------------------------------------
+    def _own_address(self) -> str | None:
+        """The DevTools address of the person's browser (``--cdp mine|visus``)."""
+        from visus.web import own_browser
+
+        engine = "edge" if self._engine == "edge" else "chrome"
+        if self._own == "visus":
+            folder = self._user_data_dir or str(Path.cwd() / ".visus" / "profiles" / engine)
+            return own_browser.launch(engine, Path(folder))
+        if self._shim is not None:
+            self._shim.close()
+        address, self._shim = own_browser.connect_mine(engine)
+        return address
+
     def _ensure(self) -> None:
         if self._browser is None:
+            address = self._own_address() if self._own else self._debugger_address
             self._browser = launch(
                 Engine.from_str(self._engine),
                 headless=self._headless,
                 slow_mo=self._slow_mo,
-                user_data_dir=self._user_data_dir,
+                # attaching: the profile is the browser's own (visus never launches it)
+                user_data_dir=None if self._own else self._user_data_dir,
                 remote_url=self._remote_url,
-                debugger_address=self._debugger_address,
+                debugger_address=address,
                 # o diálogo que um clique abriu fica até o agente tratá-lo: sem isto,
                 # a leitura do estado da página logo após o clique o fechava sozinha
                 keep_dialogs=True,
@@ -367,6 +388,10 @@ class SessionHandler:
                 # new_context() here would spawn a SECOND WebDriver/browser window
                 # (the daemon is headed) — that was the "2 browsers" bug.
                 self._page = self._browser.new_page()
+                if self._own == "mine":
+                    # the first page is the tab the person is on: the agent works in a new one
+                    self._page = self._browser.new_page()
+                    self._own_tabs.add(self._page.handle)
                 # BEFORE the initial goto: a device session whose first load saw a
                 # desktop viewport would render (and cache) the wrong layout.
                 if self._device:
@@ -426,11 +451,33 @@ class SessionHandler:
         The ``tab``/``tab_activate`` ops override."""
         new = [h for h in handles if h not in self._known_handles]
         self._known_handles = list(handles)
+        if self._own == "mine":
+            # in the person's browser: only a tab opened BY one of the agent's tabs (a
+            # popup, a link with target=_blank) is followed -- never one the person opened
+            new = [h for h in new if self._opened_by_agent(h)]
+            self._own_tabs.update(new)
         if new and self._follow:
             self._active_handle = new[-1]  # follow the newest new tab/popup
         if self._active_handle not in handles:
-            self._active_handle = handles[-1]
+            mine = [h for h in handles if h in self._own_tabs] if self._own == "mine" else []
+            self._active_handle = mine[-1] if mine else self._fallback_tab(handles)
         return self._active_handle
+
+    def _opened_by_agent(self, handle: str) -> bool:
+        opener = self._shim.opener(handle) if self._shim is not None else None
+        return opener is not None and opener in self._own_tabs
+
+    def _fallback_tab(self, handles: list[str]) -> str:
+        """The agent's tab is gone: in the person's browser, a new tab of its own (never
+        one of the person's); otherwise the newest."""
+        if self._own != "mine":
+            return handles[-1]
+        driver = self._driver()
+        driver.switch_to.new_window("tab")
+        handle = str(driver.current_window_handle)
+        self._own_tabs.add(handle)
+        self._known_handles.append(handle)
+        return handle
 
     def _peek_active(self, handles: list[str]) -> str:
         """The active handle WITHOUT adopting new windows or mutating state.
@@ -518,16 +565,30 @@ class SessionHandler:
     def close(self) -> None:
         self._stop_tracing_if_running()
         if self._browser is not None:
-            self._browser.close()
+            if self._attached:  # the person's browser: released, never closed
+                self._browser.detach()
+            else:
+                self._browser.close()
         self._browser = None
+        self._close_shim()
         self._context = None
         self._page = None
         self._capture = None  # a capture without a browser is meaningless
         self._invalidate_fields()
 
+    def _close_shim(self) -> None:
+        if self._shim is not None:
+            self._shim.close()
+            self._shim = None
+
     def detach(self) -> None:
         """Mark this session for release — ``serve()`` must not close the browser."""
         self._detached = True
+
+    @property
+    def attached(self) -> bool:
+        """The browser is not this session's (``attach``): it is released, never closed."""
+        return self._attached
 
     def detached(self) -> bool:
         """True once :meth:`detach` was called (read by ``serve()``'s teardown)."""
@@ -543,6 +604,7 @@ class SessionHandler:
         if self._browser is not None:
             self._browser.detach()
         self._browser = None
+        self._close_shim()
         self._context = None
         self._page = None
         self._capture = None
@@ -2101,6 +2163,7 @@ class SessionHandler:
             "headless": self._headless,
             "allow_run_code": self._allow_run_code,
             "attached": self._attached,
+            "own": self._own,  # "mine" | "visus" | None (visus.web.own_browser)
             "device": self._device,
             "follow": self._follow,
             "user_data_dir": self._user_data_dir,
@@ -2526,9 +2589,10 @@ def serve(
             if remaining <= 0:
                 break
             worker.join(timeout=remaining)
-        if handler.detached():
+        if handler.detached() or handler.attached:
             # An attached browser belongs to the user: end the WebDriver session,
-            # never the window.
+            # never the window -- also when the session ends idle (that reached
+            # ``driver.quit()``, which may close the person's browser).
             handler.release()
         else:
             handler.close()
@@ -2640,6 +2704,14 @@ def main(argv: list[str] | None = None) -> None:
         debugger_address=debugger_address,
         device=device,
     )
+    if debugger_address in ("mine", "visus"):
+        # o navegador da pessoa conecta já (com "mine", ela clica em Permitir agora): o
+        # 1º comando não espera pelo clique, e um erro aparece no `session attach`
+        try:
+            handler.page()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"daemon could not connect to the browser: {exc}")
+            return
     try:
         serve(handler, token=token, idle_timeout=_idle_timeout_from_env(), name=name)
     except SessionLockedError as exc:

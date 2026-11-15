@@ -101,6 +101,9 @@ def test_the_daemon_spawn_stays_detached(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, argv: list[str], **kw: Any) -> None:
             captured["argv"] = argv
             captured.update(kw)
@@ -136,6 +139,9 @@ def test_the_daemon_runs_under_pythonw_so_it_allocates_no_console(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, argv: list[str], **kw: Any) -> None:
             captured["argv"] = argv
 

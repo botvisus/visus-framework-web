@@ -1627,6 +1627,9 @@ def test_start_daemon_forwards_the_idle_timeout(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, *a: Any, **kw: Any) -> None:
             captured["env"] = kw["env"]
 
@@ -1656,7 +1659,8 @@ def test_start_daemon_timeout_reports_the_real_daemon_log(tmp_path: Path) -> Non
         session_client.start_daemon("chrome", True, None, cwd=tmp_path, timeout=8.0)
 
     message = str(excinfo.value)
-    assert "did not come up within 8s" in message
+    # the daemon gave up: said at once, not after waiting the whole 8 s
+    assert "exited before it came up" in message, message
     assert "daemon aborting" in message, message
     assert "already holds" in message, message
 
@@ -1699,6 +1703,9 @@ def test_start_daemon_retries_through_partial_session_file(
     state = {"calls": 0}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, *a: Any, **kw: Any) -> None:
             # First write a corrupt/partial file (simulates a mid-write read).
             sf.write_text("{partial", encoding="utf-8")

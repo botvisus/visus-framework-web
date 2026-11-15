@@ -52,6 +52,9 @@ def test_start_daemon_spawns_the_override_with_the_daemon_args(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, argv: list[str], **kw: Any) -> None:
             captured["argv"] = argv
 

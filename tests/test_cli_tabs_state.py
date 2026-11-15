@@ -286,6 +286,9 @@ def test_start_daemon_exports_launch_options(
     captured: dict[str, Any] = {}
 
     class _Popen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, argv: list[str], **kwargs: Any) -> None:
             captured["argv"] = argv
             captured["env"] = kwargs["env"]

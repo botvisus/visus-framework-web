@@ -321,6 +321,9 @@ def test_start_daemon_exports_the_debugger_address(
     captured: dict[str, Any] = {}
 
     class _FakePopen:
+        def poll(self) -> None:  # o daemon de mentira não sai
+            return None
+
         def __init__(self, *a: Any, **kw: Any) -> None:
             captured["env"] = kw["env"]
 

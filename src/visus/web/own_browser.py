@@ -55,8 +55,9 @@ BROWSERS: tuple[Browser, ...] = ("chrome", "edge")
 CONSENT_TIMEOUT_S = 120.0
 
 _WIN_EXE = {
-    "chrome": (r"Google\Chrome\Application\chrome.exe",),
-    "edge": (r"Microsoft\Edge\Application\msedge.exe",),
+    # barra normal: vale no Windows e nos testes que rodam no Linux
+    "chrome": ("Google/Chrome/Application/chrome.exe",),
+    "edge": ("Microsoft/Edge/Application/msedge.exe",),
 }
 _MAC_EXE = {
     "chrome": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",

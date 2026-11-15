@@ -2,7 +2,7 @@
 name: visus-web
 description: Drive a real browser from the shell with the `visus` CLI — session daemon, list-fields/act-by-index, role/name targeting, expect-text, codegen, vision. Use when automating or testing a web page.
 allowed-tools: Bash(visus:*) Bash(visus-web-mcp:*) Bash(pip:*) Bash(uvx:*)
-version: "0.3.4"
+version: "0.3.5"
 ---
 
 # visus-web

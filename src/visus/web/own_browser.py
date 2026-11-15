@@ -419,18 +419,61 @@ def find_open(
     return None
 
 
-def mine_engine(order: tuple[Browser, ...] = BROWSERS) -> Browser:
-    """Which browser ``--cdp mine`` will use: the open one with debugging allowed, else
-    the first installed (the error then says how to turn it on)."""
-    found = find_open(order)
-    if found:
-        return found[0]
-    return pick(order) or order[0]
+def mine_engine(
+    order: tuple[Browser, ...] = BROWSERS,
+    *,
+    find: Callable[[Browser], str | None] = executable,
+    folder: Callable[[Browser], Path] = profile_dir,
+    enabled: Callable[[Path], bool] = remote_debugging_enabled,
+    live: Callable[[Path], tuple[int, str] | None] = endpoint,
+) -> Browser:
+    """Which browser ``--cdp mine`` will use, in the person's order (Chrome, then Edge):
+    the first installed one with remote debugging allowed -- open or not, it is opened
+    when needed --, else one already open with it, else the first installed (the error
+    then says how to turn it on). Medido: with Chrome closed it picked an open Edge."""
+    for browser in order:
+        if find(browser) and enabled(folder(browser)):
+            return browser
+    for browser in order:
+        if live(folder(browser)):
+            return browser
+    return pick(order, find=find) or order[0]
 
 
-def connect_mine(engine: Browser) -> tuple[str, DevToolsShim]:
-    """The person's open *engine*: starts the shim; ``(debuggerAddress, shim)``."""
-    found = endpoint(profile_dir(engine))
+def _open_normally(browser: Browser, *, popen: Callable[..., Any] = subprocess.Popen) -> None:
+    """The person's browser, as if they opened it (their profile, no flags)."""
+    exe = executable(browser)
+    if exe is None:
+        raise OwnBrowserError(f"{browser} is not installed on this computer")
+    flags: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        flags["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        flags["close_fds"] = True
+    else:
+        flags["start_new_session"] = True
+    popen([exe], **flags)
+
+
+def connect_mine(
+    engine: Browser,
+    *,
+    opener: Callable[[Browser], None] = _open_normally,
+    wait_s: float = 30.0,
+) -> tuple[str, DevToolsShim]:
+    """The person's *engine*: opens it when it is closed (with remote debugging allowed it
+    serves the debugging port on its own), starts the shim; ``(debuggerAddress, shim)``."""
+    folder = profile_dir(engine)
+    found = endpoint(folder)
+    if found is None and remote_debugging_enabled(folder):
+        opener(engine)
+        deadline = time.monotonic() + wait_s
+        while found is None and time.monotonic() < deadline:
+            time.sleep(0.3)
+            found = endpoint(folder)
     if found is None:
         page = (
             "chrome://inspect/#remote-debugging"

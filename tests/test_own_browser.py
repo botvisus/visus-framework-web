@@ -236,13 +236,72 @@ def test_mine_without_the_switch_says_where_to_turn_it_on(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(ob, "profile_dir", lambda b: tmp_path)
+    opened: list[str] = []
     with pytest.raises(ob.OwnBrowserError, match="edge://inspect/#remote-debugging"):
-        ob.connect_mine("edge")
-    monkeypatch.setattr(ob, "find_open", lambda order=ob.BROWSERS: None)
-    monkeypatch.setattr(ob, "pick", lambda order=ob.BROWSERS: "edge")
-    assert ob.mine_engine() == "edge", "nenhum aberto: o instalado, e o erro diz como ligar"
-    monkeypatch.setattr(ob, "find_open", lambda order=ob.BROWSERS: ("chrome", 1, "/p"))
-    assert ob.mine_engine() == "chrome"
+        ob.connect_mine("edge", opener=opened.append)
+    assert opened == [], "sem a opção ligada, abrir não adianta"
+
+
+def test_mine_opens_the_closed_browser_when_the_switch_is_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Medido: com o Chrome fechado (a opção ligada), o agente desistia."""
+    import socket
+
+    monkeypatch.setattr(ob, "profile_dir", lambda b: tmp_path)
+    _state(tmp_path, {"devtools": {"remote_debugging": {"user-enabled": True}}})
+    with socket.socket() as srv:
+        srv.bind(("127.0.0.1", 0))
+        srv.listen()
+        port = srv.getsockname()[1]
+
+        def opener(browser: str) -> None:
+            (tmp_path / "DevToolsActivePort").write_text(f"{port}\n/devtools/browser/z")
+
+        started: list[tuple[int, str]] = []
+
+        class _Shim:
+            def __init__(self, p: int, path: str) -> None:
+                started.append((p, path))
+
+            def start(self) -> str:
+                return "127.0.0.1:1"
+
+        monkeypatch.setattr(ob, "DevToolsShim", _Shim)
+        address, _ = ob.connect_mine("chrome", opener=opener, wait_s=5)
+    assert address == "127.0.0.1:1" and started == [(port, "/devtools/browser/z")]
+
+
+def test_mine_prefers_chrome_with_the_switch_even_closed(tmp_path: Path) -> None:
+    folders = {"chrome": tmp_path / "c", "edge": tmp_path / "e"}
+    on = {folders["chrome"]}
+    live = {folders["edge"]: (1, "/e")}
+    engine = ob.mine_engine(
+        find=lambda b: "x",
+        folder=lambda b: folders[b],
+        enabled=lambda f: f in on,
+        live=lambda f: live.get(f),
+    )
+    assert engine == "chrome", "medido: com o Chrome fechado, escolhia o Edge aberto"
+    on.clear()
+    assert (
+        ob.mine_engine(
+            find=lambda b: "x",
+            folder=lambda b: folders[b],
+            enabled=lambda f: False,
+            live=lambda f: live.get(f),
+        )
+        == "edge"
+    ), "sem a opção em nenhum: o que está aberto com ela"
+    assert (
+        ob.mine_engine(
+            find=lambda b: "x" if b == "edge" else None,
+            folder=lambda b: folders[b],
+            enabled=lambda f: False,
+            live=lambda f: None,
+        )
+        == "edge"
+    ), "senão, o instalado"
 
 
 def test_the_shim_answers_404_and_a_browser_error() -> None:

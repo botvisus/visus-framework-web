@@ -82,7 +82,7 @@ jobs:
               sys.exit(f"wheel is missing required files: {missing}")
           PY
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/

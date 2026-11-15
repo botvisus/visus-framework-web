@@ -195,3 +195,74 @@ def test_in_the_persons_browser_the_agent_never_takes_their_tab() -> None:
     assert handler._resolve_active(["PERSON", "AGENT", "NEWTAB"]) == "AGENT", "a da pessoa"
     assert handler._resolve_active(["PERSON", "AGENT", "NEWTAB", "POPUP"]) == "POPUP"
     assert handler.attached, "conectada: soltar, nunca fechar"
+
+
+def test_the_installed_browser_on_mac_and_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ob.shutil, "which", lambda name: f"/usr/bin/{name}" if "edge" in name else None
+    )
+    assert ob.executable("edge", platform="linux") == "/usr/bin/microsoft-edge"
+    assert ob.executable("chrome", platform="linux") is None
+    assert ob.executable("chrome", platform="darwin") in (None, ob._MAC_EXE["chrome"])
+
+
+def test_is_running_asks_the_system(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Done:
+        def __init__(self, stdout: str = "", returncode: int = 0) -> None:
+            self.stdout, self.returncode = stdout, returncode
+
+    monkeypatch.setattr(
+        ob.subprocess, "run", lambda argv, **kw: _Done('"chrome.exe","1","Console"')
+    )
+    assert ob.is_running("chrome", platform="win32")
+    assert not ob.is_running("edge", platform="win32")
+    monkeypatch.setattr(ob.subprocess, "run", lambda argv, **kw: _Done(returncode=1))
+    assert not ob.is_running("chrome", platform="linux")
+
+
+def test_the_switch_reads_a_broken_local_state_as_off(tmp_path: Path) -> None:
+    (tmp_path / "Local State").write_text("{nao é json", encoding="utf-8")
+    assert not ob.remote_debugging_enabled(tmp_path)
+
+
+def test_a_browser_that_never_opens_its_port_says_so(tmp_path: Path) -> None:
+    with pytest.raises(ob.OwnBrowserError, match="did not open"):
+        ob.launch(
+            "chrome", tmp_path, find=lambda b: "c.exe", popen=lambda *a, **k: None, wait_s=0.3
+        )
+
+
+def test_mine_without_the_switch_says_where_to_turn_it_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ob, "profile_dir", lambda b: tmp_path)
+    with pytest.raises(ob.OwnBrowserError, match="edge://inspect/#remote-debugging"):
+        ob.connect_mine("edge")
+    monkeypatch.setattr(ob, "find_open", lambda order=ob.BROWSERS: None)
+    monkeypatch.setattr(ob, "pick", lambda order=ob.BROWSERS: "edge")
+    assert ob.mine_engine() == "edge", "nenhum aberto: o instalado, e o erro diz como ligar"
+    monkeypatch.setattr(ob, "find_open", lambda order=ob.BROWSERS: ("chrome", 1, "/p"))
+    assert ob.mine_engine() == "chrome"
+
+
+def test_the_shim_answers_404_and_a_browser_error() -> None:
+    ws = _Ws()
+    shim = ob.DevToolsShim(9222, "/x", connect=lambda url, **kw: ws)
+    address = shim.start()
+    try:
+        import urllib.error
+
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(f"http://{address}/other")  # noqa: S310
+        assert err.value.code == 404
+        ws.send = lambda raw: ws._replies.append(  # type: ignore[method-assign]
+            json.dumps({"id": json.loads(raw)["id"], "error": {"message": "x"}})
+        )
+        with pytest.raises(ob.OwnBrowserError):
+            shim.call("Browser.getVersion")
+        assert shim.opener("A") is None, "sem resposta: ninguém abriu"
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(f"http://{address}/json/version")  # noqa: S310
+        assert err.value.code == 502, "o navegador sumiu"
+    finally:
+        shim.close()

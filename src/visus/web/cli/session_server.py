@@ -356,7 +356,7 @@ class SessionHandler:
         """The DevTools address of the person's browser (``--cdp mine|visus``)."""
         from visus.web import own_browser
 
-        engine = "edge" if self._engine == "edge" else "chrome"
+        engine: own_browser.Browser = "edge" if self._engine == "edge" else "chrome"
         if self._own == "visus":
             folder = self._user_data_dir or str(Path.cwd() / ".visus" / "profiles" / engine)
             return own_browser.launch(engine, Path(folder))

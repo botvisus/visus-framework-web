@@ -48,6 +48,12 @@ def _isolate_visus_home(_visus_home_root, monkeypatch):  # type: ignore[no-untyp
     runs after this one and wins.
     """
     monkeypatch.setenv("VISUS_WEB_HOME", str(_visus_home_root))
+    # The skill-drift box goes to stderr, which CliRunner folds into `result.output`: with
+    # a stale `.claude/skills/visus-web` in the checkout (gitignored, left by
+    # `visus install --skills`) it landed after every `--json` payload a test parsed
+    # ("Extra data") -- failing locally and on the CI runners. The check's own tests call
+    # skill_check directly and are unaffected.
+    monkeypatch.setenv("VISUS_WEB_NO_SKILL_CHECK", "1")
 
 
 class _FixtureHandler(http.server.SimpleHTTPRequestHandler):

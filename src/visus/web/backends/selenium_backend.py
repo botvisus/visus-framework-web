@@ -7,12 +7,13 @@ import functools
 import os
 import shutil
 import tempfile
+import time
 import weakref
 from collections.abc import Callable
 from typing import Any, cast
 
 from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import SessionNotCreatedException, WebDriverException
 from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.remote.webdriver import WebDriver
 
@@ -21,6 +22,9 @@ from visus.web.backends.selenium.driver_delegate import (
     SeleniumContextDelegate,
     translate_exc,
 )
+
+#: the pause before the one retry of a browser that failed to start
+SESSION_RETRY_DELAY_S = 1.0
 
 
 def _cleanup(
@@ -83,12 +87,22 @@ def _spawn_driver(
         # command runs while it is open — an agent reading the page state right after
         # the click that opened it would lose the dialog it is about to handle.
         cast(ArgOptions, options).unhandled_prompt_behavior = "ignore"
-    try:
+
+    def _create() -> WebDriver:
         if remote_url is not None:
-            driver = webdriver.Remote(command_executor=remote_url, options=options)  # type: ignore[arg-type]
-        else:
-            service = config.service_factory()
-            driver = cast(WebDriver, config.driver_factory(options=options, service=service))
+            return webdriver.Remote(command_executor=remote_url, options=options)  # type: ignore[arg-type]
+        service = config.service_factory()
+        return cast(WebDriver, config.driver_factory(options=options, service=service))
+
+    try:
+        try:
+            driver = _create()
+        except SessionNotCreatedException:
+            # Measured (Windows CI runners, a loaded PC): the browser sometimes fails to
+            # start on the first try ("session not created", "Chrome failed to start:
+            # crashed") and starts fine a second later -- one retry, then the real error.
+            time.sleep(SESSION_RETRY_DELAY_S)
+            driver = _create()
     except WebDriverException as exc:
         if owns_profile:
             shutil.rmtree(profile_dir, ignore_errors=True)

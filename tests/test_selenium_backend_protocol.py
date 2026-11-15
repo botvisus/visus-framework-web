@@ -137,3 +137,47 @@ def test_cleanup_respects_owns_profile(tmp_path):
     _cleanup(weakref.ref(d), str(profile), str(dl), True)
     assert not profile.exists()
     assert not dl.exists()
+
+
+def test_a_browser_that_fails_to_start_once_is_retried(monkeypatch):
+    """Measured on the Windows CI runners and a loaded PC: "session not created" on the
+    first try, fine a second later. One retry; a second failure is the real error."""
+    import pytest
+    from selenium.common.exceptions import SessionNotCreatedException
+
+    import visus.web.backends.selenium_backend as sb
+    from visus.web import errors
+
+    monkeypatch.setattr(sb, "SESSION_RETRY_DELAY_S", 0)
+    attempts = {"n": 0}
+
+    def flaky(**k):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise SessionNotCreatedException("session not created: Chrome failed to start")
+        return _SpawnableFakeDriver()
+
+    cfg = BrowserConfig(
+        engine=Engine.CHROME,
+        options_factory=lambda **k: None,
+        service_factory=lambda: None,
+        driver_factory=flaky,
+    )
+    delegate = SeleniumBackend().launch(cfg, headless=True)
+    assert attempts["n"] == 2
+    delegate.dispose()
+
+    def broken(**k):
+        attempts["n"] += 1
+        raise SessionNotCreatedException("session not created: no Chrome")
+
+    attempts["n"] = 0
+    cfg = BrowserConfig(
+        engine=Engine.CHROME,
+        options_factory=lambda **k: None,
+        service_factory=lambda: None,
+        driver_factory=broken,
+    )
+    with pytest.raises(errors.VisusWebError):
+        SeleniumBackend().launch(cfg, headless=True)
+    assert attempts["n"] == 2, "só uma nova tentativa"

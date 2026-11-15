@@ -141,12 +141,7 @@ def test_read_skill_returns_none_when_missing(tmp_path: Path) -> None:
 def test_frame_pads_every_line_to_the_widest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(skill_check.sys, "stderr", io.StringIO())  # utf-8 capable
     out = skill_check.frame(["ab", "cdefg"])
-    assert out == (
-        "╔═══════╗\n"
-        "║ ab    ║\n"
-        "║ cdefg ║\n"
-        "╚═══════╝\n"
-    )
+    assert out == ("╔═══════╗\n║ ab    ║\n║ cdefg ║\n╚═══════╝\n")
 
 
 def test_frame_falls_back_to_ascii_on_a_cp1252_console(
@@ -221,6 +216,7 @@ def test_cli_warns_after_the_skill_is_edited(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Port of playwright-cli tests/integration.spec.ts:75-86."""
+    monkeypatch.delenv("VISUS_WEB_NO_SKILL_CHECK")  # this test IS the check (conftest)
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["install", "--skills=claude"]).exit_code == 0
     installed = tmp_path / ".claude" / "skills" / "visus-web" / "SKILL.md"
@@ -336,3 +332,20 @@ def test_help_advertises_the_skill_install() -> None:
     assert result.exit_code == 0, result.output
     assert "Installing skills" in result.output
     assert "visus install --skills" in result.output
+
+
+def test_the_skill_check_can_be_turned_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """VISUS_WEB_NO_SKILL_CHECK=1: the CLI skips the check (an automation that reads the
+    output); unset, it runs."""
+    from typer.testing import CliRunner
+
+    from visus.web.cli.main import app
+
+    calls: list[str] = []
+    monkeypatch.setattr(skill_check, "check_installed_skills", lambda: calls.append("x"))
+    monkeypatch.setenv("VISUS_WEB_NO_SKILL_CHECK", "1")
+    CliRunner().invoke(app, ["version"])
+    assert calls == []
+    monkeypatch.delenv("VISUS_WEB_NO_SKILL_CHECK")
+    CliRunner().invoke(app, ["version"])
+    assert calls == ["x"]

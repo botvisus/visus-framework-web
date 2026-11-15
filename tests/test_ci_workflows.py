@@ -55,8 +55,7 @@ def test_fast_lane_covers_windows_and_the_declared_python_floor() -> None:
     job = _load(CI)["jobs"]["fast-tests"]
     matrix = job["strategy"]["matrix"]
     assert "windows-latest" in matrix["os"], (
-        "Windows-first project: main.py shells to PowerShell, session_client.py "
-        "shells to tasklist"
+        "Windows-first project: main.py shells to PowerShell, session_client.py shells to tasklist"
     )
     assert "ubuntu-latest" in matrix["os"]
     assert "3.10" in matrix["python"], 'requires-python = ">=3.10"'
@@ -92,10 +91,12 @@ def test_browser_lane_pins_xdist_parallelism_instead_of_auto() -> None:
     `browser` marker) and workers die with `_ArrayMemoryError`. A real full-suite
     run measured `-n 4` as safe (935 passed, 7 skipped, 0 failed, 14m52s); relying
     on the bare `-n auto` baked into `[tool.pytest.ini_options] addopts` would let
-    a wide GitHub-hosted runner rediscover that crash.
+    a wide GitHub-hosted runner rediscover that crash. Then `-n 3`: on the 4-core
+    windows runners, 4 browsers plus the fixture servers flaked (renderer timeouts,
+    "session not created") in the v0.3.4 and v0.3.6 release runs.
     """
     run = _run_text(_load(CI)["jobs"]["browser-tests"])
-    assert "-n 4" in run, "pin xdist workers explicitly rather than trust -n auto's default"
+    assert "-n 3" in run, "pin xdist workers explicitly rather than trust -n auto's default"
 
 
 def test_workflow_files_are_well_formed_yaml() -> None:
@@ -106,10 +107,7 @@ def test_workflow_files_are_well_formed_yaml() -> None:
 PUBLISH = REPO_ROOT / ".github" / "workflows" / "publish.yml"
 
 
-GUARD = (
-    "github.event_name == 'release' && "
-    "github.event.release.target_commitish == 'main'"
-)
+GUARD = "github.event_name == 'release' && github.event.release.target_commitish == 'main'"
 
 
 def test_every_publish_job_is_guarded_to_a_real_release() -> None:

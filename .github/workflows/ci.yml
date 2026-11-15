@@ -158,8 +158,10 @@ jobs:
       # 935 passed, 7 skipped, 0 failed in 14m52s. GitHub-hosted windows-latest
       # runners are not guaranteed to stay small-core forever, so this is pinned
       # explicitly rather than left to whatever `os.cpu_count()` reports.
+      # Then -n 3: on these 4-core runners, 4 browsers plus the fixture servers flaked
+      # (renderer timeouts, "session not created") in the v0.3.4 and v0.3.6 releases.
       - name: pytest (full suite, real browsers) + global coverage gate
-        run: pytest -q -n 4 -m "not packaging" --cov-fail-under=90 --cov-report=json
+        run: pytest -q -n 3 -m "not packaging" --cov-fail-under=90 --cov-report=json
       - name: Per-package coverage floors
         run: python scripts/check_coverage.py
       - name: Upload coverage.json

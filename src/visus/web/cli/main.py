@@ -119,7 +119,11 @@ def _root(
     # The guard tuple is PLAN 1's constant — never re-inline the literal, and never
     # shrink it: warning a user while they run the command that fixes the warning
     # is the bug it exists to prevent.
-    if ctx.invoked_subcommand not in _SKILL_INSTALL_COMMANDS:
+    # VISUS_WEB_NO_SKILL_CHECK=1: an automation that reads the output (and the test suite,
+    # whose CliRunner folds stderr into the output it parses) opts out of the check
+    if ctx.invoked_subcommand not in _SKILL_INSTALL_COMMANDS and not os.environ.get(
+        "VISUS_WEB_NO_SKILL_CHECK"
+    ):
         check_installed_skills()
 
 
